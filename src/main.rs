@@ -18,19 +18,19 @@
 
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
 use vulkano::image::{Dimensions, StorageImage, SwapchainImage};
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::pipeline::viewport::Viewport;
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::{ComputePipeline, GraphicsPipeline};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, PresentMode, SurfaceTransform, Swapchain, SwapchainCreationError,
 };
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::sync;
 use vulkano::sync::{FlushError, GpuFuture};
 
@@ -227,8 +227,27 @@ void main() {
         }
     }
 
+    mod cs {
+        vulkano_shaders::shader! {
+            ty: "compute",
+            src: "
+#version 450
+
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
+
+void main() {
+    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(1.0, 0.0, 1.0, 1.0));
+}
+"
+        }
+    }
+
     let vs = vs::Shader::load(device.clone()).unwrap();
     let fs = fs::Shader::load(device.clone()).unwrap();
+    let cs = cs::Shader::load(device.clone()).unwrap();
 
     // At this point, OpenGL initialization would be finished. However in Vulkan it is not. OpenGL
     // implicitly does a lot of computation whenever you draw. In Vulkan, you have to do all this
@@ -256,7 +275,7 @@ void main() {
         .unwrap(),
     );
 
-    let pipeline = Arc::new(
+    let graphics_pipeline = Arc::new(
         GraphicsPipeline::start()
             .vertex_input_single_buffer()
             .vertex_shader(vs.main_entry_point(), ())
@@ -267,12 +286,24 @@ void main() {
             .build(device.clone())
             .unwrap(),
     );
-    
-    let descriptor_set = Arc::new(PersistentDescriptorSet::start(pipeline.clone(), 0)
-        .add_sampled_image(output_image.clone(), sampler.clone())
-        .unwrap()
-        .build()
-        .unwrap()
+
+    let graphics_descriptors = Arc::new(
+        PersistentDescriptorSet::start(graphics_pipeline.clone(), 0)
+            .add_sampled_image(output_image.clone(), sampler.clone())
+            .unwrap()
+            .build()
+            .unwrap(),
+    );
+
+    let compute_pipeline =
+        Arc::new(ComputePipeline::new(device.clone(), &cs.main_entry_point(), &()).unwrap());
+
+    let compute_descriptors = Arc::new(
+        PersistentDescriptorSet::start(compute_pipeline.clone(), 0)
+            .add_image(output_image.clone())
+            .unwrap()
+            .build()
+            .unwrap(),
     );
 
     // Dynamic viewports allow us to recreate just the viewport when the window is resized
@@ -329,14 +360,23 @@ void main() {
         let command_buffer =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                 .unwrap()
+                .clear_color_image(output_image.clone(), [0.0, 0.0, 1.0, 1.0].into())
+                .unwrap()
+                .dispatch(
+                    [128 / 8, 128 / 8, 1],
+                    compute_pipeline.clone(),
+                    compute_descriptors.clone(),
+                    (),
+                )
+                .unwrap()
                 .begin_render_pass(framebuffers[image_num].clone(), false, clear_values)
                 .unwrap()
                 .draw_indexed(
-                    pipeline.clone(),
+                    graphics_pipeline.clone(),
                     &dynamic_state,
                     vertex_buffer.clone(),
                     index_buffer.clone(),
-                    descriptor_set.clone(),
+                    graphics_descriptors.clone(),
                     (),
                 )
                 .unwrap()
