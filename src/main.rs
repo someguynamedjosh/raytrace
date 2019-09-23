@@ -58,6 +58,7 @@ fn main() {
     // Setup the window.
     let mut events_loop = EventsLoop::new();
     let surface = WindowBuilder::new()
+        .with_dimensions((512, 512).into())
         .build_vk_surface(&events_loop, instance.clone())
         .unwrap();
     let window = surface.window();
@@ -140,12 +141,12 @@ fn main() {
 
     let sampler = Sampler::new(
         device.clone(),
-        Filter::Linear,
-        Filter::Linear,
+        Filter::Nearest,
+        Filter::Nearest,
         MipmapMode::Nearest,
-        SamplerAddressMode::Repeat,
-        SamplerAddressMode::Repeat,
-        SamplerAddressMode::Repeat,
+        SamplerAddressMode::ClampToEdge,
+        SamplerAddressMode::ClampToEdge,
+        SamplerAddressMode::ClampToEdge,
         0.0,
         1.0,
         0.0,
@@ -204,7 +205,7 @@ layout(location = 0) out vec2 uv_coordinates;
 
 void main() {
     gl_Position = vec4(position, 0.0, 1.0);
-    uv_coordinates = vec2(position.x, position.y);
+    uv_coordinates = vec2(position.x / 2.0 + 0.5, position.y / 2.0 + 0.5);
 }"
         }
     }
@@ -239,7 +240,13 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
 
 void main() {
-    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(1.0, 0.0, 1.0, 1.0));
+    vec4 color = vec4(
+        mod(gl_GlobalInvocationID.x / 16.0, 1.0),
+        mod(gl_GlobalInvocationID.y / 16.0, 1.0),
+        (gl_GlobalInvocationID.x / 16 + gl_GlobalInvocationID.y / 16) / 32.0,
+        1.0
+    );
+    imageStore(img, ivec2(gl_GlobalInvocationID.xy), color);
 }
 "
         }
