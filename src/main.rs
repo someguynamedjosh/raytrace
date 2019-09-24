@@ -40,94 +40,19 @@ use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
 
+mod init;
 mod shaders;
 
 fn main() {
-    let instance = {
-        // We don't need anything fancy.
-        let extensions = vulkano_win::required_extensions();
-        Instance::new(None, &extensions, None).unwrap()
-    };
-
-    // Get the first physical device we find.
-    let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
-    println!(
-        "Using device: {} (type: {:?})",
-        physical.name(),
-        physical.ty()
-    );
-
-    // Setup the window.
-    let mut events_loop = EventsLoop::new();
-    let surface = WindowBuilder::new()
-        .with_dimensions((512, 512).into())
-        .build_vk_surface(&events_loop, instance.clone())
-        .unwrap();
+    let init::InitResult {
+        device,
+        queue,
+        surface,
+        mut events_loop,
+        mut swapchain,
+        swapchain_images,
+    } = init::init();
     let window = surface.window();
-
-    // Get queue families for the graphical portion and the compute portion.
-    let queue_family = physical
-        .queue_families()
-        .find(|&q| {
-            // We take the first queue that supports drawing to our window.
-            q.supports_graphics()
-                && q.supports_compute()
-                && surface.is_supported(q).unwrap_or(false)
-        })
-        .unwrap();
-
-    // Create the virtual device using the queues and basic extensions.
-    let device_ext = DeviceExtensions {
-        khr_swapchain: true,
-        ..DeviceExtensions::none()
-    };
-    let (device, mut queues) = Device::new(
-        physical,
-        physical.supported_features(),
-        &device_ext,
-        [(queue_family, 0.5)].iter().cloned(),
-    )
-    .unwrap();
-
-    // Unwrap the created queues.
-    let queue = queues.next().unwrap();
-
-    // Make a swapchain.
-    let (mut swapchain, images) = {
-        let caps = surface.capabilities(physical).unwrap();
-        let usage = caps.supported_usage_flags;
-
-        // The alpha mode indicates how the alpha value of the final image will behave. For example
-        // you can choose whether the window will be opaque or transparent.
-        let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        // Choosing the internal format that the images will have.
-        let format = caps.supported_formats[0].0;
-        let initial_dimensions = if let Some(dimensions) = window.get_inner_size() {
-            // convert to physical pixels
-            let dimensions: (u32, u32) = dimensions.to_physical(window.get_hidpi_factor()).into();
-            [dimensions.0, dimensions.1]
-        } else {
-            // The window no longer exists so exit the application.
-            return;
-        };
-
-        Swapchain::new(
-            device.clone(),
-            surface.clone(),
-            caps.min_image_count,
-            format,
-            initial_dimensions,
-            1,
-            usage,
-            &queue,
-            SurfaceTransform::Identity,
-            alpha,
-            PresentMode::Fifo,
-            true,
-            None,
-        )
-        .unwrap()
-    };
 
     let input_data = CpuAccessibleBuffer::from_iter(
         device.clone(), BufferUsage::all(), (0..64*64*64).map(|_| 0u32)
@@ -296,7 +221,7 @@ fn main() {
     };
 
     let mut framebuffers =
-        window_size_dependent_setup(&images, render_pass.clone(), &mut dynamic_state);
+        window_size_dependent_setup(&swapchain_images, render_pass.clone(), &mut dynamic_state);
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>;
 

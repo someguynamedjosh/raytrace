@@ -1,5 +1,5 @@
 [package]
-name = "matrix-3"
+name = "raytrace"
 version = "0.1.0"
 authors = ["Code_Cube <therealcodecube@gmail.com>"]
 edition = "2018"

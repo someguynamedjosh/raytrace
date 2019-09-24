@@ -387,19 +387,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "matrix-3"
-version = "0.1.0"
-dependencies = [
- "cgmath 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "image 0.22.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "time 0.1.42 (registry+https://github.com/rust-lang/crates.io-index)",
- "vulkano 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "vulkano-shaders 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "vulkano-win 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "winit 0.19.3 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -730,6 +717,19 @@ dependencies = [
  "crossbeam-utils 0.6.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num_cpus 1.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "raytrace"
+version = "0.1.0"
+dependencies = [
+ "cgmath 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "image 0.22.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "time 0.1.42 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano-shaders 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano-win 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winit 0.19.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
