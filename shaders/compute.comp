@@ -5,6 +5,9 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, r32ui) uniform uimage3D in_data;
 layout(set = 0, binding = 1, rgba8) uniform writeonly image2D img;
 
+const float IMAGE_WIDTH = 512.0;
+const float IMAGE_HEIGHT = 512.0;
+
 void main() {
     vec3 ray_start = vec3(
         gl_GlobalInvocationID.x / 16.0 + 16.51,
@@ -16,12 +19,15 @@ void main() {
         floor(ray_start.y),
         floor(ray_start.z)
     );
+
+    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(IMAGE_WIDTH, IMAGE_HEIGHT);
     // Must be normalized. 
     vec3 ray_direction = normalize(vec3(
-        0.3,
+        screen_pos.x * 0.6 - 0.3,
         1.0,
-        0.3
+        screen_pos.y * 0.6 - 0.3
     ));
+
     ivec3 ray_step = ivec3(
         ray_direction.x < 0 ? -1 : 1,
         ray_direction.y < 0 ? -1 : 1,
