@@ -12,12 +12,99 @@ layout(push_constant) uniform CameraVectors {
 const float IMAGE_WIDTH = 512.0;
 const float IMAGE_HEIGHT = 512.0;
 
+struct HitResult {
+    uint value;
+    vec3 position;
+};
+
+HitResult trace_ray(vec3 origin, vec3 direction) {
+    ivec3 current_voxel = ivec3(
+        floor(origin.x),
+        floor(origin.y),
+        floor(origin.z)
+    );
+    ivec3 step = ivec3(
+        direction.x < 0 ? -1 : 1,
+        direction.y < 0 ? -1 : 1,
+        direction.z < 0 ? -1 : 1
+    );
+    // How much we need to move along the vector to reach the next voxel in the
+    // x, y, and z directions.
+    vec3 min_step_to_boundary = vec3(0);
+    if (step.x == 1) {
+        min_step_to_boundary.x = (1.0 - mod(origin.x, 1.0)) / (direction.x + 1e-8);
+    } else {
+        min_step_to_boundary.x = mod(origin.x, 1.0) / (-direction.x + 1e-8);
+    }
+    if (step.y == 1) {
+        min_step_to_boundary.y = (1.0 - mod(origin.y, 1.0)) / (direction.y + 1e-8);
+    } else {
+        min_step_to_boundary.y = mod(origin.y, 1.0) / (-direction.y + 1e-8);
+    }
+    if (step.z == 1) {
+        min_step_to_boundary.z = (1.0 - mod(origin.z, 1.0)) / (direction.z + 1e-8);
+    } else {
+        min_step_to_boundary.z = mod(origin.z, 1.0) / (-direction.z + 1e-8);
+    }
+    // How much we need to move along the vector to advance the current voxel
+    // coordinate by *exactly* 1.0 in the x, y, and z directions. 
+    vec3 voxel_width_step_size = abs(vec3(
+        1.0 / (direction.x + 1e-8),
+        1.0 / (direction.y + 1e-8),
+        1.0 / (direction.z + 1e-8)
+    ));
+    HitResult result;
+    float total_step = 0.0;
+    result.value = imageLoad(in_data, current_voxel).r;
+    while (result.value == 0) {
+        if (min_step_to_boundary.x < min_step_to_boundary.y) {
+            if (min_step_to_boundary.x < min_step_to_boundary.z) {
+                total_step = min_step_to_boundary.x;
+                current_voxel.x += step.x;
+                if (current_voxel.x > 64 || current_voxel.x < 0) {
+                    break;
+                }
+                min_step_to_boundary.x += voxel_width_step_size.x;
+            } else {
+                total_step = min_step_to_boundary.z;
+                current_voxel.z += step.z;
+                if (current_voxel.z > 64 || current_voxel.z < 0) {
+                    break;
+                }
+                min_step_to_boundary.z += voxel_width_step_size.z;
+            }
+        } else {
+            if (min_step_to_boundary.y < min_step_to_boundary.z) {
+                total_step = min_step_to_boundary.y;
+                current_voxel.y += step.y;
+                if (current_voxel.y > 64 || current_voxel.y < 0) {
+                    break;
+                }
+                min_step_to_boundary.y += voxel_width_step_size.y;
+            } else {
+                total_step = min_step_to_boundary.z;
+                current_voxel.z += step.z;
+                if (current_voxel.z > 64 || current_voxel.z < 0) {
+                    break;
+                }
+                min_step_to_boundary.z += voxel_width_step_size.z;
+            }
+        }
+        result.value = imageLoad(in_data, current_voxel).r;
+    }
+    result.position = origin + direction * (total_step - 0.01);
+    return result;
+}
+
 void main() {
     vec3 ray_start = camera_vectors.origin;
-    ivec3 current_voxel = ivec3(
-        floor(ray_start.x),
-        floor(ray_start.y),
-        floor(ray_start.z)
+    // Angle pointing from the groud to the sun.
+    vec3 sun_directions[5] = vec3[5](
+        -normalize(vec3(0.5, 0.5, -1)),
+        -normalize(vec3(0.4, 0.5, -1)),
+        -normalize(vec3(0.6, 0.5, -1)),
+        -normalize(vec3(0.5, 0.4, -1)),
+        -normalize(vec3(0.5, 0.6, -1))
     );
 
     vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(IMAGE_WIDTH, IMAGE_HEIGHT) * 2.0 - vec2(1);
@@ -28,73 +115,20 @@ void main() {
         + screen_pos.y * camera_vectors.up
     );
 
-    ivec3 ray_step = ivec3(
-        ray_direction.x < 0 ? -1 : 1,
-        ray_direction.y < 0 ? -1 : 1,
-        ray_direction.z < 0 ? -1 : 1
-    );
-    // How much we need to move along the vector to reach the next voxel in the
-    // x, y, and z directions.
-    vec3 min_step_to_boundary = vec3(0);
-    if (ray_step.x == 1) {
-        min_step_to_boundary.x = (1.0 - mod(ray_start.x, 1.0)) / (ray_direction.x + 1e-8);
-    } else {
-        min_step_to_boundary.x = mod(ray_start.x, 1.0) / (-ray_direction.x + 1e-8);
-    }
-    if (ray_step.y == 1) {
-        min_step_to_boundary.y = (1.0 - mod(ray_start.y, 1.0)) / (ray_direction.y + 1e-8);
-    } else {
-        min_step_to_boundary.y = mod(ray_start.y, 1.0) / (-ray_direction.y + 1e-8);
-    }
-    if (ray_step.z == 1) {
-        min_step_to_boundary.z = (1.0 - mod(ray_start.z, 1.0)) / (ray_direction.z + 1e-8);
-    } else {
-        min_step_to_boundary.z = mod(ray_start.z, 1.0) / (-ray_direction.z + 1e-8);
-    }
-    // How much we need to move along the vector to advance the current voxel
-    // coordinate by *exactly* 1.0 in the x, y, and z directions. 
-    vec3 voxel_width_step_size = abs(vec3(
-        1.0 / (ray_direction.x + 1e-8),
-        1.0 / (ray_direction.y + 1e-8),
-        1.0 / (ray_direction.z + 1e-8)
-    ));
     // Sky color.
     vec4 color = vec4(0.5765, 0.6196, 0.8549, 1.0);
-    while (true) {
-        if (imageLoad(in_data, current_voxel).r > 0) {
-            color.rgb = current_voxel / 90.0 + 0.3 * mod(current_voxel, vec3(2));
-            break;
-        }
-
-        if (min_step_to_boundary.x < min_step_to_boundary.y) {
-            if (min_step_to_boundary.x < min_step_to_boundary.z) {
-                current_voxel.x += ray_step.x;
-                if (current_voxel.x > 64 || current_voxel.x < 0) {
-                    break;
-                }
-                min_step_to_boundary.x += voxel_width_step_size.x;
-            } else {
-                current_voxel.z += ray_step.z;
-                if (current_voxel.z > 64 || current_voxel.z < 0) {
-                    break;
-                }
-                min_step_to_boundary.z += voxel_width_step_size.z;
-            }
-        } else {
-            if (min_step_to_boundary.y < min_step_to_boundary.z) {
-                current_voxel.y += ray_step.y;
-                if (current_voxel.y > 64 || current_voxel.y < 0) {
-                    break;
-                }
-                min_step_to_boundary.y += voxel_width_step_size.y;
-            } else {
-                current_voxel.z += ray_step.z;
-                if (current_voxel.z > 64 || current_voxel.z < 0) {
-                    break;
-                }
-                min_step_to_boundary.z += voxel_width_step_size.z;
+    HitResult result = trace_ray(camera_vectors.origin, ray_direction);
+    if (result.value > 0) {
+        color.rgb = result.position / 90.0;
+        int shadow = 0;
+        for (int i = 0; i < 5; i++) {
+            HitResult sun = trace_ray(result.position, sun_directions[i]);
+            if (sun.value > 0) {
+                shadow += 1;
             }
         }
+        color.rgb *= (1.0 - shadow * 0.1);
     }
+
     imageStore(img, ivec2(gl_GlobalInvocationID.xy), color);
 }

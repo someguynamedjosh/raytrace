@@ -97,7 +97,8 @@ impl RenderBuilder {
         for z in 0..64 {
             for y in 0..64 {
                 for x in 0..64 {
-                    if z < (x + y) / 4 {
+                    let offset = if x % 15 > 10 && y % 15 > 10 { 30 } else { 0 };
+                    if z < (x + y + offset) / 4 {
                         target[index] = 10;
                     }
                     if x == 0 && y == 10 {
