@@ -61,6 +61,7 @@ fn main() {
     let mut previous_frame_end = Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>;
 
     loop {
+        let frame_start = std::time::Instant::now();
         previous_frame_end.cleanup_finished();
         if recreate_swapchain {
             let dimensions = if let Some(dimensions) = window.get_inner_size() {
@@ -148,6 +149,7 @@ fn main() {
         if done {
             return;
         }
+        println!("Frame took {}ms.", frame_start.elapsed().as_millis());
     }
 }
 
