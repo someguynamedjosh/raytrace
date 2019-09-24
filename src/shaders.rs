@@ -2,6 +2,13 @@ use vulkano::device::Device;
 
 use std::sync::Arc;
 
+// Unfortunately the shader! macro does not trigger a recompile whenever source code changes.
+fn _watchdog() {
+    let _source = include_bytes!("../shaders/compute.comp");
+    let _source = include_bytes!("../shaders/vertex.vert");
+    let _source = include_bytes!("../shaders/fragment.frag");
+}
+
 mod cs {
     vulkano_shaders::shader! {
         ty: "compute",
