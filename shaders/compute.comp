@@ -1,0 +1,16 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, r32ui) uniform uimage3D in_data;
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D img;
+
+void main() {
+    vec4 color = vec4(
+        mod(gl_GlobalInvocationID.x / 16.0, 1.0),
+        mod(gl_GlobalInvocationID.y / 16.0, 1.0),
+        imageLoad(in_data, ivec3(gl_GlobalInvocationID.x, 12, gl_GlobalInvocationID.y)).r > 0 ? 1.0 : 0.0,
+        1.0
+    );
+    imageStore(img, ivec2(gl_GlobalInvocationID.xy), color);
+}

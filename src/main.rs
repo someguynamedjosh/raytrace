@@ -40,6 +40,8 @@ use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
 
+mod shaders;
+
 fn main() {
     let instance = {
         // We don't need anything fancy.
@@ -222,69 +224,6 @@ fn main() {
     )
     .unwrap();
 
-    mod cs {
-        vulkano_shaders::shader! {
-            ty: "compute",
-            src: "
-#version 450
-
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-
-layout(set = 0, binding = 0, r32ui) uniform uimage3D in_data;
-layout(set = 0, binding = 1, rgba8) uniform writeonly image2D img;
-
-void main() {
-    vec4 color = vec4(
-        mod(gl_GlobalInvocationID.x / 16.0, 1.0),
-        mod(gl_GlobalInvocationID.y / 16.0, 1.0),
-        imageLoad(in_data, ivec3(gl_GlobalInvocationID.x, 12, gl_GlobalInvocationID.y)).r > 0 ? 1.0 : 0.0,
-        1.0
-    );
-    imageStore(img, ivec2(gl_GlobalInvocationID.xy), color);
-}
-"
-        }
-    }
-
-    // Shaders.
-    mod vs {
-        vulkano_shaders::shader! {
-            ty: "vertex",
-            src: "
-#version 450
-
-layout(location = 0) in vec2 position;
-layout(location = 0) out vec2 uv_coordinates;
-
-void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
-    uv_coordinates = vec2(position.x / 2.0 + 0.5, position.y / 2.0 + 0.5);
-}"
-        }
-    }
-
-    mod fs {
-        vulkano_shaders::shader! {
-            ty: "fragment",
-            src: "
-#version 450
-
-layout(location = 0) in vec2 uv_coordinates;
-layout(location = 0) out vec4 f_color;
-
-layout(set = 0, binding = 0) uniform sampler2D tex;
-
-void main() {
-    f_color = texture(tex, uv_coordinates);
-}
-"
-        }
-    }
-
-    let cs = cs::Shader::load(device.clone()).unwrap();
-    let vs = vs::Shader::load(device.clone()).unwrap();
-    let fs = fs::Shader::load(device.clone()).unwrap();
-
     // At this point, OpenGL initialization would be finished. However in Vulkan it is not. OpenGL
     // implicitly does a lot of computation whenever you draw. In Vulkan, you have to do all this
     // manually.
@@ -310,6 +249,10 @@ void main() {
         )
         .unwrap(),
     );
+
+    let cs = shaders::load_compute(device.clone());
+    let vs = shaders::load_vertex(device.clone());
+    let fs = shaders::load_fragment(device.clone());
 
     let compute_pipeline =
         Arc::new(ComputePipeline::new(device.clone(), &cs.main_entry_point(), &()).unwrap());
