@@ -16,7 +16,7 @@
 // and that you want to learn Vulkan. This means that for example it won't go into details about
 // what a vertex or a shader is.
 
-use cgmath::{Rad, Vector3};
+use cgmath::{Rad, Vector3, InnerSpace};
 
 use vulkano::command_buffer::DynamicState;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
@@ -25,13 +25,14 @@ use vulkano::pipeline::viewport::Viewport;
 use vulkano::swapchain::{self, AcquireError, SwapchainCreationError};
 use vulkano::sync::{self, FlushError, GpuFuture};
 
-use winit::{ElementState, Event, KeyboardInput, Window, WindowEvent, VirtualKeyCode};
+use winit::{ElementState, Event, KeyboardInput, VirtualKeyCode, Window, WindowEvent};
 
 use std::sync::Arc;
 
 mod init;
 mod renderer;
 mod shaders;
+mod util;
 
 fn main() {
     let init::InitResult {
@@ -70,6 +71,11 @@ fn main() {
         },
         heading: Rad(0.0),
         pitch: Rad(0.0),
+    };
+    let mut camera_movement = Vector3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
     };
     loop {
         let frame_start = std::time::Instant::now();
@@ -174,15 +180,36 @@ fn main() {
                     },
                 ..
             } => match code {
-                VirtualKeyCode::W => camera.origin.y += 1.0,
-                VirtualKeyCode::S => camera.origin.y -= 1.0,
-                VirtualKeyCode::D => camera.origin.x += 1.0,
-                VirtualKeyCode::A => camera.origin.x -= 1.0,
-                VirtualKeyCode::Q => camera.origin.z -= 1.0,
-                VirtualKeyCode::E => camera.origin.z += 1.0,
+                VirtualKeyCode::W => camera_movement.y = 1.0,
+                VirtualKeyCode::S => camera_movement.y = -1.0,
+                VirtualKeyCode::D => camera_movement.x = 1.0,
+                VirtualKeyCode::A => camera_movement.x = -1.0,
+                VirtualKeyCode::E => camera_movement.z = 1.0,
+                VirtualKeyCode::Q => camera_movement.z = -1.0,
                 VirtualKeyCode::Escape => done = true,
-                _ => ()
-            }
+                _ => (),
+            },
+            Event::WindowEvent {
+                event:
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                state: ElementState::Released,
+                                virtual_keycode: Some(code),
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } => match code {
+                VirtualKeyCode::W => camera_movement.y = 0.0,
+                VirtualKeyCode::S => camera_movement.y = 0.0,
+                VirtualKeyCode::D => camera_movement.x = 0.0,
+                VirtualKeyCode::A => camera_movement.x = 0.0,
+                VirtualKeyCode::E => camera_movement.z = 0.0,
+                VirtualKeyCode::Q => camera_movement.z = 0.0,
+                _ => (),
+            },
             Event::WindowEvent {
                 event: WindowEvent::Resized(_),
                 ..
@@ -192,6 +219,18 @@ fn main() {
         if done {
             return;
         }
+        let elapsed = frame_start.elapsed().as_millis() as f32 / 1000.0;
+        camera.origin += {
+            let amount = elapsed * 15.0;
+            let util::TripleEulerVector { forward, up, right } =
+                util::compute_triple_euler_vector(camera.heading, camera.pitch);
+            let forward = forward.normalize();
+            let up = up.normalize();
+            let right = right.normalize();
+            amount * forward * camera_movement.y
+                + amount * up * camera_movement.z
+                + amount * right * camera_movement.x
+        };
         println!("Frame took {}ms.", frame_start.elapsed().as_millis());
     }
 }

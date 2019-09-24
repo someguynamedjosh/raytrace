@@ -18,6 +18,7 @@ use crate::shaders::{
     self, CameraVectorPushConstants, ComputeShader, ComputeShaderLayout, FragmentShader,
     VertexShader,
 };
+use crate::util;
 
 type InputData = Arc<CpuAccessibleBuffer<[u32]>>;
 type InputDataImage = Arc<StorageImage<Format>>;
@@ -304,19 +305,8 @@ impl Renderer {
     ) -> AutoCommandBuffer {
         let clear_values = vec![[0.0, 0.0, 1.0, 1.0].into()];
         let camera_pos = camera.origin;
-        let heading = camera.heading;
-        let pitch = camera.pitch;
-        let forward = Vector3 {
-            x: heading.0.cos() * pitch.0.cos(),
-            y: heading.0.sin() * pitch.0.cos(),
-            z: pitch.0.sin(),
-        };
-        let up = Vector3 {
-            x: heading.0.cos() * (pitch.0 + std::f32::consts::FRAC_PI_2).cos(),
-            y: heading.0.sin() * (pitch.0 + std::f32::consts::FRAC_PI_2).cos(),
-            z: (pitch.0 + std::f32::consts::FRAC_PI_2).sin(),
-        };
-        let right = forward.cross(up);
+        let util::TripleEulerVector { forward, up, right } =
+            util::compute_triple_euler_vector(camera.heading, camera.pitch);
         AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family())
             .unwrap()
             .clear_color_image(self.output_image.clone(), [0.0, 0.0, 1.0, 1.0].into())
