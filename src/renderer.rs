@@ -30,6 +30,9 @@ type CustomGraphicsPipeline = Arc<
     >,
 >;
 
+const RENDER_OUTPUT_WIDTH: u32 = 512;
+const RENDER_OUTPUT_HEIGHT: u32 = 512;
+
 #[derive(Clone, Debug, Default)]
 struct Vertex {
     position: [f32; 2],
@@ -106,8 +109,8 @@ impl RenderBuilder {
         let output_image = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim2d {
-                width: 128,
-                height: 128,
+                width: RENDER_OUTPUT_WIDTH,
+                height: RENDER_OUTPUT_HEIGHT,
             },
             Format::R8G8B8A8Unorm,
             Some(self.queue.family()),
@@ -284,7 +287,7 @@ impl Renderer {
             .copy_buffer_to_image(self.input_data.clone(), self.input_data_image.clone())
             .unwrap()
             .dispatch(
-                [128 / 8, 128 / 8, 1],
+                [RENDER_OUTPUT_WIDTH / 8, RENDER_OUTPUT_HEIGHT / 8, 1],
                 self.compute_pipeline.clone(),
                 self.compute_descriptors.clone(),
                 (),
