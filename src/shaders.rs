@@ -31,6 +31,7 @@ mod fs {
     }
 }
 
+pub use cs::ty::CameraVectors as CameraVectorPushConstants;
 pub use cs::Layout as ComputeShaderLayout;
 pub use cs::Shader as ComputeShader;
 pub use fs::Layout as FragmentShaderLayout;

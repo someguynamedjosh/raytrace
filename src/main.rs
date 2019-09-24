@@ -16,6 +16,8 @@
 // and that you want to learn Vulkan. This means that for example it won't go into details about
 // what a vertex or a shader is.
 
+use cgmath::{Rad, Vector3};
+
 use vulkano::command_buffer::DynamicState;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
 use vulkano::image::SwapchainImage;
@@ -23,7 +25,7 @@ use vulkano::pipeline::viewport::Viewport;
 use vulkano::swapchain::{self, AcquireError, SwapchainCreationError};
 use vulkano::sync::{self, FlushError, GpuFuture};
 
-use winit::{Event, Window, WindowEvent};
+use winit::{ElementState, Event, KeyboardInput, Window, WindowEvent, VirtualKeyCode};
 
 use std::sync::Arc;
 
@@ -60,6 +62,15 @@ fn main() {
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>;
 
+    let mut camera = renderer::Camera {
+        origin: Vector3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        heading: Rad(0.0),
+        pitch: Rad(0.0),
+    };
     loop {
         let frame_start = std::time::Instant::now();
         previous_frame_end.cleanup_finished();
@@ -100,8 +111,11 @@ fn main() {
                 Err(err) => panic!("{:?}", err),
             };
 
-        let command_buffer =
-            renderer.create_command_buffer(&dynamic_state, framebuffers[image_num].clone());
+        let command_buffer = renderer.create_command_buffer(
+            &camera,
+            &dynamic_state,
+            framebuffers[image_num].clone(),
+        );
 
         let future = previous_frame_end
             .join(acquire_future)
@@ -140,6 +154,35 @@ fn main() {
                 event: WindowEvent::CloseRequested,
                 ..
             } => done = true,
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => {
+                camera.heading.0 = (position.x / 150.0) as f32;
+                camera.pitch.0 = ((position.y - 256.0) / 200.0) as f32;
+            }
+            Event::WindowEvent {
+                event:
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                state: ElementState::Pressed,
+                                virtual_keycode: Some(code),
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } => match code {
+                VirtualKeyCode::W => camera.origin.y += 1.0,
+                VirtualKeyCode::S => camera.origin.y -= 1.0,
+                VirtualKeyCode::D => camera.origin.x += 1.0,
+                VirtualKeyCode::A => camera.origin.x -= 1.0,
+                VirtualKeyCode::Q => camera.origin.z += 1.0,
+                VirtualKeyCode::E => camera.origin.z -= 1.0,
+                VirtualKeyCode::Escape => done = true,
+                _ => ()
+            }
             Event::WindowEvent {
                 event: WindowEvent::Resized(_),
                 ..

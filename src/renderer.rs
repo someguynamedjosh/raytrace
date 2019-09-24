@@ -1,3 +1,5 @@
+use cgmath::{Rad, Vector3};
+
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState};
 use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet};
@@ -12,7 +14,10 @@ use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 
 use std::sync::Arc;
 
-use crate::shaders::{self, ComputeShader, ComputeShaderLayout, FragmentShader, VertexShader};
+use crate::shaders::{
+    self, CameraVectorPushConstants, ComputeShader, ComputeShaderLayout, FragmentShader,
+    VertexShader,
+};
 
 type InputData = Arc<CpuAccessibleBuffer<[u32]>>;
 type InputDataImage = Arc<StorageImage<Format>>;
@@ -32,6 +37,12 @@ type CustomGraphicsPipeline = Arc<
 
 const RENDER_OUTPUT_WIDTH: u32 = 512;
 const RENDER_OUTPUT_HEIGHT: u32 = 512;
+
+pub struct Camera {
+    pub origin: Vector3<f32>,
+    pub heading: Rad<f32>,
+    pub pitch: Rad<f32>,
+}
 
 #[derive(Clone, Debug, Default)]
 struct Vertex {
@@ -276,10 +287,25 @@ impl Renderer {
 
     pub fn create_command_buffer(
         &mut self,
+        camera: &Camera,
         state: &DynamicState,
         output: Arc<dyn FramebufferAbstract + Send + Sync>,
     ) -> AutoCommandBuffer {
         let clear_values = vec![[0.0, 0.0, 1.0, 1.0].into()];
+        let camera_pos = camera.origin;
+        let heading = camera.heading;
+        let pitch = camera.pitch;
+        let forward = Vector3 {
+            x: heading.0.cos() * pitch.0.cos(),
+            y: heading.0.sin() * pitch.0.cos(),
+            z: pitch.0.sin(),
+        };
+        let up = Vector3 {
+            x: heading.0.cos() * (pitch.0 + std::f32::consts::FRAC_PI_2).cos(),
+            y: heading.0.sin() * (pitch.0 + std::f32::consts::FRAC_PI_2).cos(),
+            z: (pitch.0 + std::f32::consts::FRAC_PI_2).sin(),
+        };
+        let right = up.cross(forward);
         AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family())
             .unwrap()
             .clear_color_image(self.output_image.clone(), [0.0, 0.0, 1.0, 1.0].into())
@@ -290,7 +316,15 @@ impl Renderer {
                 [RENDER_OUTPUT_WIDTH / 8, RENDER_OUTPUT_HEIGHT / 8, 1],
                 self.compute_pipeline.clone(),
                 self.compute_descriptors.clone(),
-                (),
+                CameraVectorPushConstants {
+                    _dummy0: [0; 4],
+                    _dummy1: [0; 4],
+                    _dummy2: [0; 4],
+                    origin: [camera_pos.x, camera_pos.y, camera_pos.z],
+                    forward: [forward.x, forward.y, forward.z],
+                    right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
+                    up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
+                },
             )
             .unwrap()
             .begin_render_pass(output, false, clear_values)
