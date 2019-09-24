@@ -38,6 +38,11 @@ type CustomGraphicsPipeline = Arc<
 const RENDER_OUTPUT_WIDTH: u32 = 512;
 const RENDER_OUTPUT_HEIGHT: u32 = 512;
 
+// Positive Y (angle PI / 2) is forward
+// Positive X is to the right
+// Positive Z is up
+// Heading starts at Positive X and goes clockwise (towards Positive Y).
+// Pitch starts at zero and positive pitch looks up at Positive Z.
 pub struct Camera {
     pub origin: Vector3<f32>,
     pub heading: Rad<f32>,
@@ -91,7 +96,13 @@ impl RenderBuilder {
         for z in 0..64 {
             for y in 0..64 {
                 for x in 0..64 {
-                    if (63 - z) < (x + y) / 4 {
+                    if z < (x + y) / 4 {
+                        target[index] = 10;
+                    }
+                    if x == 0 && y == 10 {
+                        target[index] = 10;
+                    }
+                    if y == 0 && x == 30 {
                         target[index] = 10;
                     }
                     index += 1;
@@ -305,7 +316,7 @@ impl Renderer {
             y: heading.0.sin() * (pitch.0 + std::f32::consts::FRAC_PI_2).cos(),
             z: (pitch.0 + std::f32::consts::FRAC_PI_2).sin(),
         };
-        let right = up.cross(forward);
+        let right = forward.cross(up);
         AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family())
             .unwrap()
             .clear_color_image(self.output_image.clone(), [0.0, 0.0, 1.0, 1.0].into())

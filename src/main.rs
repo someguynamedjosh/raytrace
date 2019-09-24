@@ -158,8 +158,8 @@ fn main() {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
             } => {
-                camera.heading.0 = (position.x / 150.0) as f32;
-                camera.pitch.0 = ((position.y - 256.0) / 200.0) as f32;
+                camera.heading.0 = (-position.x / 80.0) as f32;
+                camera.pitch.0 = ((256.0 - position.y) / 200.0) as f32;
             }
             Event::WindowEvent {
                 event:
@@ -178,8 +178,8 @@ fn main() {
                 VirtualKeyCode::S => camera.origin.y -= 1.0,
                 VirtualKeyCode::D => camera.origin.x += 1.0,
                 VirtualKeyCode::A => camera.origin.x -= 1.0,
-                VirtualKeyCode::Q => camera.origin.z += 1.0,
-                VirtualKeyCode::E => camera.origin.z -= 1.0,
+                VirtualKeyCode::Q => camera.origin.z -= 1.0,
+                VirtualKeyCode::E => camera.origin.z += 1.0,
                 VirtualKeyCode::Escape => done = true,
                 _ => ()
             }
