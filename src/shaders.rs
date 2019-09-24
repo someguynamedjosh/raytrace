@@ -1,4 +1,4 @@
-use vulkano::device::{Device};
+use vulkano::device::Device;
 
 use std::sync::Arc;
 
@@ -24,14 +24,21 @@ mod fs {
     }
 }
 
-pub fn load_compute(device: Arc<Device>) -> cs::Shader {
+pub use cs::Layout as ComputeShaderLayout;
+pub use cs::Shader as ComputeShader;
+pub use fs::Layout as FragmentShaderLayout;
+pub use fs::Shader as FragmentShader;
+pub use vs::Layout as VertexShaderLayout;
+pub use vs::Shader as VertexShader;
+
+pub fn load_compute(device: Arc<Device>) -> ComputeShader {
     cs::Shader::load(device).unwrap()
 }
 
-pub fn load_vertex(device: Arc<Device>) -> vs::Shader {
+pub fn load_vertex(device: Arc<Device>) -> VertexShader {
     vs::Shader::load(device).unwrap()
 }
 
-pub fn load_fragment(device: Arc<Device>) -> fs::Shader {
+pub fn load_fragment(device: Arc<Device>) -> FragmentShader {
     fs::Shader::load(device).unwrap()
 }

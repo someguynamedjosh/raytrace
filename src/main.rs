@@ -16,31 +16,19 @@
 // and that you want to learn Vulkan. This means that for example it won't go into details about
 // what a vertex or a shader is.
 
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::device::{Device, DeviceExtensions};
-use vulkano::format::Format;
-use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::{Dimensions, StorageImage, SwapchainImage};
-use vulkano::instance::{Instance, PhysicalDevice};
+use vulkano::command_buffer::DynamicState;
+use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
+use vulkano::image::SwapchainImage;
 use vulkano::pipeline::viewport::Viewport;
-use vulkano::pipeline::{ComputePipeline, GraphicsPipeline};
-use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::swapchain;
-use vulkano::swapchain::{
-    AcquireError, PresentMode, SurfaceTransform, Swapchain, SwapchainCreationError,
-};
-use vulkano::sync;
-use vulkano::sync::{FlushError, GpuFuture};
+use vulkano::swapchain::{self, AcquireError, SwapchainCreationError};
+use vulkano::sync::{self, FlushError, GpuFuture};
 
-use vulkano_win::VkSurfaceBuild;
-
-use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
+use winit::{Event, Window, WindowEvent};
 
 use std::sync::Arc;
 
 mod init;
+mod renderer;
 mod shaders;
 
 fn main() {
@@ -54,163 +42,7 @@ fn main() {
     } = init::init();
     let window = surface.window();
 
-    let input_data = CpuAccessibleBuffer::from_iter(
-        device.clone(), BufferUsage::all(), (0..64*64*64).map(|_| 0u32)
-    ).unwrap();
-
-    let mut target = input_data.write().unwrap();
-    let mut index = 0;
-    for z in 0..64 {
-        for y in 0..64 {
-            for x in 0..64 {
-                if (63 - z) < (x + y) / 4 {
-                    target[index] = 10;
-                }
-                index += 1;
-            }
-        }
-    }
-    drop(target);
-
-    let input_data_image = StorageImage::new(
-        device.clone(),
-        Dimensions::Dim3d {
-            width: 64,
-            height: 64,
-            depth: 64,
-        },
-        Format::R32Uint,
-        Some(queue.family()),
-    ).unwrap();
-
-    // The image that the compute shader will write from and the graphics pipeline will read from.
-    let output_image = StorageImage::new(
-        device.clone(),
-        Dimensions::Dim2d {
-            width: 128,
-            height: 128,
-        },
-        Format::R8G8B8A8Unorm,
-        Some(queue.family()),
-    )
-    .unwrap();
-
-    let sampler = Sampler::new(
-        device.clone(),
-        Filter::Nearest,
-        Filter::Nearest,
-        MipmapMode::Nearest,
-        SamplerAddressMode::ClampToEdge,
-        SamplerAddressMode::ClampToEdge,
-        SamplerAddressMode::ClampToEdge,
-        0.0,
-        1.0,
-        0.0,
-        0.0,
-    )
-    .unwrap();
-
-    // Create a vertex buffer containing a full screen quad.
-    let vertex_buffer = {
-        #[derive(Default, Debug, Clone)]
-        struct Vertex {
-            position: [f32; 2],
-        }
-        vulkano::impl_vertex!(Vertex, position);
-
-        CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            BufferUsage::all(),
-            [
-                Vertex {
-                    position: [1.0, 1.0],
-                },
-                Vertex {
-                    position: [-1.0, 1.0],
-                },
-                Vertex {
-                    position: [-1.0, -1.0],
-                },
-                Vertex {
-                    position: [1.0, -1.0],
-                },
-            ]
-            .iter()
-            .cloned(),
-        )
-        .unwrap()
-    };
-
-    // Indexes buffer used when drawing the quad.
-    let index_buffer = CpuAccessibleBuffer::from_iter(
-        device.clone(),
-        BufferUsage::index_buffer(),
-        [0u32, 1u32, 2u32, 2u32, 3u32, 0u32].iter().cloned(),
-    )
-    .unwrap();
-
-    // At this point, OpenGL initialization would be finished. However in Vulkan it is not. OpenGL
-    // implicitly does a lot of computation whenever you draw. In Vulkan, you have to do all this
-    // manually.
-
-    // The next step is to create a *render pass*, which is an object that describes where the
-    // output of the graphics pipeline will go. It describes the layout of the images
-    // where the colors, depth and/or stencil information will be written.
-    let render_pass = Arc::new(
-        vulkano::single_pass_renderpass!(
-            device.clone(),
-            attachments: {
-                color: {
-                    load: Clear,
-                    store: Store,
-                    format: swapchain.format(),
-                    samples: 1,
-                }
-            },
-            pass: {
-                color: [color],
-                depth_stencil: {}
-            }
-        )
-        .unwrap(),
-    );
-
-    let cs = shaders::load_compute(device.clone());
-    let vs = shaders::load_vertex(device.clone());
-    let fs = shaders::load_fragment(device.clone());
-
-    let compute_pipeline =
-        Arc::new(ComputePipeline::new(device.clone(), &cs.main_entry_point(), &()).unwrap());
-
-    let compute_descriptors = Arc::new(
-        PersistentDescriptorSet::start(compute_pipeline.clone(), 0)
-            .add_image(input_data_image.clone())
-            .unwrap()
-            .add_image(output_image.clone())
-            .unwrap()
-            .build()
-            .unwrap(),
-    );
-
-    let graphics_pipeline = Arc::new(
-        GraphicsPipeline::start()
-            .vertex_input_single_buffer()
-            .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
-            .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .build(device.clone())
-            .unwrap(),
-    );
-
-    let graphics_descriptors = Arc::new(
-        PersistentDescriptorSet::start(graphics_pipeline.clone(), 0)
-            .add_sampled_image(output_image.clone(), sampler.clone())
-            .unwrap()
-            .build()
-            .unwrap(),
-    );
+    let mut renderer = renderer::Renderer::new(device.clone(), queue.clone(), swapchain.format());
 
     // Dynamic viewports allow us to recreate just the viewport when the window is resized
     // Otherwise we would have to recreate the whole pipeline.
@@ -220,8 +52,11 @@ fn main() {
         scissors: None,
     };
 
-    let mut framebuffers =
-        window_size_dependent_setup(&swapchain_images, render_pass.clone(), &mut dynamic_state);
+    let mut framebuffers = window_size_dependent_setup(
+        &swapchain_images,
+        renderer.get_render_pass(),
+        &mut dynamic_state,
+    );
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>;
 
@@ -245,8 +80,11 @@ fn main() {
             };
 
             swapchain = new_swapchain;
-            framebuffers =
-                window_size_dependent_setup(&new_images, render_pass.clone(), &mut dynamic_state);
+            framebuffers = window_size_dependent_setup(
+                &new_images,
+                renderer.get_render_pass(),
+                &mut dynamic_state,
+            );
 
             recreate_swapchain = false;
         }
@@ -261,37 +99,8 @@ fn main() {
                 Err(err) => panic!("{:?}", err),
             };
 
-        let clear_values = vec![[0.0, 0.0, 1.0, 1.0].into()];
-
         let command_buffer =
-            AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
-                .unwrap()
-                .clear_color_image(output_image.clone(), [0.0, 0.0, 1.0, 1.0].into())
-                .unwrap()
-                .copy_buffer_to_image(input_data.clone(), input_data_image.clone())
-                .unwrap()
-                .dispatch(
-                    [128 / 8, 128 / 8, 1],
-                    compute_pipeline.clone(),
-                    compute_descriptors.clone(),
-                    (),
-                )
-                .unwrap()
-                .begin_render_pass(framebuffers[image_num].clone(), false, clear_values)
-                .unwrap()
-                .draw_indexed(
-                    graphics_pipeline.clone(),
-                    &dynamic_state,
-                    vertex_buffer.clone(),
-                    index_buffer.clone(),
-                    graphics_descriptors.clone(),
-                    (),
-                )
-                .unwrap()
-                .end_render_pass()
-                .unwrap()
-                .build()
-                .unwrap();
+            renderer.create_command_buffer(&dynamic_state, framebuffers[image_num].clone());
 
         let future = previous_frame_end
             .join(acquire_future)

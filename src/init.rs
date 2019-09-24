@@ -1,9 +1,7 @@
 use vulkano::device::{Device, DeviceExtensions, Queue};
-use vulkano::image::{SwapchainImage};
+use vulkano::image::SwapchainImage;
 use vulkano::instance::{Instance, PhysicalDevice};
-use vulkano::swapchain::{
-    PresentMode, SurfaceTransform, Swapchain, Surface
-};
+use vulkano::swapchain::{PresentMode, Surface, SurfaceTransform, Swapchain};
 
 use vulkano_win::VkSurfaceBuild;
 
@@ -17,7 +15,7 @@ pub struct InitResult {
     pub surface: Arc<Surface<Window>>,
     pub events_loop: EventsLoop,
     pub swapchain: Arc<Swapchain<Window>>,
-    pub swapchain_images: Vec<Arc<SwapchainImage<Window>>>
+    pub swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
 }
 
 pub fn init() -> InitResult {
