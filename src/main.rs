@@ -65,18 +65,21 @@ fn main() {
 
     let mut camera = renderer::Camera {
         origin: Vector3 {
-            x: 30.0,
-            y: 30.0,
-            z: 30.0,
+            x: 90.0,
+            y: 90.0,
+            z: 90.0,
         },
-        heading: Rad(0.0),
-        pitch: Rad(0.0),
+        heading: Rad(1.5),
+        pitch: Rad(-1.0),
     };
     let mut camera_movement = Vector3 {
         x: 0.0,
         y: 0.0,
         z: 0.0,
     };
+
+    let mut total_frames = 0;
+    let mut total_frame_time = 0;
     loop {
         let frame_start = std::time::Instant::now();
         previous_frame_end.cleanup_finished();
@@ -220,6 +223,8 @@ fn main() {
             return;
         }
         let elapsed = frame_start.elapsed().as_millis() as f32 / 1000.0;
+        total_frame_time += frame_start.elapsed().as_millis();
+        total_frames += 1;
         camera.origin += {
             let amount = elapsed * 15.0;
             let util::TripleEulerVector { forward, up, right } =
@@ -231,7 +236,7 @@ fn main() {
                 + amount * up * camera_movement.z
                 + amount * right * camera_movement.x
         };
-        println!("Frame took {}ms.", frame_start.elapsed().as_millis());
+        println!("Frame took {}ms, average {} per frame.", frame_start.elapsed().as_millis(), total_frame_time / (total_frames));
     }
 }
 

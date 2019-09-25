@@ -39,6 +39,8 @@ type CustomGraphicsPipeline = Arc<
 const RENDER_OUTPUT_WIDTH: u32 = 512;
 const RENDER_OUTPUT_HEIGHT: u32 = 512;
 const WORLD_SIZE: usize = 128;
+const L2_STEP: usize = 8;
+const L2_SIZE: usize = WORLD_SIZE / L2_STEP;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
@@ -62,8 +64,10 @@ pub struct Renderer {
     device: Arc<Device>,
     queue: Arc<Queue>,
 
-    input_data: InputData,
-    input_data_image: InputDataImage,
+    world_l1_data: InputData,
+    world_l1_image: InputDataImage,
+    world_l2_data: InputData,
+    world_l2_image: InputDataImage,
 
     output_image: OutputImage,
 
@@ -85,36 +89,49 @@ struct RenderBuilder {
 }
 
 impl RenderBuilder {
-    fn make_input_data(&self) -> (InputData, InputDataImage) {
-        let input_data = CpuAccessibleBuffer::from_iter(
+    fn make_world(&self) -> (InputData, InputDataImage, InputData, InputDataImage) {
+        let world_l1_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
             BufferUsage::all(),
             (0..WORLD_SIZE * WORLD_SIZE * WORLD_SIZE).map(|_| 0u32),
         )
         .unwrap();
 
-        let mut target = input_data.write().unwrap();
+        let world_l2_data = CpuAccessibleBuffer::from_iter(
+            self.device.clone(),
+            BufferUsage::all(),
+            (0..L2_SIZE * L2_SIZE * L2_SIZE).map(|_| 0u32),
+        )
+        .unwrap();
+
+        let mut target = world_l1_data.write().unwrap();
+        let mut l2 = world_l2_data.write().unwrap();
         let mut index = 0;
         for z in 0..WORLD_SIZE {
             for y in 0..WORLD_SIZE {
                 for x in 0..WORLD_SIZE {
                     let offset = if x % 15 > 10 && y % 15 > 10 { 30 } else { 0 };
+                    let l2_index = ((z / 8 * L2_SIZE) + (y / 8)) * L2_SIZE + x / 8;
                     if z < (x + y + offset) / 4 {
                         target[index] = 10;
+                        l2[l2_index] = 10;
                     }
                     if x == 0 && y == 10 {
                         target[index] = 10;
+                        l2[l2_index] = 10;
                     }
                     if y == 0 && x == 30 {
                         target[index] = 10;
+                        l2[l2_index] = 10;
                     }
                     index += 1;
                 }
             }
         }
         drop(target);
+        drop(l2);
 
-        let input_data_image = StorageImage::new(
+        let world_l1_image = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
                 width: WORLD_SIZE as u32,
@@ -126,7 +143,19 @@ impl RenderBuilder {
         )
         .unwrap();
 
-        (input_data, input_data_image)
+        let world_l2_image = StorageImage::new(
+            self.device.clone(),
+            Dimensions::Dim3d {
+                width: L2_SIZE as u32,
+                height: L2_SIZE as u32,
+                depth: L2_SIZE as u32,
+            },
+            Format::R32Uint,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+
+        (world_l1_data, world_l1_image, world_l2_data, world_l2_image)
     }
 
     fn make_output_image(&self) -> (OutputImage, Arc<Sampler>) {
@@ -204,7 +233,7 @@ impl RenderBuilder {
     }
 
     fn build(self) -> Renderer {
-        let (input_data, input_data_image) = self.make_input_data();
+        let (world_l1_data, world_l1_image, world_l2_data, world_l2_image) = self.make_world();
         let (output_image, output_sampler) = self.make_output_image();
         let (vertex_buffer, index_buffer) = self.make_quad();
         let (compute_shader, vertex_shader, fragment_shader) = self.load_shaders();
@@ -235,7 +264,9 @@ impl RenderBuilder {
 
         let compute_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
             PersistentDescriptorSet::start(compute_pipeline.clone(), 0)
-                .add_image(input_data_image.clone())
+                .add_image(world_l1_image.clone())
+                .unwrap()
+                .add_image(world_l2_image.clone())
                 .unwrap()
                 .add_image(output_image.clone())
                 .unwrap()
@@ -267,8 +298,10 @@ impl RenderBuilder {
             device: self.device,
             queue: self.queue,
 
-            input_data,
-            input_data_image,
+            world_l1_data,
+            world_l1_image,
+            world_l2_data,
+            world_l2_image,
 
             output_image,
 
@@ -313,7 +346,9 @@ impl Renderer {
             .unwrap()
             .clear_color_image(self.output_image.clone(), [0.0, 0.0, 1.0, 1.0].into())
             .unwrap()
-            .copy_buffer_to_image(self.input_data.clone(), self.input_data_image.clone())
+            .copy_buffer_to_image(self.world_l1_data.clone(), self.world_l1_image.clone())
+            .unwrap()
+            .copy_buffer_to_image(self.world_l2_data.clone(), self.world_l2_image.clone())
             .unwrap()
             .dispatch(
                 [RENDER_OUTPUT_WIDTH / 8, RENDER_OUTPUT_HEIGHT / 8, 1],
