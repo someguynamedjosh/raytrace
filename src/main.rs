@@ -49,7 +49,12 @@ fn main() {
     } = init::init();
     let window = surface.window();
 
-    let presenter = Presenter::new(device.clone(), queue.clone(), (128, 128), swapchain.format());
+    let presenter = Presenter::new(
+        device.clone(),
+        queue.clone(),
+        (512, 512),
+        swapchain.format(),
+    );
     let renderer = Renderer::new(
         device.clone(),
         queue.clone(),

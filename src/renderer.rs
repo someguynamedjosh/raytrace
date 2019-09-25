@@ -11,12 +11,14 @@ use vulkano::pipeline::ComputePipeline;
 
 use std::sync::Arc;
 
-use crate::shaders::{self, CameraVectorPushConstants, BasicRaytraceShader, BasicRaytraceShaderLayout};
+use crate::shaders::{
+    self, BasicRaytraceShaderLayout, CameraVectorPushConstants,
+};
 use crate::util;
 
-type RendererInputData = CpuAccessibleBuffer<[u32]>;
-type RendererInputImage = StorageImage<Format>;
-type RendererComputePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
+type WorldData = CpuAccessibleBuffer<[u32]>;
+type WorldImage = StorageImage<Format>;
+type BasicRaytraceComputePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
 
 type GenericImage = StorageImage<Format>;
 
@@ -47,13 +49,15 @@ pub struct Renderer {
     target_height: u32,
     image_update_requested: bool,
 
-    world_l1_data: Arc<RendererInputData>,
-    world_l1_image: Arc<RendererInputImage>,
-    world_l2_data: Arc<RendererInputData>,
-    world_l2_image: Arc<RendererInputImage>,
+    world_l1_data: Arc<WorldData>,
+    world_l1_image: Arc<WorldImage>,
+    world_l2_data: Arc<WorldData>,
+    world_l2_image: Arc<WorldImage>,
 
-    compute_pipeline: Arc<RendererComputePipeline>,
-    compute_descriptors: Arc<dyn DescriptorSet + Sync + Send>,
+    position_buffer: Arc<GenericImage>,
+
+    basic_raytrace_pipeline: Arc<BasicRaytraceComputePipeline>,
+    basic_raytrace_descriptors: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
 struct RenderBuilder {
@@ -66,10 +70,10 @@ impl RenderBuilder {
     fn make_world(
         &self,
     ) -> (
-        Arc<RendererInputData>,
-        Arc<RendererInputImage>,
-        Arc<RendererInputData>,
-        Arc<RendererInputImage>,
+        Arc<WorldData>,
+        Arc<WorldImage>,
+        Arc<WorldData>,
+        Arc<WorldImage>,
     ) {
         let world_l1_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
@@ -140,35 +144,51 @@ impl RenderBuilder {
         (world_l1_data, world_l1_image, world_l2_data, world_l2_image)
     }
 
-    fn load_shaders(&self) -> (BasicRaytraceShader,) {
-        (shaders::load_basic_raytrace_shader(self.device.clone()),)
-    }
-
     fn build(self) -> Renderer {
-        let (world_l1_data, world_l1_image, world_l2_data, world_l2_image) = self.make_world();
-        let (compute_shader,) = self.load_shaders();
+        let (target_width, target_height) = match self.target_image.dimensions() {
+            Dimensions::Dim2d { width, height } => (width, height),
+            _ => panic!("A non-2d image was passed as the target of a Renderer."),
+        };
 
-        let compute_pipeline = Arc::new(
-            ComputePipeline::new(self.device.clone(), &compute_shader.main_entry_point(), &())
-                .unwrap(),
+        let (world_l1_data, world_l1_image, world_l2_data, world_l2_image) = self.make_world();
+        let position_buffer = StorageImage::new(
+            self.device.clone(),
+            self.target_image.dimensions(),
+            Format::R16G16B16Sfloat,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+        let hit_result_buffer = StorageImage::new(
+            self.device.clone(),
+            self.target_image.dimensions(),
+            Format::R16Uint,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+        let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
+
+        let basic_raytrace_pipeline = Arc::new(
+            ComputePipeline::new(
+                self.device.clone(),
+                &basic_raytrace_shader.main_entry_point(),
+                &(),
+            )
+            .unwrap(),
         );
 
-        let compute_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
-            PersistentDescriptorSet::start(compute_pipeline.clone(), 0)
+        let basic_raytrace_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
+            PersistentDescriptorSet::start(basic_raytrace_pipeline.clone(), 0)
                 .add_image(world_l1_image.clone())
                 .unwrap()
                 .add_image(world_l2_image.clone())
                 .unwrap()
-                .add_image(self.target_image.clone())
+                .add_image(position_buffer.clone())
+                .unwrap()
+                .add_image(hit_result_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
         );
-
-        let (target_width, target_height) = match self.target_image.dimensions() {
-            Dimensions::Dim2d{width, height} => (width, height),
-            _ => panic!("A non-2d image was passed as the target of a Renderer.")
-        };
 
         Renderer {
             target_width,
@@ -180,8 +200,10 @@ impl RenderBuilder {
             world_l2_data,
             world_l2_image,
 
-            compute_pipeline,
-            compute_descriptors,
+            position_buffer,
+
+            basic_raytrace_pipeline,
+            basic_raytrace_descriptors,
         }
     }
 }
@@ -218,8 +240,8 @@ impl Renderer {
         add_to
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.compute_pipeline.clone(),
-                self.compute_descriptors.clone(),
+                self.basic_raytrace_pipeline.clone(),
+                self.basic_raytrace_descriptors.clone(),
                 CameraVectorPushConstants {
                     _dummy0: [0; 4],
                     _dummy1: [0; 4],

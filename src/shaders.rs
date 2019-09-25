@@ -4,15 +4,15 @@ use std::sync::Arc;
 
 // Unfortunately the shader! macro does not trigger a recompile whenever source code changes.
 fn _watchdog() {
-    let _source = include_bytes!("../shaders/compute.comp");
-    let _source = include_bytes!("../shaders/vertex.vert");
-    let _source = include_bytes!("../shaders/fragment.frag");
+    let _source = include_bytes!("../shaders/basic_raytrace.comp");
+    let _source = include_bytes!("../shaders/screen.vert");
+    let _source = include_bytes!("../shaders/screen.frag");
 }
 
 mod basic_raytrace {
     vulkano_shaders::shader! {
         ty: "compute",
-        path: "shaders/compute.comp"
+        path: "shaders/basic_raytrace.comp"
     }
 }
 
@@ -20,14 +20,14 @@ mod basic_raytrace {
 mod screen_vs {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "shaders/vertex.vert"
+        path: "shaders/screen.vert"
     }
 }
 
 mod screen_fs {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "shaders/fragment.frag"
+        path: "shaders/screen.frag"
     }
 }
 

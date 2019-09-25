@@ -181,7 +181,12 @@ impl PresenterBuilder {
 }
 
 impl Presenter {
-    pub fn new(device: Arc<Device>, queue: Arc<Queue>, resolution: (u32, u32), format: Format) -> Presenter {
+    pub fn new(
+        device: Arc<Device>,
+        queue: Arc<Queue>,
+        resolution: (u32, u32),
+        format: Format,
+    ) -> Presenter {
         PresenterBuilder {
             device,
             queue,
