@@ -38,6 +38,7 @@ type CustomGraphicsPipeline = Arc<
 
 const RENDER_OUTPUT_WIDTH: u32 = 512;
 const RENDER_OUTPUT_HEIGHT: u32 = 512;
+const WORLD_SIZE: usize = 128;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
@@ -88,15 +89,15 @@ impl RenderBuilder {
         let input_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
             BufferUsage::all(),
-            (0..64 * 64 * 64).map(|_| 0u32),
+            (0..WORLD_SIZE * WORLD_SIZE * WORLD_SIZE).map(|_| 0u32),
         )
         .unwrap();
 
         let mut target = input_data.write().unwrap();
         let mut index = 0;
-        for z in 0..64 {
-            for y in 0..64 {
-                for x in 0..64 {
+        for z in 0..WORLD_SIZE {
+            for y in 0..WORLD_SIZE {
+                for x in 0..WORLD_SIZE {
                     let offset = if x % 15 > 10 && y % 15 > 10 { 30 } else { 0 };
                     if z < (x + y + offset) / 4 {
                         target[index] = 10;
@@ -116,9 +117,9 @@ impl RenderBuilder {
         let input_data_image = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
-                width: 64,
-                height: 64,
-                depth: 64,
+                width: WORLD_SIZE as u32,
+                height: WORLD_SIZE as u32,
+                depth: WORLD_SIZE as u32,
             },
             Format::R32Uint,
             Some(self.queue.family()),

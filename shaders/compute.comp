@@ -11,6 +11,7 @@ layout(push_constant) uniform CameraVectors {
 
 const float IMAGE_WIDTH = 512.0;
 const float IMAGE_HEIGHT = 512.0;
+const uint WORLD_SIZE = 128;
 
 struct HitResult {
     uint value;
@@ -61,14 +62,14 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
             if (min_step_to_boundary.x < min_step_to_boundary.z) {
                 total_step = min_step_to_boundary.x;
                 current_voxel.x += step.x;
-                if (current_voxel.x > 64 || current_voxel.x < 0) {
+                if (current_voxel.x > WORLD_SIZE || current_voxel.x < 0) {
                     break;
                 }
                 min_step_to_boundary.x += voxel_width_step_size.x;
             } else {
                 total_step = min_step_to_boundary.z;
                 current_voxel.z += step.z;
-                if (current_voxel.z > 64 || current_voxel.z < 0) {
+                if (current_voxel.z > WORLD_SIZE || current_voxel.z < 0) {
                     break;
                 }
                 min_step_to_boundary.z += voxel_width_step_size.z;
@@ -77,14 +78,14 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
             if (min_step_to_boundary.y < min_step_to_boundary.z) {
                 total_step = min_step_to_boundary.y;
                 current_voxel.y += step.y;
-                if (current_voxel.y > 64 || current_voxel.y < 0) {
+                if (current_voxel.y > WORLD_SIZE || current_voxel.y < 0) {
                     break;
                 }
                 min_step_to_boundary.y += voxel_width_step_size.y;
             } else {
                 total_step = min_step_to_boundary.z;
                 current_voxel.z += step.z;
-                if (current_voxel.z > 64 || current_voxel.z < 0) {
+                if (current_voxel.z > WORLD_SIZE || current_voxel.z < 0) {
                     break;
                 }
                 min_step_to_boundary.z += voxel_width_step_size.z;
@@ -119,7 +120,7 @@ void main() {
     vec4 color = vec4(0.5765, 0.6196, 0.8549, 1.0);
     HitResult result = trace_ray(camera_vectors.origin, ray_direction);
     if (result.value > 0) {
-        color.rgb = result.position / 90.0;
+        color.rgb = result.position / (WORLD_SIZE / 1.0);
         int shadow = 0;
         for (int i = 0; i < 5; i++) {
             HitResult sun = trace_ray(result.position, sun_directions[i]);
