@@ -11,17 +11,15 @@ use vulkano::pipeline::ComputePipeline;
 
 use std::sync::Arc;
 
-use crate::shaders::{self, CameraVectorPushConstants, ComputeShader, ComputeShaderLayout};
+use crate::shaders::{self, CameraVectorPushConstants, BasicRaytraceShader, BasicRaytraceShaderLayout};
 use crate::util;
 
 type RendererInputData = CpuAccessibleBuffer<[u32]>;
 type RendererInputImage = StorageImage<Format>;
-type RendererComputePipeline = ComputePipeline<PipelineLayout<ComputeShaderLayout>>;
+type RendererComputePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
 
 type GenericImage = StorageImage<Format>;
 
-const RENDER_OUTPUT_WIDTH: u32 = 512;
-const RENDER_OUTPUT_HEIGHT: u32 = 512;
 const WORLD_SIZE: usize = 256;
 const L2_STEP: usize = 16;
 const L2_SIZE: usize = WORLD_SIZE / L2_STEP;
@@ -45,6 +43,8 @@ struct Vertex {
 vulkano::impl_vertex!(Vertex, position);
 
 pub struct Renderer {
+    target_width: u32,
+    target_height: u32,
     image_update_requested: bool,
 
     world_l1_data: Arc<RendererInputData>,
@@ -140,8 +140,8 @@ impl RenderBuilder {
         (world_l1_data, world_l1_image, world_l2_data, world_l2_image)
     }
 
-    fn load_shaders(&self) -> (ComputeShader,) {
-        (shaders::load_compute(self.device.clone()),)
+    fn load_shaders(&self) -> (BasicRaytraceShader,) {
+        (shaders::load_basic_raytrace_shader(self.device.clone()),)
     }
 
     fn build(self) -> Renderer {
@@ -165,7 +165,14 @@ impl RenderBuilder {
                 .unwrap(),
         );
 
+        let (target_width, target_height) = match self.target_image.dimensions() {
+            Dimensions::Dim2d{width, height} => (width, height),
+            _ => panic!("A non-2d image was passed as the target of a Renderer.")
+        };
+
         Renderer {
+            target_width,
+            target_height,
             image_update_requested: true,
 
             world_l1_data,
@@ -210,7 +217,7 @@ impl Renderer {
         }
         add_to
             .dispatch(
-                [RENDER_OUTPUT_WIDTH / 8, RENDER_OUTPUT_HEIGHT / 8, 1],
+                [self.target_width / 8, self.target_height / 8, 1],
                 self.compute_pipeline.clone(),
                 self.compute_descriptors.clone(),
                 CameraVectorPushConstants {

@@ -12,7 +12,7 @@ use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 
 use std::sync::Arc;
 
-use crate::shaders::{self, FragmentShader, VertexShader};
+use crate::shaders::{self, ScreenFragmentShader, ScreenVertexShader};
 
 #[derive(Clone, Debug, Default)]
 struct PresenterVertex {
@@ -24,9 +24,6 @@ vulkano::impl_vertex!(PresenterVertex, position);
 type PresenterVertexBuffer = CpuAccessibleBuffer<[PresenterVertex]>;
 type PresenterIndexBuffer = CpuAccessibleBuffer<[u32]>;
 type GenericImage = StorageImage<Format>;
-
-const PRESENTER_IMAGE_WIDTH: u32 = 512;
-const PRESENTER_IMAGE_HEIGHT: u32 = 512;
 
 type GenericRenderPass = dyn RenderPassAbstract + Sync + Send;
 type PresenterGraphicsPipeline = GraphicsPipeline<
@@ -49,6 +46,7 @@ pub struct Presenter {
 struct PresenterBuilder {
     device: Arc<Device>,
     queue: Arc<Queue>,
+    resolution: (u32, u32),
     format: Format,
 }
 
@@ -93,8 +91,8 @@ impl PresenterBuilder {
         let presented_image = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim2d {
-                width: PRESENTER_IMAGE_WIDTH,
-                height: PRESENTER_IMAGE_HEIGHT,
+                width: self.resolution.0,
+                height: self.resolution.1,
             },
             Format::R8G8B8A8Unorm,
             Some(self.queue.family()),
@@ -103,8 +101,8 @@ impl PresenterBuilder {
 
         let sampler = Sampler::new(
             self.device.clone(),
-            Filter::Nearest,
-            Filter::Nearest,
+            Filter::Linear,
+            Filter::Linear,
             MipmapMode::Nearest,
             SamplerAddressMode::ClampToEdge,
             SamplerAddressMode::ClampToEdge,
@@ -119,10 +117,10 @@ impl PresenterBuilder {
         (presented_image, sampler)
     }
 
-    fn load_shaders(&self) -> (VertexShader, FragmentShader) {
+    fn load_shaders(&self) -> (ScreenVertexShader, ScreenFragmentShader) {
         (
-            shaders::load_vertex(self.device.clone()),
-            shaders::load_fragment(self.device.clone()),
+            shaders::load_screen_vertex_shader(self.device.clone()),
+            shaders::load_screen_fragment_shader(self.device.clone()),
         )
     }
 
@@ -183,10 +181,11 @@ impl PresenterBuilder {
 }
 
 impl Presenter {
-    pub fn new(device: Arc<Device>, queue: Arc<Queue>, format: Format) -> Presenter {
+    pub fn new(device: Arc<Device>, queue: Arc<Queue>, resolution: (u32, u32), format: Format) -> Presenter {
         PresenterBuilder {
             device,
             queue,
+            resolution,
             format,
         }
         .build()

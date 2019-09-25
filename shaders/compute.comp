@@ -10,8 +10,6 @@ layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
 } camera_vectors;
 
-const float IMAGE_WIDTH = 512.0;
-const float IMAGE_HEIGHT = 512.0;
 const uint WORLD_SIZE = 256;
 const uint L2_STEP = 16;
 const float L2_STEPF = L2_STEP;
@@ -182,7 +180,7 @@ void main() {
         -normalize(vec3(0.5, 0.6, -1))
     );
 
-    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(IMAGE_WIDTH, IMAGE_HEIGHT) * 2.0 - vec2(1);
+    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(img)) * 2.0 - vec2(1);
     // Must be normalized. 
     vec3 ray_direction = normalize(
         camera_vectors.forward
