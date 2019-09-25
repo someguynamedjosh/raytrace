@@ -27,22 +27,17 @@ struct HitResult {
 
 #define PERFORM_L1_STEP(AXIS) \
     l1_pos. AXIS += l1_step. AXIS ; \
+    if (l1_pos. AXIS == l1_exit_planes. AXIS) { break; } \
     total_step = l1_to_boundary. AXIS ; \
     result.value = imageLoad(l1, l1_pos).r; \
     if (result.value != 0) { break; } \
-    if (l1_pos. AXIS == l1_exit_planes. AXIS) { break; } \
     l1_to_boundary. AXIS += l1_advance_amount. AXIS ;
 
-#define PERFORM_L2_STEP(AXIS, OTHER1, OTHER2) \
-    l2_pos. AXIS += l1_step. AXIS ; \
-    total_step = l2_to_boundary. AXIS ; \
-    if (l2_pos. AXIS > L2_SIZE || l2_pos. AXIS < 0) { break; } \
-    result.value = imageLoad(l2, l2_pos).r; \
-    if (result.value != 0) { \
+#define PERFORM_L1_TRACE() \
         ivec3 l1_exit_planes = ivec3( \
-            l2_pos.x * L2_STEP + (l1_step.x == 1 ? L2_STEP - 1 : 0), \
-            l2_pos.y * L2_STEP + (l1_step.y == 1 ? L2_STEP - 1 : 0), \
-            l2_pos.z * L2_STEP + (l1_step.z == 1 ? L2_STEP - 1 : 0) \
+            l2_pos.x * L2_STEP + (l1_step.x == 1 ? L2_STEP : - 1), \
+            l2_pos.y * L2_STEP + (l1_step.y == 1 ? L2_STEP : - 1), \
+            l2_pos.z * L2_STEP + (l1_step.z == 1 ? L2_STEP : - 1) \
         ); \
         vec3 exact_pos = origin + direction * (total_step + 0.01); \
         ivec3 l1_pos = ivec3( \
@@ -52,25 +47,34 @@ struct HitResult {
         ); \
         \
         vec3 l1_to_boundary = vec3(0); \
-        l1_to_boundary. AXIS = l1_advance_amount. AXIS; \
-        if (l1_step. OTHER1 == 1) { \
-            l1_to_boundary. OTHER1 =  \
-                (1.0 - mod(exact_pos. OTHER1, 1.0))  \
-                * l1_advance_amount. OTHER1; \
+        if (l1_step.x == 1) { \
+            l1_to_boundary.x =  \
+                (1.0 - mod(exact_pos.x, 1.0))  \
+                * l1_advance_amount.x; \
         } else { \
-            l1_to_boundary. OTHER1 =  \
-                mod(exact_pos. OTHER1, 1.0) * l1_advance_amount. OTHER1; \
+            l1_to_boundary.x =  \
+                mod(exact_pos.x, 1.0) * l1_advance_amount.x; \
         } \
-        if (l1_step. OTHER2 == 1) { \
-            l1_to_boundary. OTHER2 =  \
-                (1.0 - mod(exact_pos. OTHER2, 1.0))  \
-                * l1_advance_amount. OTHER2; \
+        if (l1_step.y == 1) { \
+            l1_to_boundary.y =  \
+                (1.0 - mod(exact_pos.y, 1.0))  \
+                * l1_advance_amount.y; \
         } else { \
-            l1_to_boundary. OTHER2 =  \
-                mod(exact_pos. OTHER2, 1.0) * l1_advance_amount. OTHER2; \
+            l1_to_boundary.y =  \
+                mod(exact_pos.y, 1.0) * l1_advance_amount.y; \
         } \
+        if (l1_step.z == 1) { \
+            l1_to_boundary.z =  \
+                (1.0 - mod(exact_pos.z, 1.0))  \
+                * l1_advance_amount.z; \
+        } else { \
+            l1_to_boundary.z =  \
+                mod(exact_pos.z, 1.0) * l1_advance_amount.z; \
+        } \
+        l1_to_boundary += vec3(total_step); \
         \
-        while (true) { \
+        result.value = imageLoad(l1, l1_pos).r; \
+        if (result.value == 0) { while (true) { \
             if (l1_to_boundary.x < l1_to_boundary.y) { \
                 if (l1_to_boundary.x < l1_to_boundary.z) { \
                     PERFORM_L1_STEP(x); \
@@ -84,18 +88,25 @@ struct HitResult {
                     PERFORM_L1_STEP(z); \
                 } \
             } \
-        } \
+        } }
+
+#define PERFORM_L2_STEP(AXIS) \
+    l2_pos. AXIS += l1_step. AXIS ; \
+    total_step = l2_to_boundary. AXIS ; \
+    if (l2_pos. AXIS > L2_SIZE || l2_pos. AXIS < 0) { break; } \
+    result.value = imageLoad(l2, l2_pos).r; \
+    if (result.value != 0) { \
+        PERFORM_L1_TRACE(); \
         if (result.value != 0) { break; } \
     } \
     l2_to_boundary. AXIS += l2_advance_amount. AXIS ;
 
 HitResult trace_ray(vec3 origin, vec3 direction) {
-    ivec3 pos = ivec3(
+    ivec3 l2_pos = ivec3(
         floor(origin.x),
         floor(origin.y),
         floor(origin.z)
-    );
-    ivec3 l2_pos = pos / ivec3(L2_STEP);
+    ) / ivec3(L2_STEP);
     ivec3 l1_step = ivec3(
         direction.x < 0 ? -1 : 1,
         direction.y < 0 ? -1 : 1,
@@ -138,18 +149,21 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     float total_step = 0.0;
     uint mode = MODE_L1;
     result.value = imageLoad(l2, l2_pos).r;
+    if (result.value != 0) {
+        PERFORM_L1_TRACE();
+    }
     if (result.value == 0) { while (true) {
         if (l2_to_boundary.x < l2_to_boundary.y) {
             if (l2_to_boundary.x < l2_to_boundary.z) {
-                PERFORM_L2_STEP(x, y,z);
+                PERFORM_L2_STEP(x);
             } else {
-                PERFORM_L2_STEP(z, x,y);
+                PERFORM_L2_STEP(z);
             }
         } else {
             if (l2_to_boundary.y < l2_to_boundary.z) {
-                PERFORM_L2_STEP(y, x,z);
+                PERFORM_L2_STEP(y);
             } else {
-                PERFORM_L2_STEP(z, x,y);
+                PERFORM_L2_STEP(z);
             }
         }
     } }
