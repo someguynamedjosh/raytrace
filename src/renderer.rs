@@ -38,8 +38,8 @@ type CustomGraphicsPipeline = Arc<
 
 const RENDER_OUTPUT_WIDTH: u32 = 512;
 const RENDER_OUTPUT_HEIGHT: u32 = 512;
-const WORLD_SIZE: usize = 128;
-const L2_STEP: usize = 8;
+const WORLD_SIZE: usize = 256;
+const L2_STEP: usize = 16;
 const L2_SIZE: usize = WORLD_SIZE / L2_STEP;
 
 // Positive Y (angle PI / 2) is forward
@@ -111,7 +111,8 @@ impl RenderBuilder {
             for y in 0..WORLD_SIZE {
                 for x in 0..WORLD_SIZE {
                     let offset = if x % 15 > 10 && y % 15 > 10 { 30 } else { 0 };
-                    let l2_index = ((z / 8 * L2_SIZE) + (y / 8)) * L2_SIZE + x / 8;
+                    let (l2x, l2y, l2z) = (x / L2_STEP, y / L2_STEP, z / L2_STEP);
+                    let l2_index = ((l2z * L2_SIZE) + l2y) * L2_SIZE + l2x;
                     if z < (x + y + offset) / 4 {
                         target[index] = 10;
                         l2[l2_index] = 10;

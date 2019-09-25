@@ -65,9 +65,9 @@ fn main() {
 
     let mut camera = renderer::Camera {
         origin: Vector3 {
-            x: 90.0,
-            y: 90.0,
-            z: 90.0,
+            x: 160.0,
+            y: 160.0,
+            z: 160.0,
         },
         heading: Rad(1.5),
         pitch: Rad(-1.0),

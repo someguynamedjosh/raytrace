@@ -12,8 +12,8 @@ layout(push_constant) uniform CameraVectors {
 
 const float IMAGE_WIDTH = 512.0;
 const float IMAGE_HEIGHT = 512.0;
-const uint WORLD_SIZE = 128;
-const uint L2_STEP = 8;
+const uint WORLD_SIZE = 256;
+const uint L2_STEP = 16;
 const float L2_STEPF = L2_STEP;
 const uint L2_SIZE = WORLD_SIZE / L2_STEP;
 
