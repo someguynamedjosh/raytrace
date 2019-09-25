@@ -11,16 +11,16 @@ use vulkano::pipeline::ComputePipeline;
 
 use std::sync::Arc;
 
-use crate::shaders::{
-    self, BasicRaytraceShaderLayout, CameraVectorPushConstants,
-};
+use crate::shaders::{self, BasicRaytraceShaderLayout, FinalizeShaderLayout, CameraVectorPushConstants};
 use crate::util;
 
 type WorldData = CpuAccessibleBuffer<[u32]>;
 type WorldImage = StorageImage<Format>;
-type BasicRaytraceComputePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
+type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
+type FinalizePipeline = ComputePipeline<PipelineLayout<FinalizeShaderLayout>>;
 
 type GenericImage = StorageImage<Format>;
+type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
 
 const WORLD_SIZE: usize = 256;
 const L2_STEP: usize = 16;
@@ -54,10 +54,10 @@ pub struct Renderer {
     world_l2_data: Arc<WorldData>,
     world_l2_image: Arc<WorldImage>,
 
-    position_buffer: Arc<GenericImage>,
-
-    basic_raytrace_pipeline: Arc<BasicRaytraceComputePipeline>,
-    basic_raytrace_descriptors: Arc<dyn DescriptorSet + Sync + Send>,
+    basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
+    basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
+    finalize_pipeline: Arc<FinalizePipeline>,
+    finalize_descriptors: Arc<GenericDescriptorSet>,
 }
 
 struct RenderBuilder {
@@ -154,7 +154,7 @@ impl RenderBuilder {
         let position_buffer = StorageImage::new(
             self.device.clone(),
             self.target_image.dimensions(),
-            Format::R16G16B16Sfloat,
+            Format::R16G16B16A16Sfloat,
             Some(self.queue.family()),
         )
         .unwrap();
@@ -166,6 +166,7 @@ impl RenderBuilder {
         )
         .unwrap();
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
+        let finalize_shader = shaders::load_finalize_shader(self.device.clone());
 
         let basic_raytrace_pipeline = Arc::new(
             ComputePipeline::new(
@@ -190,6 +191,27 @@ impl RenderBuilder {
                 .unwrap(),
         );
 
+        let finalize_pipeline = Arc::new(
+            ComputePipeline::new(
+                self.device.clone(),
+                &finalize_shader.main_entry_point(),
+                &(),
+            )
+            .unwrap(),
+        );
+
+        let finalize_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
+            PersistentDescriptorSet::start(finalize_pipeline.clone(), 0)
+                .add_image(position_buffer.clone())
+                .unwrap()
+                .add_image(hit_result_buffer.clone())
+                .unwrap()
+                .add_image(self.target_image.clone())
+                .unwrap()
+                .build()
+                .unwrap(),
+        );
+
         Renderer {
             target_width,
             target_height,
@@ -200,10 +222,10 @@ impl RenderBuilder {
             world_l2_data,
             world_l2_image,
 
-            position_buffer,
-
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
+            finalize_pipeline,
+            finalize_descriptors,
         }
     }
 }
@@ -251,6 +273,13 @@ impl Renderer {
                     right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
                     up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
                 },
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.finalize_pipeline.clone(),
+                self.finalize_descriptors.clone(),
+                ()
             )
             .unwrap()
     }
