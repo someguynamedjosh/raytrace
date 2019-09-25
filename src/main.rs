@@ -16,9 +16,9 @@
 // and that you want to learn Vulkan. This means that for example it won't go into details about
 // what a vertex or a shader is.
 
-use cgmath::{Rad, Vector3, InnerSpace};
+use cgmath::{InnerSpace, Rad, Vector3};
 
-use vulkano::command_buffer::DynamicState;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
 use vulkano::image::SwapchainImage;
 use vulkano::pipeline::viewport::Viewport;
@@ -30,9 +30,13 @@ use winit::{ElementState, Event, KeyboardInput, VirtualKeyCode, Window, WindowEv
 use std::sync::Arc;
 
 mod init;
+mod presenter;
 mod renderer;
 mod shaders;
 mod util;
+
+use presenter::Presenter;
+use renderer::{Camera, Renderer};
 
 fn main() {
     let init::InitResult {
@@ -45,7 +49,12 @@ fn main() {
     } = init::init();
     let window = surface.window();
 
-    let mut renderer = renderer::Renderer::new(device.clone(), queue.clone(), swapchain.format());
+    let presenter = Presenter::new(device.clone(), queue.clone(), swapchain.format());
+    let renderer = Renderer::new(
+        device.clone(),
+        queue.clone(),
+        presenter.get_presented_image(),
+    );
 
     // Dynamic viewports allow us to recreate just the viewport when the window is resized
     // Otherwise we would have to recreate the whole pipeline.
@@ -57,13 +66,13 @@ fn main() {
 
     let mut framebuffers = window_size_dependent_setup(
         &swapchain_images,
-        renderer.get_render_pass(),
+        presenter.get_render_pass(),
         &mut dynamic_state,
     );
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>;
 
-    let mut camera = renderer::Camera {
+    let mut camera = Camera {
         origin: Vector3 {
             x: 160.0,
             y: 160.0,
@@ -103,7 +112,7 @@ fn main() {
             swapchain = new_swapchain;
             framebuffers = window_size_dependent_setup(
                 &new_images,
-                renderer.get_render_pass(),
+                presenter.get_render_pass(),
                 &mut dynamic_state,
             );
 
@@ -120,11 +129,16 @@ fn main() {
                 Err(err) => panic!("{:?}", err),
             };
 
-        let command_buffer = renderer.create_command_buffer(
-            &camera,
+        let builder =
+            AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
+                .unwrap();
+        let builder = renderer.add_render_commands(builder, &camera);
+        let builder = presenter.add_present_commands(
+            builder,
             &dynamic_state,
             framebuffers[image_num].clone(),
         );
+        let command_buffer = builder.build().unwrap();
 
         let future = previous_frame_end
             .join(acquire_future)
@@ -236,7 +250,11 @@ fn main() {
                 + amount * up * camera_movement.z
                 + amount * right * camera_movement.x
         };
-        println!("Frame took {}ms, average {} per frame.", frame_start.elapsed().as_millis(), total_frame_time / (total_frames));
+        println!(
+            "Frame took {}ms, average {} per frame.",
+            frame_start.elapsed().as_millis(),
+            total_frame_time / (total_frames)
+        );
     }
 }
 
