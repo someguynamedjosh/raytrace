@@ -28,6 +28,19 @@ const WORLD_SIZE: usize = 256;
 const L2_STEP: usize = 16;
 const L2_SIZE: usize = WORLD_SIZE / L2_STEP;
 
+const LIGHTMAP_SIZE: u32 = L2_STEP as u32; // One lightmap covers LIGHTMAP_SIZE^3 voxels.
+const LIGHTMAP_RES_L0: u32 = 8; // Pixels per voxel.
+const LIGHTMAP_QUANTITY_L0: u32 = 32; // Number of lightmaps to create.
+const LIGHTMAP_PACKING_L0: u32 = 1; // LIGHTMAP_PACKING lightmaps will be packed into each layer.
+const LIGHTMAP_RES_L1: u32 = 4;
+const LIGHTMAP_QUANTITY_L1: u32 = 128;
+const LIGHTMAP_PACKING_L1: u32 = 4;
+const LIGHTMAP_RES_L2: u32 = 2;
+const LIGHTMAP_QUANTITY_L2: u32 = 512;
+const LIGHTMAP_PACKING_L2: u32 = 16;
+// Calculations show each lightmap atlas contains 24 million pixels. Assuming 32 bits per pixel,
+// this makes all atlases consume 288MB.
+
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
 // Positive Z is up
@@ -51,6 +64,10 @@ pub struct Renderer {
 
     lightmap_requirement_buffer: Arc<GenericImage>,
     total_lightmaps_buffer: Arc<GenericImage>,
+
+    lightmap_atlas_l0: Arc<GenericImage>,
+    lightmap_atlas_l1: Arc<GenericImage>,
+    lightmap_atlas_l2: Arc<GenericImage>,
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
@@ -142,6 +159,30 @@ impl RenderBuilder {
         (world_l1_data, world_l1_image, world_l2_data, world_l2_image)
     }
 
+    fn make_lightmap_atlas(
+        &self,
+        pixels_per_voxel: u32,
+        quantity: u32,
+        lightmaps_per_layer: u32,
+    ) -> Arc<GenericImage> {
+        let lightmap_resolution = pixels_per_voxel * LIGHTMAP_SIZE;
+        // *3 because we need seperate layers for X, Y, and Z axes.
+        let layers_per_lightmap = LIGHTMAP_SIZE * 3 / lightmaps_per_layer;
+        let total_layers = layers_per_lightmap * quantity;
+        let atlas = StorageImage::new(
+            self.device.clone(),
+            Dimensions::Dim2dArray {
+                width: lightmap_resolution * lightmaps_per_layer,
+                height: lightmap_resolution,
+                array_layers: total_layers,
+            },
+            Format::R32Sfloat,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+        atlas
+    }
+
     fn build(self) -> Renderer {
         let (target_width, target_height) = match self.target_image.dimensions() {
             Dimensions::Dim2d { width, height } => (width, height),
@@ -177,13 +218,18 @@ impl RenderBuilder {
         .unwrap();
         let total_lightmaps_buffer = StorageImage::new(
             self.device.clone(),
-            Dimensions::Dim1d {
-                width: 16u32,
-            },
+            Dimensions::Dim1d { width: 16u32 },
             Format::R32Uint,
             Some(self.queue.family()),
         )
         .unwrap();
+
+        let lightmap_atlas_l0 =
+            self.make_lightmap_atlas(LIGHTMAP_RES_L0, LIGHTMAP_QUANTITY_L0, LIGHTMAP_PACKING_L0);
+        let lightmap_atlas_l1 =
+            self.make_lightmap_atlas(LIGHTMAP_RES_L1, LIGHTMAP_QUANTITY_L1, LIGHTMAP_PACKING_L1);
+        let lightmap_atlas_l2 =
+            self.make_lightmap_atlas(LIGHTMAP_RES_L2, LIGHTMAP_QUANTITY_L2, LIGHTMAP_PACKING_L2);
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
         let finalize_shader = shaders::load_finalize_shader(self.device.clone());
@@ -252,6 +298,10 @@ impl RenderBuilder {
 
             lightmap_requirement_buffer,
             total_lightmaps_buffer,
+
+            lightmap_atlas_l0,
+            lightmap_atlas_l1,
+            lightmap_atlas_l2,
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
