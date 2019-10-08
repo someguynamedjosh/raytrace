@@ -245,7 +245,7 @@ fn main() {
         total_frame_time += frame_start.elapsed().as_millis();
         total_frames += 1;
         camera.origin += {
-            let amount = elapsed * 15.0;
+            let amount = elapsed * 50.0;
             let util::TripleEulerVector { forward, up, right } =
                 util::compute_triple_euler_vector(camera.heading, camera.pitch);
             let forward = forward.normalize();

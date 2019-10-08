@@ -11,10 +11,12 @@ use vulkano::pipeline::ComputePipeline;
 
 use std::sync::Arc;
 
-use crate::shaders::{self, BasicRaytraceShaderLayout, FinalizeShaderLayout, CameraVectorPushConstants};
+use crate::shaders::{
+    self, BasicRaytraceShaderLayout, CameraVectorPushConstants, FinalizeShaderLayout,
+};
 use crate::util;
 
-type WorldData = CpuAccessibleBuffer<[u32]>;
+type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
 type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
 type FinalizePipeline = ComputePipeline<PipelineLayout<FinalizeShaderLayout>>;
@@ -37,13 +39,6 @@ pub struct Camera {
     pub pitch: Rad<f32>,
 }
 
-#[derive(Clone, Debug, Default)]
-struct Vertex {
-    position: [f32; 2],
-}
-
-vulkano::impl_vertex!(Vertex, position);
-
 pub struct Renderer {
     target_width: u32,
     target_height: u32,
@@ -53,6 +48,9 @@ pub struct Renderer {
     world_l1_image: Arc<WorldImage>,
     world_l2_data: Arc<WorldData>,
     world_l2_image: Arc<WorldImage>,
+
+    lightmap_requirement_buffer: Arc<GenericImage>,
+    total_lightmaps_buffer: Arc<GenericImage>,
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
@@ -78,14 +76,14 @@ impl RenderBuilder {
         let world_l1_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
             BufferUsage::all(),
-            (0..WORLD_SIZE * WORLD_SIZE * WORLD_SIZE).map(|_| 0u32),
+            (0..WORLD_SIZE * WORLD_SIZE * WORLD_SIZE).map(|_| 0u16),
         )
         .unwrap();
 
         let world_l2_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
             BufferUsage::all(),
-            (0..L2_SIZE * L2_SIZE * L2_SIZE).map(|_| 0u32),
+            (0..L2_SIZE * L2_SIZE * L2_SIZE).map(|_| 0u16),
         )
         .unwrap();
 
@@ -124,7 +122,7 @@ impl RenderBuilder {
                 height: WORLD_SIZE as u32,
                 depth: WORLD_SIZE as u32,
             },
-            Format::R32Uint,
+            Format::R16Uint,
             Some(self.queue.family()),
         )
         .unwrap();
@@ -136,7 +134,7 @@ impl RenderBuilder {
                 height: L2_SIZE as u32,
                 depth: L2_SIZE as u32,
             },
-            Format::R32Uint,
+            Format::R16Uint,
             Some(self.queue.family()),
         )
         .unwrap();
@@ -151,6 +149,7 @@ impl RenderBuilder {
         };
 
         let (world_l1_data, world_l1_image, world_l2_data, world_l2_image) = self.make_world();
+
         let position_buffer = StorageImage::new(
             self.device.clone(),
             self.target_image.dimensions(),
@@ -165,6 +164,27 @@ impl RenderBuilder {
             Some(self.queue.family()),
         )
         .unwrap();
+        let lightmap_requirement_buffer = StorageImage::new(
+            self.device.clone(),
+            Dimensions::Dim3d {
+                width: L2_SIZE as u32,
+                height: L2_SIZE as u32,
+                depth: L2_SIZE as u32,
+            },
+            Format::R32Uint,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+        let total_lightmaps_buffer = StorageImage::new(
+            self.device.clone(),
+            Dimensions::Dim1d {
+                width: 16u32,
+            },
+            Format::R32Uint,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
         let finalize_shader = shaders::load_finalize_shader(self.device.clone());
 
@@ -187,6 +207,10 @@ impl RenderBuilder {
                 .unwrap()
                 .add_image(hit_result_buffer.clone())
                 .unwrap()
+                .add_image(lightmap_requirement_buffer.clone())
+                .unwrap()
+                .add_image(total_lightmaps_buffer.clone())
+                .unwrap()
                 .build()
                 .unwrap(),
         );
@@ -206,6 +230,10 @@ impl RenderBuilder {
                 .unwrap()
                 .add_image(hit_result_buffer.clone())
                 .unwrap()
+                .add_image(lightmap_requirement_buffer.clone())
+                .unwrap()
+                .add_image(total_lightmaps_buffer.clone())
+                .unwrap()
                 .add_image(self.target_image.clone())
                 .unwrap()
                 .build()
@@ -221,6 +249,9 @@ impl RenderBuilder {
             world_l1_image,
             world_l2_data,
             world_l2_image,
+
+            lightmap_requirement_buffer,
+            total_lightmaps_buffer,
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
@@ -260,6 +291,10 @@ impl Renderer {
                 .unwrap();
         }
         add_to
+            .clear_color_image(self.lightmap_requirement_buffer.clone(), [5u32].into())
+            .unwrap()
+            .clear_color_image(self.total_lightmaps_buffer.clone(), [0u32].into())
+            .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.basic_raytrace_pipeline.clone(),
@@ -279,7 +314,7 @@ impl Renderer {
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.finalize_pipeline.clone(),
                 self.finalize_descriptors.clone(),
-                ()
+                (),
             )
             .unwrap()
     }

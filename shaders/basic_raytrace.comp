@@ -2,10 +2,12 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, r32ui) uniform uimage3D l1;
-layout(set = 0, binding = 1, r32ui) uniform uimage3D l2;
+layout(set = 0, binding = 0, r16ui) uniform uimage3D l1;
+layout(set = 0, binding = 1, r16ui) uniform uimage3D l2;
 layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D position_out;
 layout(set = 0, binding = 3, r16ui) uniform writeonly uimage2D hit_result_out;
+layout(set = 0, binding = 4, r32ui) uniform uimage3D lightmap_requirement_out;
+layout(set = 0, binding = 5, r32ui) uniform uimage1D total_required_lightmaps;
 
 layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
@@ -22,6 +24,7 @@ const uint MODE_L2 = 1;
 struct HitResult {
     uint value;
     vec3 position;
+    float distance;
 };
 
 #define PERFORM_L1_STEP(AXIS) \
@@ -39,7 +42,7 @@ struct HitResult {
             l2_pos.z * L2_STEP + (l1_step.z == 1 ? L2_STEP : - 1) \
         ); \
         vec3 exact_pos = origin + direction * (total_step + 0.01); \
-        ivec3 l1_pos = ivec3( \
+        l1_pos = ivec3( \
             floor(exact_pos.x), \
             floor(exact_pos.y), \
             floor(exact_pos.z) \
@@ -101,6 +104,7 @@ struct HitResult {
     l2_to_boundary. AXIS += l2_advance_amount. AXIS ;
 
 HitResult trace_ray(vec3 origin, vec3 direction) {
+    ivec3 l1_pos = ivec3(0);
     ivec3 l2_pos = ivec3(
         floor(origin.x),
         floor(origin.y),
@@ -166,7 +170,28 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
             }
         }
     } }
-    result.position = origin + direction * (total_step - 0.01);
+    result.distance = total_step;
+    result.position = origin + direction * result.distance;
+    // Shrink the resulting coordinate a bit to be *inside* the cube it hit.
+    // A coordinate at the very edge of the cube (say, 0.0) will be shrunk by
+    // 0.01, yielding 0.01 as the coordinate. All other coordinates are shrunk
+    // proportionately, with a coordinate at the center of a cube not being
+    // shrunk at all.
+    result.position += ((result.position - vec3(l1_pos)) - 0.5) * -0.05;
+    if (result.value != 0) {
+        uint lightmap_level = 0;
+        if (result.distance > 50) {
+            lightmap_level++;
+        }
+        if (result.distance > 100) {
+            lightmap_level++;
+        }
+        uint old_value = imageAtomicMin(lightmap_requirement_out, l2_pos, lightmap_level);
+        if (old_value > lightmap_level) {
+            imageAtomicAdd(total_required_lightmaps, int(old_value), uint(-1));
+            imageAtomicAdd(total_required_lightmaps, int(lightmap_level), 1);
+        }
+    }
     return result;
 }
 
@@ -183,6 +208,6 @@ void main() {
 
     HitResult result = trace_ray(camera_vectors.origin, ray_direction);
 
-    imageStore(position_out, ivec2(gl_GlobalInvocationID.xy), vec4(result.position, 0.0));
+    imageStore(position_out, ivec2(gl_GlobalInvocationID.xy), vec4(result.position, result.distance));
     imageStore(hit_result_out, ivec2(gl_GlobalInvocationID.xy), ivec4(result.value));
 }
