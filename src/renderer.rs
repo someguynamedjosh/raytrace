@@ -42,7 +42,9 @@ const LIGHTMAP_RES_L2: u32 = 2;
 const LIGHTMAP_QUANTITY_L2: u32 = 512;
 const LIGHTMAP_PACKING_L2: u32 = 16;
 // Enough to store LIGHTMAP_QUANTITY_L2 + 2 extra bytes, rounded up.
-const LIGHTMAP_AVAILABILITY_TABLE_SIZE: u32 = 1024;
+const LIGHTMAP_TABLE_SIZE: u32 = 1024;
+// Value 0: lightmap is used? value 1-3: xyz of region where used.
+const LIGHTMAP_DESCRIPTION_WIDTH: u32 = 16;
 // Calculations show each lightmap atlas contains 24 million pixels. Assuming 32 bits per pixel,
 // this makes all atlases consume 288MB.
 
@@ -71,6 +73,7 @@ pub struct Renderer {
     lightmap_availability_table: Arc<GenericImage>,
     lat_reset_buffer: Arc<LatResetBuffer>,
     lightmap_operation_buffer: Arc<GenericImage>,
+    lightmap_table: Arc<GenericImage>,
     lightmap_usage_buffer: Arc<GenericImage>,
 
     lightmap_atlas_l0: Arc<GenericImage>,
@@ -193,6 +196,42 @@ impl RenderBuilder {
         atlas
     }
 
+    fn build_lat(&self) -> (Arc<GenericImage>, Arc<LatResetBuffer>) {
+        let lightmap_availability_table = StorageImage::new(
+            self.device.clone(),
+            Dimensions::Dim2d {
+                width: LIGHTMAP_TABLE_SIZE,
+                height: 3,
+            },
+            Format::R32Uint,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+        let mut reset_data = Vec::new();
+        for lightmap_resolution in 0..3 {
+            let atlas_size = match lightmap_resolution {
+                0 => LIGHTMAP_QUANTITY_L0,
+                1 => LIGHTMAP_QUANTITY_L1,
+                2 => LIGHTMAP_QUANTITY_L2,
+                _ => unreachable!(),
+            };
+            for index in 0..LIGHTMAP_TABLE_SIZE - 2 {
+                reset_data.push(index);
+            }
+            // Elements 0..LIGHTMAP_AVAILABILITY_TABLE_SIZE represent indexes of available
+            // lightmaps of whatever our current resolution is.
+            reset_data.push(0);
+            reset_data.push(atlas_size);
+        }
+        let lat_reset_buffer = CpuAccessibleBuffer::from_iter(
+            self.device.clone(),
+            BufferUsage::all(),
+            reset_data.into_iter(),
+        )
+        .unwrap();
+        (lightmap_availability_table, lat_reset_buffer)
+    }
+
     fn build(self) -> Renderer {
         let (target_width, target_height) = match self.target_image.dimensions() {
             Dimensions::Dim2d { width, height } => (width, height),
@@ -227,44 +266,24 @@ impl RenderBuilder {
             Some(self.queue.family()),
         )
         .unwrap();
-        let lightmap_availability_table = StorageImage::new(
-            self.device.clone(),
-            Dimensions::Dim2d {
-                width: LIGHTMAP_AVAILABILITY_TABLE_SIZE,
-                height: 3,
-            },
-            Format::R32Uint,
-            Some(self.queue.family()),
-        )
-        .unwrap();
-        let mut reset_data = Vec::new();
-        for lightmap_resolution in 0..3 {
-            let atlas_size = match lightmap_resolution {
-                0 => LIGHTMAP_QUANTITY_L0,
-                1 => LIGHTMAP_QUANTITY_L1,
-                2 => LIGHTMAP_QUANTITY_L2,
-                _ => unreachable!(),
-            };
-            for index in 0..LIGHTMAP_AVAILABILITY_TABLE_SIZE - 2 {
-                reset_data.push(index);
-            }
-            // Elements 0..LIGHTMAP_AVAILABILITY_TABLE_SIZE represent indexes of available
-            // lightmaps of whatever our current resolution is.
-            reset_data.push(0);
-            reset_data.push(atlas_size);
-        }
-        let lat_reset_buffer = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::all(),
-            reset_data.into_iter(),
-        )
-        .unwrap();
+        let (lightmap_availability_table, lat_reset_buffer) = self.build_lat();
         let lightmap_operation_buffer = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
                 width: L2_SIZE as u32,
                 height: L2_SIZE as u32,
                 depth: L2_SIZE as u32,
+            },
+            Format::R32Uint,
+            Some(self.queue.family()),
+        )
+        .unwrap();
+        let lightmap_table = StorageImage::new(
+            self.device.clone(),
+            Dimensions::Dim3d {
+                width: LIGHTMAP_TABLE_SIZE,
+                height: LIGHTMAP_DESCRIPTION_WIDTH,
+                depth: 4u32, // Only going to use 3 but powers of two.
             },
             Format::R32Uint,
             Some(self.queue.family()),
@@ -331,6 +350,8 @@ impl RenderBuilder {
                 .unwrap()
                 .add_image(lightmap_assignment_buffer.clone())
                 .unwrap()
+                .add_image(lightmap_table.clone())
+                .unwrap()
                 .build()
                 .unwrap(),
         );
@@ -350,6 +371,8 @@ impl RenderBuilder {
                 .add_image(hit_result_buffer.clone())
                 .unwrap()
                 .add_image(lightmap_assignment_buffer.clone())
+                .unwrap()
+                .add_image(lightmap_table.clone())
                 .unwrap()
                 .add_image(lightmap_usage_buffer.clone())
                 .unwrap()
@@ -373,6 +396,7 @@ impl RenderBuilder {
             lightmap_availability_table,
             lat_reset_buffer,
             lightmap_operation_buffer,
+            lightmap_table,
             lightmap_usage_buffer,
 
             lightmap_atlas_l0,
@@ -417,12 +441,14 @@ impl Renderer {
                 .unwrap()
                 .copy_buffer_to_image(self.world_l2_data.clone(), self.world_l2_image.clone())
                 .unwrap()
-                .clear_color_image(self.lightmap_assignment_buffer.clone(), [0x3030u32].into())
+                .clear_color_image(self.lightmap_assignment_buffer.clone(), [0x3000u32].into())
                 .unwrap()
                 .copy_buffer_to_image(
                     self.lat_reset_buffer.clone(),
                     self.lightmap_availability_table.clone(),
                 )
+                .unwrap()
+                .clear_color_image(self.lightmap_table.clone(), [0x0u32].into())
                 .unwrap();
             self.image_update_requested = false;
         }

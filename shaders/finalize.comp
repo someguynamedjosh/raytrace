@@ -5,8 +5,9 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, rgba16f) uniform image2D position;
 layout(set = 0, binding = 1, r16ui) uniform uimage2D hit_result;
 layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_assignment;
-layout(set = 0, binding = 3, r32ui) uniform uimage1D lightmap_usage;
-layout(set = 0, binding = 4, rgba8_snorm) uniform image2D image_out;
+layout(set = 0, binding = 3, r32ui) uniform uimage3D lightmap_table;
+layout(set = 0, binding = 4, r32ui) uniform uimage1D lightmap_usage;
+layout(set = 0, binding = 5, rgba8_snorm) uniform image2D image_out;
 
 void main() {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
@@ -32,19 +33,26 @@ void main() {
         if (lightmap_level >= 2) {
             total_lightmap_capacity *= 4;
         }
-        if (pixel_coords.x < num_lightmaps * (512 / total_lightmap_capacity)) {
+        /*if (pixel_coords.x < num_lightmaps * (512 / total_lightmap_capacity)) {
             color = vec3(1.0, 0.0, 1.0);
         } else {
             color = vec3(0.2, 0.0, 0.2);
         }
         if (num_lightmaps > 99999) {
             color = vec3(0.0, 0.0, 1.0);
-        }
+        }*/
         // There is no level 3. Draw the total size of all lightmaps instead.
         if (lightmap_level == 3) {
             uint total_size = imageLoad(lightmap_usage, 0).r * 16 + imageLoad(lightmap_usage, 1).r * 4 + imageLoad(lightmap_usage, 2).r;
             if (pixel_coords.x < total_size) {
                 color = vec3(1.0, 0.0, 0.0);
+            }
+        } else {
+            uint lightmap_index = pixel_coords.x / (512 / total_lightmap_capacity);
+            if (imageLoad(lightmap_table, ivec3(lightmap_index, 0, lightmap_level)).r == 1) {
+                color = vec3(1.0);
+            } else {
+                color = vec3(0.2, 0.2, 0.5);
             }
         }
     }
