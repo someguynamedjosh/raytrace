@@ -4,11 +4,21 @@ use std::sync::Arc;
 
 // Unfortunately the shader! macro does not trigger a recompile whenever source code changes.
 fn _watchdog() {
+    let _source = include_bytes!("../shaders/assign_lightmaps.comp");
     let _source = include_bytes!("../shaders/basic_raytrace.comp");
     let _source = include_bytes!("../shaders/finalize.comp");
     let _source = include_bytes!("../shaders/screen.vert");
     let _source = include_bytes!("../shaders/screen.frag");
 }
+
+mod assign_lightmaps {
+    vulkano_shaders::shader! {
+        ty: "compute",
+        path: "shaders/assign_lightmaps.comp"
+    }
+}
+pub use assign_lightmaps::Layout as AssignLightmapsShaderLayout;
+pub use assign_lightmaps::Shader as AssignLightmapsShader;
 
 mod basic_raytrace {
     vulkano_shaders::shader! {
@@ -46,6 +56,10 @@ mod screen_fs {
 }
 pub use screen_vs::Layout as ScreenVertexShaderLayout;
 pub use screen_vs::Shader as ScreenVertexShader;
+
+pub fn load_assign_lightmaps_shader(device: Arc<Device>) -> AssignLightmapsShader {
+    assign_lightmaps::Shader::load(device).unwrap()
+}
 
 pub fn load_basic_raytrace_shader(device: Arc<Device>) -> BasicRaytraceShader {
     basic_raytrace::Shader::load(device).unwrap()

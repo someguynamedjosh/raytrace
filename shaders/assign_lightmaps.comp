@@ -1,0 +1,47 @@
+#version 450
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(set = 0, binding = 0, r32ui) uniform uimage3D lightmap_operations;
+layout(set = 0, binding = 1, r32ui) uniform uimage2D availability_table;
+layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_assignment;
+
+const uint TABLE_SIZE = 1024;
+const uint CUBE_BUFFER_SIZES = 16;
+
+uint reserve_lightmap(uint lod) {
+    uint reserve_site = imageAtomicAdd(availability_table, ivec2(TABLE_SIZE - 2, lod), 1);
+    reserve_site %= TABLE_SIZE - 2;
+    // Doesn't need to be atomic. We already reserved a spot.
+    return imageLoad(availability_table, ivec2(reserve_site, lod)).r;
+}
+
+void dump_lightmap(uint lod, uint index) {
+    uint dump_site = imageAtomicAdd(availability_table, ivec2(TABLE_SIZE - 1, lod), 1);
+    dump_site %= TABLE_SIZE - 2;
+    // Doesn't need to be atomic. We already reserved a spot.
+    imageStore(availability_table, ivec2(dump_site, lod), ivec4(index));
+}
+
+void main() {
+    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+    uint operation = imageLoad(lightmap_operations, pos).r;
+    uint assignment = imageLoad(lightmap_assignment, pos).r;
+    uint assignment_lod = (assignment & 0xF000) >> 12;
+    uint assignment_index = (assignment & 0x0FFF);
+    if (operation == 3) { // If we should dump the lightmap...
+        if (assignment_lod != 3) { // If there is a lightmap we are able to dump...
+            dump_lightmap(assignment_lod, assignment_index);
+            // Mark the region as having no lightmap.
+            imageStore(lightmap_assignment, pos, ivec4(0x3000));
+        }
+    // If the result of the operation will not be redundant...
+    } else if (operation != assignment_lod) {
+        if (assignment_lod != 3) { // If there is an existing lightmap...
+            dump_lightmap(assignment_lod, assignment_index);
+        }
+        uint new_index = reserve_lightmap(operation);
+        // Mark the position as having the lightmap we just reserved.
+        imageStore(lightmap_assignment, pos, ivec4(operation << 12 | new_index));
+    }
+}

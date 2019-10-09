@@ -55,7 +55,7 @@ fn main() {
         (512, 512),
         swapchain.format(),
     );
-    let renderer = Renderer::new(
+    let mut renderer = Renderer::new(
         device.clone(),
         queue.clone(),
         presenter.get_presented_image(),

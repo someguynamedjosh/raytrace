@@ -4,8 +4,8 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba16f) uniform image2D position;
 layout(set = 0, binding = 1, r16ui) uniform uimage2D hit_result;
-layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_requirement;
-layout(set = 0, binding = 3, r32ui) uniform uimage1D total_lightmaps;
+layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_assignment;
+layout(set = 0, binding = 3, r32ui) uniform uimage1D lightmap_usage;
 layout(set = 0, binding = 4, rgba8_snorm) uniform image2D image_out;
 
 void main() {
@@ -14,12 +14,17 @@ void main() {
     if (imageLoad(hit_result, pixel_coords).r != 0) {
         vec4 position = imageLoad(position, pixel_coords).xyzw;
         ivec3 lightmap_position = ivec3(position.xyz) / ivec3(16);
-        color = vec3(imageLoad(lightmap_requirement, lightmap_position).r / 5.0);
         // color = vec3(position.xyz / 256.0);
+        uint assignment = imageLoad(lightmap_assignment, lightmap_position).r;
+        uint lod = (assignment & 0xF000) >> 12;
+        color.b = lod / 4.0;
+        uint index = assignment & 0x0FFF;
+        color.r = (index % 32) / 32.0;
+        color.g = (index / 32) / 16.0;
     }
     if (pixel_coords.y < 16) {
         int lightmap_level = pixel_coords.y / 4;
-        uint num_lightmaps = imageLoad(total_lightmaps, lightmap_level).r;
+        uint num_lightmaps = imageLoad(lightmap_usage, lightmap_level).r;
         uint total_lightmap_capacity = 32;
         if (lightmap_level >= 1) {
             total_lightmap_capacity *= 4;
@@ -37,7 +42,7 @@ void main() {
         }
         // There is no level 3. Draw the total size of all lightmaps instead.
         if (lightmap_level == 3) {
-            uint total_size = imageLoad(total_lightmaps, 0).r * 16 + imageLoad(total_lightmaps, 1).r * 4 + imageLoad(total_lightmaps, 2).r;
+            uint total_size = imageLoad(lightmap_usage, 0).r * 16 + imageLoad(lightmap_usage, 1).r * 4 + imageLoad(lightmap_usage, 2).r;
             if (pixel_coords.x < total_size) {
                 color = vec3(1.0, 0.0, 0.0);
             }
