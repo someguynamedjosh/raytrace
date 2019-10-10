@@ -6,8 +6,10 @@ layout(set = 0, binding = 0, r32ui) uniform uimage3D lightmap_operations;
 layout(set = 0, binding = 1, r32ui) uniform uimage2D availability_table;
 layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_assignment;
 layout(set = 0, binding = 3, r32ui) uniform uimage3D lightmap_table;
+layout(set = 0, binding = 4, r32ui) uniform uimage1D lightmap_update_queue;
 
 const uint TABLE_SIZE = 1024;
+const uint QUEUE_LENGTH = 2048;
 const uint CUBE_BUFFER_SIZES = 16;
 
 uint reserve_lightmap(uint lod, ivec3 region_coords) {
@@ -30,6 +32,11 @@ void dump_lightmap(uint lod, uint index) {
     imageStore(availability_table, ivec2(dump_site, lod), ivec4(index));
 }
 
+void mark_for_update(uint lod, uint index) {
+    uint dump_site = imageAtomicAdd(lightmap_update_queue, int(QUEUE_LENGTH - 1), 1);
+    imageStore(lightmap_update_queue, int(dump_site), ivec4(lod << 12 | index));
+}
+
 void main() {
     ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
     uint operation = imageLoad(lightmap_operations, pos).r;
@@ -42,13 +49,19 @@ void main() {
             // Mark the region as having no lightmap.
             imageStore(lightmap_assignment, pos, ivec4(0x3000));
         }
-    // If the result of the operation will not be redundant...
-    } else if (operation != assignment_lod) {
-        if (assignment_lod != 3) { // If there is an existing lightmap...
-            dump_lightmap(assignment_lod, assignment_index);
+    // If the region requires a lightmap...
+    } else {
+        // If it currently does not have an appropriately sized lightmap...
+        if (operation != assignment_lod) {
+            if (assignment_lod != 3) { // If there is an existing lightmap...
+                dump_lightmap(assignment_lod, assignment_index);
+            }
+            uint new_index = reserve_lightmap(operation, pos);
+            mark_for_update(operation, new_index);
+            // Mark the position as having the lightmap we just reserved.
+            imageStore(lightmap_assignment, pos, ivec4(operation << 12 | new_index));
+        } else { // If an appropriate lightmap is already assigned to the region...
+            mark_for_update(assignment_lod, assignment_index);
         }
-        uint new_index = reserve_lightmap(operation, pos);
-        // Mark the position as having the lightmap we just reserved.
-        imageStore(lightmap_assignment, pos, ivec4(operation << 12 | new_index));
     }
 }

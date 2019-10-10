@@ -1,0 +1,337 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, r16ui) uniform uimage3D world_l0;
+layout(set = 0, binding = 1, r16ui) uniform uimage3D world_l1;
+
+layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_table;
+layout(set = 0, binding = 3, r32ui) uniform uimage1D lightmap_update_queue;
+
+layout(set = 0, binding = 4, r32ui) uniform uimage3D lightmap_atlas_l0;
+layout(set = 0, binding = 5, r32ui) uniform uimage3D lightmap_atlas_l1;
+layout(set = 0, binding = 6, r32ui) uniform uimage3D lightmap_atlas_l2;
+
+const uint WORLD_SIZE = 256;
+const uint L1_STEP = 16;
+const float L1_STEPF = L1_STEP;
+const uint L1_SIZE = WORLD_SIZE / L1_STEP;
+
+const uint MODE_L0 = 0;
+const uint MODE_L1 = 1;
+
+const uint QUEUE_SIZE = 2048;
+const uint LIGHTMAP_SIZE = 16;
+
+const uint LIGHTMAP_ATLAS_WIDTH_L0 = 8;
+const uint LIGHTMAP_ATLAS_WIDTH_L1 = 16;
+const uint LIGHTMAP_ATLAS_WIDTH_L2 = 32;
+
+struct HitResult {
+    uint value;
+    vec3 position;
+    float distance;
+};
+
+#define PERFORM_L0_STEP(AXIS) \
+    l0_pos. AXIS += l0_step. AXIS ; \
+    if (l0_pos. AXIS == l0_exit_planes. AXIS) { break; } \
+    total_step = l0_to_boundary. AXIS ; \
+    result.value = imageLoad(world_l0, l0_pos).r; \
+    if (result.value != 0) { break; } \
+    l0_to_boundary. AXIS += l0_advance_amount. AXIS ;
+
+#define PERFORM_L0_TRACE() \
+        ivec3 l0_exit_planes = ivec3( \
+            l1_pos.x * L1_STEP + (l0_step.x == 1 ? L1_STEP : - 1), \
+            l1_pos.y * L1_STEP + (l0_step.y == 1 ? L1_STEP : - 1), \
+            l1_pos.z * L1_STEP + (l0_step.z == 1 ? L1_STEP : - 1) \
+        ); \
+        vec3 exact_pos = origin + direction * (total_step + 0.01); \
+        l0_pos = ivec3( \
+            floor(exact_pos.x), \
+            floor(exact_pos.y), \
+            floor(exact_pos.z) \
+        ); \
+        \
+        vec3 l0_to_boundary = vec3(0); \
+        if (l0_step.x == 1) { \
+            l0_to_boundary.x =  \
+                (1.0 - mod(exact_pos.x, 1.0))  \
+                * l0_advance_amount.x; \
+        } else { \
+            l0_to_boundary.x =  \
+                mod(exact_pos.x, 1.0) * l0_advance_amount.x; \
+        } \
+        if (l0_step.y == 1) { \
+            l0_to_boundary.y =  \
+                (1.0 - mod(exact_pos.y, 1.0))  \
+                * l0_advance_amount.y; \
+        } else { \
+            l0_to_boundary.y =  \
+                mod(exact_pos.y, 1.0) * l0_advance_amount.y; \
+        } \
+        if (l0_step.z == 1) { \
+            l0_to_boundary.z =  \
+                (1.0 - mod(exact_pos.z, 1.0))  \
+                * l0_advance_amount.z; \
+        } else { \
+            l0_to_boundary.z =  \
+                mod(exact_pos.z, 1.0) * l0_advance_amount.z; \
+        } \
+        l0_to_boundary += vec3(total_step); \
+        \
+        result.value = imageLoad(world_l0, l0_pos).r; \
+        if (result.value == 0) { while (true) { \
+            if (l0_to_boundary.x < l0_to_boundary.y) { \
+                if (l0_to_boundary.x < l0_to_boundary.z) { \
+                    PERFORM_L0_STEP(x); \
+                } else { \
+                    PERFORM_L0_STEP(z); \
+                } \
+            } else { \
+                if (l0_to_boundary.y < l0_to_boundary.z) { \
+                    PERFORM_L0_STEP(y); \
+                } else { \
+                    PERFORM_L0_STEP(z); \
+                } \
+            } \
+        } }
+
+#define PERFORM_L1_STEP(AXIS) \
+    l1_pos. AXIS += l0_step. AXIS ; \
+    total_step = l1_to_boundary. AXIS ; \
+    if (l1_pos. AXIS > L1_SIZE || l1_pos. AXIS < 0) { break; } \
+    result.value = imageLoad(world_l1, l1_pos).r; \
+    if (result.value != 0) { \
+        PERFORM_L0_TRACE(); \
+        if (result.value != 0) { break; } \
+    } \
+    l1_to_boundary. AXIS += l1_advance_amount. AXIS ;
+
+HitResult trace_ray(vec3 origin, vec3 direction) {
+    ivec3 l0_pos = ivec3(0);
+    ivec3 l1_pos = ivec3(
+        floor(origin.x),
+        floor(origin.y),
+        floor(origin.z)
+    ) / ivec3(L1_STEP);
+    ivec3 l0_step = ivec3(
+        direction.x < 0 ? -1 : 1,
+        direction.y < 0 ? -1 : 1,
+        direction.z < 0 ? -1 : 1
+    );
+    ivec3 l1_step = l0_step * ivec3(L1_STEP);
+
+    // How much we need to move along the vector to advance the current voxel
+    // coordinate by *exactly* 1.0 in the x, y, and z directions. 
+    vec3 l0_advance_amount = abs(vec3(
+        1.0 / (direction.x + 1e-8),
+        1.0 / (direction.y + 1e-8),
+        1.0 / (direction.z + 1e-8)
+    ));
+    // How much we need to move along the vector to advance the current voxel
+    // coordinate by *exactly* L1_STEPF in the x, y, and z directions. 
+    vec3 l1_advance_amount = l0_advance_amount * vec3(L1_STEPF);
+    // How much we need to move along the vector to reach the next voxel in the
+    // x, y, and z directions. In this case, since it is l1, 'voxel' refers to
+    // an 8x8x8 segment.
+
+    vec3 l1_to_boundary = vec3(0);
+    if (l0_step.x == 1) {
+        l1_to_boundary.x = (L1_STEPF - mod(origin.x, L1_STEPF)) * l0_advance_amount.x;
+    } else {
+        l1_to_boundary.x = mod(origin.x, L1_STEPF) * l0_advance_amount.x;
+    }
+    if (l0_step.y == 1) {
+        l1_to_boundary.y = (L1_STEPF - mod(origin.y, L1_STEPF)) * l0_advance_amount.y;
+    } else {
+        l1_to_boundary.y = mod(origin.y, L1_STEPF) * l0_advance_amount.y;
+    }
+    if (l0_step.z == 1) {
+        l1_to_boundary.z = (L1_STEPF - mod(origin.z, L1_STEPF)) * l0_advance_amount.z;
+    } else {
+        l1_to_boundary.z = mod(origin.z, L1_STEPF) * l0_advance_amount.z;
+    }
+
+    HitResult result;
+    float total_step = 0.0;
+    uint mode = MODE_L0;
+    result.value = imageLoad(world_l1, l1_pos).r;
+    if (result.value != 0) {
+        PERFORM_L0_TRACE();
+    }
+    if (result.value == 0) { while (true) {
+        if (l1_to_boundary.x < l1_to_boundary.y) {
+            if (l1_to_boundary.x < l1_to_boundary.z) {
+                PERFORM_L1_STEP(x);
+            } else {
+                PERFORM_L1_STEP(z);
+            }
+        } else {
+            if (l1_to_boundary.y < l1_to_boundary.z) {
+                PERFORM_L1_STEP(y);
+            } else {
+                PERFORM_L1_STEP(z);
+            }
+        }
+    } }
+    result.distance = total_step;
+    result.position = origin + direction * result.distance;
+    // Grow the resulting coordinate a bit to be *outside* the cube it hit.
+    // A coordinate at the very edge of the cube (say, 0.0) will be grown by
+    // 0.01, yielding -0.01 as the coordinate. All other coordinates are grown
+    // proportionately, with a coordinate at the center of a cube not being
+    // gorwn at all.
+    result.position += ((result.position - vec3(l0_pos)) - 0.5) * 0.05;
+    return result;
+}
+
+#define INSTANTIATE_LOD(FUNCTION_MACRO) \
+FUNCTION_MACRO(0) \
+FUNCTION_MACRO(1) \
+FUNCTION_MACRO(2)
+
+#define INSTANTIATE_AXIS_LOD(FUNCTION_MACRO) \
+FUNCTION_MACRO(x, 0) FUNCTION_MACRO(y, 0) FUNCTION_MACRO(z, 0) \
+FUNCTION_MACRO(x, 1) FUNCTION_MACRO(y, 1) FUNCTION_MACRO(z, 1) \
+FUNCTION_MACRO(x, 2) FUNCTION_MACRO(y, 2) FUNCTION_MACRO(z, 2) 
+
+#define LOD_0_RES 8
+#define LOD_1_RES 4
+#define LOD_2_RES 2
+
+// For layers along X: world y -> map x, world z -> map y, world x -> map layer
+// For layers along Y: world x -> map x, world z -> map y, world y -> map layer
+// For layers along Z: world x -> map x, world y -> map y, world z -> map layer
+#define x_ATLAS_X_AXIS_WORLD_AXIS y
+#define x_ATLAS_Y_AXIS_WORLD_AXIS z
+#define y_ATLAS_X_AXIS_WORLD_AXIS x
+#define y_ATLAS_Y_AXIS_WORLD_AXIS z
+#define z_ATLAS_X_AXIS_WORLD_AXIS x
+#define z_ATLAS_Y_AXIS_WORLD_AXIS y
+#define x_ATLAS_SQUARE_POS_TO_WORLD_POS(ATLAS_SQUARE_POS) \
+    (mod((ATLAS_SQUARE_POS.zxy), LIGHTMAP_SIZE))
+#define y_ATLAS_SQUARE_POS_TO_WORLD_POS(ATLAS_SQUARE_POS) \
+    (mod((ATLAS_SQUARE_POS.xzy), LIGHTMAP_SIZE))
+#define z_ATLAS_SQUARE_POS_TO_WORLD_POS(ATLAS_SQUARE_POS) \
+    (mod((ATLAS_SQUARE_POS.xyz), LIGHTMAP_SIZE))
+
+#define LIGHTMAP_PIXEL_FUNC(LOD) \
+void update_lod_##LOD##_lightmap_pixel(ivec3 atlas_pos, vec3 world_pos) { \
+    HitResult result = trace_ray(world_pos, normalize(vec3(0.5, 0.5, 0.5))); \
+    imageStore(lightmap_atlas_l##LOD , atlas_pos, ivec4( \
+        result.value > 0 ? 0xFFFF : 0x0000 \
+    )); \
+}
+INSTANTIATE_LOD(LIGHTMAP_PIXEL_FUNC)
+
+#define LIGHTMAP_SQUARE_FUNC_CONSTANTS(LOD) \
+const float LOD_##LOD##_WORLD_STEP = 1.0 / LOD_##LOD##_RES;
+INSTANTIATE_LOD(LIGHTMAP_SQUARE_FUNC_CONSTANTS)
+
+#define LIGHTMAP_SQUARE_FUNC(AXIS, LOD) \
+void update_lod_##LOD##_axis_##AXIS##_lightmap_square( \
+    ivec3 atlas_square_pos, ivec3 world_region \
+) { \
+    ivec3 atlas_pos = atlas_square_pos * ivec3(LOD_##LOD##_RES, LOD_##LOD##_RES, 1); \
+    vec3 world_pos = vec3( \
+        world_region * LIGHTMAP_SIZE + AXIS##_ATLAS_SQUARE_POS_TO_WORLD_POS(atlas_square_pos) \
+    ); \
+    for (uint axis_b = 0; axis_b < LOD_##LOD##_RES; axis_b++) { \
+        atlas_pos.x += 1; \
+        world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += LOD_##LOD##_WORLD_STEP; \
+        for (uint axis_c = 0; axis_c < LOD_##LOD##_RES; axis_c++) { \
+            update_lod_##LOD##_lightmap_pixel(atlas_pos, world_pos); \
+            atlas_pos.y += 1; \
+            world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS += LOD_##LOD##_WORLD_STEP; \
+        } \
+        atlas_pos.y -= LOD_##LOD##_RES; \
+        world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS -= 1.0; \
+    } \
+}
+INSTANTIATE_AXIS_LOD(LIGHTMAP_SQUARE_FUNC)
+
+#define LIGHTMAP_LAYER_FUNC(AXIS, LOD) \
+void update_lod_##LOD##_axis_##AXIS##_lightmap_layer(ivec3 atlas_layer_pos, ivec3 world_region) { \
+    ivec3 atlas_square_pos = atlas_layer_pos * ivec3(LIGHTMAP_SIZE, LIGHTMAP_SIZE, 1); \
+    ivec3 lower_world_pos = world_region * int(LIGHTMAP_SIZE); \
+    ivec3 upper_world_pos = lower_world_pos; \
+    upper_world_pos.AXIS += 1; \
+    for (uint axis_b = 0; axis_b < LIGHTMAP_SIZE; axis_b++) { \
+        atlas_square_pos.x += 1; \
+        lower_world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += 1; \
+        upper_world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += 1; \
+        for (uint axis_c = 0; axis_c < LIGHTMAP_SIZE; axis_c++) { \
+            bool upper_voxel = imageLoad(world_l0, upper_world_pos).r > 0; \
+            bool lower_voxel = imageLoad(world_l0, lower_world_pos).r > 0; \
+            if (upper_voxel && !lower_voxel) { /* Lower face. */ \
+                update_lod_##LOD##_axis_##AXIS##_lightmap_square(atlas_square_pos, world_region); \
+            } else if (lower_voxel && !upper_voxel) { /* Upper face. */ \
+                update_lod_##LOD##_axis_##AXIS##_lightmap_square(atlas_square_pos, world_region); \
+            } \
+            atlas_square_pos.y += 1; \
+            lower_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS += 1; \
+            upper_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS += 1; \
+        } \
+        lower_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS -= int(LIGHTMAP_SIZE); \
+        upper_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS -= int(LIGHTMAP_SIZE); \
+        atlas_square_pos.y -= int(LIGHTMAP_SIZE); \
+    } \
+}
+INSTANTIATE_AXIS_LOD(LIGHTMAP_LAYER_FUNC)
+
+#define LIGHTMAP_FUNC(LOD) \
+void update_lod_##LOD##_lightmap(ivec2 atlas_lightmap_pos, ivec3 world_region) { \
+    for (uint layer = 0; layer < LIGHTMAP_SIZE; layer++) { \
+        update_lod_##LOD##_axis_x_lightmap_layer(ivec3(atlas_lightmap_pos, layer), world_region); \
+    } \
+    for (uint layer = 0; layer < LIGHTMAP_SIZE; layer++) { \
+        update_lod_##LOD##_axis_y_lightmap_layer( \
+            ivec3(atlas_lightmap_pos, layer + LIGHTMAP_SIZE),  \
+            world_region \
+        ); \
+    } \
+    for (uint layer = 0; layer < LIGHTMAP_SIZE; layer++) { \
+        update_lod_##LOD##_axis_z_lightmap_layer( \
+            ivec3(atlas_lightmap_pos, layer + LIGHTMAP_SIZE * 2),  \
+            world_region \
+        ); \
+    } \
+}
+INSTANTIATE_LOD(LIGHTMAP_FUNC)
+
+void main() {
+    uint queue_index = gl_GlobalInvocationID.x;
+    if (imageLoad(lightmap_update_queue, int(QUEUE_SIZE - 1)).r <= queue_index) {
+        // The shader was dispatched to update an entry in the queue that is outside the queue.
+        // Therefore, the item in the queue does not contain a valid lightmap ID.
+        return;
+    }
+    uint lightmap_id = imageLoad(lightmap_update_queue, int(queue_index)).r;
+    uint lightmap_lod = (lightmap_id & 0xF000) >> 12;
+    uint lightmap_index = lightmap_id & 0x0FFF;
+    ivec3 world_region;
+    world_region.x = int(imageLoad(lightmap_table, ivec3(lightmap_index, 1, lightmap_lod)).r);
+    world_region.y = int(imageLoad(lightmap_table, ivec3(lightmap_index, 2, lightmap_lod)).r);
+    world_region.z = int(imageLoad(lightmap_table, ivec3(lightmap_index, 3, lightmap_lod)).r);
+    if (lightmap_lod == 0) {
+        ivec2 atlas_lightmap_pos = ivec2(
+            lightmap_index % LIGHTMAP_ATLAS_WIDTH_L0, 
+            lightmap_index / LIGHTMAP_ATLAS_WIDTH_L0
+        );
+        update_lod_0_lightmap(atlas_lightmap_pos, world_region);
+    } else if (lightmap_lod == 1) {
+        ivec2 atlas_lightmap_pos = ivec2(
+            lightmap_index % LIGHTMAP_ATLAS_WIDTH_L1, 
+            lightmap_index / LIGHTMAP_ATLAS_WIDTH_L1
+        );
+        update_lod_1_lightmap(atlas_lightmap_pos, world_region);
+    } else if (lightmap_lod == 2) {
+        ivec2 atlas_lightmap_pos = ivec2(
+            lightmap_index % LIGHTMAP_ATLAS_WIDTH_L2, 
+            lightmap_index / LIGHTMAP_ATLAS_WIDTH_L2
+        );
+        update_lod_2_lightmap(atlas_lightmap_pos, world_region);
+    }
+}

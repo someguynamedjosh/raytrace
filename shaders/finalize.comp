@@ -8,6 +8,9 @@ layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_assignment;
 layout(set = 0, binding = 3, r32ui) uniform uimage3D lightmap_table;
 layout(set = 0, binding = 4, r32ui) uniform uimage1D lightmap_usage;
 layout(set = 0, binding = 5, rgba8_snorm) uniform image2D image_out;
+layout(set = 0, binding = 6, r32ui) uniform uimage3D lightmap_atlas_l0;
+layout(set = 0, binding = 7, r32ui) uniform uimage3D lightmap_atlas_l1;
+layout(set = 0, binding = 8, r32ui) uniform uimage3D lightmap_atlas_l2;
 
 void main() {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
@@ -54,6 +57,14 @@ void main() {
             } else {
                 color = vec3(0.2, 0.2, 0.5);
             }
+        }
+    }
+    if (pixel_coords.x < 256 && pixel_coords.y < 256) {
+        ivec3 lightmap_pos = ivec3(pixel_coords.xy * 4, 3);
+        if (imageLoad(lightmap_atlas_l2, lightmap_pos).r > 0) {
+            color = vec3(1);
+        } else {
+            color = vec3(0);
         }
     }
     imageStore(image_out, ivec2(gl_GlobalInvocationID.xy), vec4(color, 1.0));

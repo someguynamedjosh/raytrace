@@ -9,6 +9,7 @@ fn _watchdog() {
     let _source = include_bytes!("../shaders/finalize.comp");
     let _source = include_bytes!("../shaders/screen.vert");
     let _source = include_bytes!("../shaders/screen.frag");
+    let _source = include_bytes!("../shaders/update_lightmaps.comp");
 }
 
 mod assign_lightmaps {
@@ -57,6 +58,15 @@ mod screen_fs {
 pub use screen_vs::Layout as ScreenVertexShaderLayout;
 pub use screen_vs::Shader as ScreenVertexShader;
 
+mod update_lightmaps {
+    vulkano_shaders::shader! {
+        ty: "compute",
+        path: "shaders/update_lightmaps.comp"
+    }
+}
+pub use update_lightmaps::Layout as UpdateLightmapsShaderLayout;
+pub use update_lightmaps::Shader as UpdateLightmapsShader;
+
 pub fn load_assign_lightmaps_shader(device: Arc<Device>) -> AssignLightmapsShader {
     assign_lightmaps::Shader::load(device).unwrap()
 }
@@ -75,4 +85,8 @@ pub fn load_screen_vertex_shader(device: Arc<Device>) -> ScreenVertexShader {
 
 pub fn load_screen_fragment_shader(device: Arc<Device>) -> ScreenFragmentShader {
     screen_fs::Shader::load(device).unwrap()
+}
+
+pub fn load_update_lightmaps_shader(device: Arc<Device>) -> UpdateLightmapsShader {
+    update_lightmaps::Shader::load(device).unwrap()
 }
