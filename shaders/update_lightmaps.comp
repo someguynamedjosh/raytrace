@@ -217,12 +217,18 @@ FUNCTION_MACRO(x, 2) FUNCTION_MACRO(y, 2) FUNCTION_MACRO(z, 2)
 #define z_ATLAS_SQUARE_POS_TO_WORLD_POS(ATLAS_SQUARE_POS) \
     (mod((ATLAS_SQUARE_POS.xyz), LIGHTMAP_SIZE))
 
+    // HitResult result = trace_ray(world_pos, normalize(vec3(-0.5, -0.5, 0.5)));
+    // imageStore(lightmap_atlas_l##LOD , atlas_pos, ivec4(
+        // result.value > 0 ? 0xFFFF : 0x0000
+    // ));
+
 #define LIGHTMAP_PIXEL_FUNC(LOD) \
 void update_lod_##LOD##_lightmap_pixel(ivec3 atlas_pos, vec3 world_pos) { \
-    HitResult result = trace_ray(world_pos, normalize(vec3(0.5, 0.5, 0.5))); \
-    imageStore(lightmap_atlas_l##LOD , atlas_pos, ivec4( \
-        result.value > 0 ? 0xFFFF : 0x0000 \
-    )); \
+    if (world_pos.z < 16) { \
+        imageStore(lightmap_atlas_l##LOD , atlas_pos, ivec4(0xFFFF)); \
+    } else { \
+        imageStore(lightmap_atlas_l##LOD , atlas_pos, ivec4(0x0000)); \
+    } \
 }
 INSTANTIATE_LOD(LIGHTMAP_PIXEL_FUNC)
 
@@ -232,12 +238,12 @@ INSTANTIATE_LOD(LIGHTMAP_SQUARE_FUNC_CONSTANTS)
 
 #define LIGHTMAP_SQUARE_FUNC(AXIS, LOD) \
 void update_lod_##LOD##_axis_##AXIS##_lightmap_square( \
-    ivec3 atlas_square_pos, ivec3 world_region \
+    ivec3 atlas_square_pos, ivec3 world_region, vec3 world_pos_offset \
 ) { \
     ivec3 atlas_pos = atlas_square_pos * ivec3(LOD_##LOD##_RES, LOD_##LOD##_RES, 1); \
     vec3 world_pos = vec3( \
         world_region * LIGHTMAP_SIZE + AXIS##_ATLAS_SQUARE_POS_TO_WORLD_POS(atlas_square_pos) \
-    ); \
+    ) + world_pos_offset; \
     for (uint axis_b = 0; axis_b < LOD_##LOD##_RES; axis_b++) { \
         atlas_pos.x += 1; \
         world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += LOD_##LOD##_WORLD_STEP; \
@@ -258,6 +264,9 @@ void update_lod_##LOD##_axis_##AXIS##_lightmap_layer(ivec3 atlas_layer_pos, ivec
     ivec3 lower_world_pos = world_region * int(LIGHTMAP_SIZE); \
     ivec3 upper_world_pos = lower_world_pos; \
     upper_world_pos.AXIS += 1; \
+    vec3 lower_offset = vec3(0.0), upper_offset = vec3(0.0); \
+    lower_offset.AXIS = -0.01; \
+    upper_offset.AXIS = 0.01; \
     for (uint axis_b = 0; axis_b < LIGHTMAP_SIZE; axis_b++) { \
         atlas_square_pos.x += 1; \
         lower_world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += 1; \
@@ -266,9 +275,9 @@ void update_lod_##LOD##_axis_##AXIS##_lightmap_layer(ivec3 atlas_layer_pos, ivec
             bool upper_voxel = imageLoad(world_l0, upper_world_pos).r > 0; \
             bool lower_voxel = imageLoad(world_l0, lower_world_pos).r > 0; \
             if (upper_voxel && !lower_voxel) { /* Lower face. */ \
-                update_lod_##LOD##_axis_##AXIS##_lightmap_square(atlas_square_pos, world_region); \
+                update_lod_##LOD##_axis_##AXIS##_lightmap_square(atlas_square_pos, world_region, lower_offset); \
             } else if (lower_voxel && !upper_voxel) { /* Upper face. */ \
-                update_lod_##LOD##_axis_##AXIS##_lightmap_square(atlas_square_pos, world_region); \
+                update_lod_##LOD##_axis_##AXIS##_lightmap_square(atlas_square_pos, world_region, upper_offset); \
             } \
             atlas_square_pos.y += 1; \
             lower_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS += 1; \

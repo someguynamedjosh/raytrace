@@ -2,7 +2,7 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba16f) uniform image2D position;
+layout(set = 0, binding = 0, rgba16ui) uniform uimage2D position;
 layout(set = 0, binding = 1, r16ui) uniform uimage2D hit_result;
 layout(set = 0, binding = 2, r32ui) uniform uimage3D lightmap_assignment;
 layout(set = 0, binding = 3, r32ui) uniform uimage3D lightmap_table;
@@ -12,19 +12,75 @@ layout(set = 0, binding = 6, r32ui) uniform uimage3D lightmap_atlas_l0;
 layout(set = 0, binding = 7, r32ui) uniform uimage3D lightmap_atlas_l1;
 layout(set = 0, binding = 8, r32ui) uniform uimage3D lightmap_atlas_l2;
 
+const uint LIGHTMAP_SIZE = 16;
+const uint LIGHTMAP_RES_L0 = 8;
+const uint LIGHTMAP_RES_L1 = 4;
+const uint LIGHTMAP_RES_L2 = 2;
+const uint LIGHTMAP_ATLAS_WIDTH_L0 = 8;
+const uint LIGHTMAP_ATLAS_WIDTH_L1 = 16;
+const uint LIGHTMAP_ATLAS_WIDTH_L2 = 32;
+const uint POSITION_PRECISION = 64; 
+const float POSITION_PRECISION_F = 64.0; 
+
+const float TINY = 0.1e-2;
+
 void main() {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
     vec3 color = vec3(0.3569, 0.5529, 0.7137);
-    if (imageLoad(hit_result, pixel_coords).r != 0) {
-        vec4 position = imageLoad(position, pixel_coords).xyzw;
-        ivec3 lightmap_position = ivec3(position.xyz) / ivec3(16);
-        // color = vec3(position.xyz / 256.0);
+    uint hit_result = imageLoad(hit_result, pixel_coords).r;
+    uint voxel_type = hit_result & 0x0FFF;
+    uint face_normal = (hit_result & 0xF000) >> 12;
+    if (hit_result != 0) {
+        uvec4 position = imageLoad(position, pixel_coords).xyzw;
+        color = position.xyz / POSITION_PRECISION_F / 256.0;
+
+        ivec3 lightmap_position = ivec3(position.xyz) / ivec3(POSITION_PRECISION * 16);
         uint assignment = imageLoad(lightmap_assignment, lightmap_position).r;
         uint lod = (assignment & 0xF000) >> 12;
-        color.b = lod / 4.0;
+        uint tile_resolution = lod == 0 ? LIGHTMAP_RES_L0 : (lod == 1 ? LIGHTMAP_RES_L1 : LIGHTMAP_RES_L2);
+        uvec3 lightmap_pixel;
+
         uint index = assignment & 0x0FFF;
-        color.r = (index % 32) / 32.0;
-        color.g = (index / 32) / 16.0;
+        uint atlas_width = lod == 0 ? LIGHTMAP_ATLAS_WIDTH_L0 : (lod == 1 ? LIGHTMAP_ATLAS_WIDTH_L1 : LIGHTMAP_ATLAS_WIDTH_L2);
+        uvec2 square_offset = uvec2(index % atlas_width, index / atlas_width) * tile_resolution;
+
+        if ((face_normal & 0xE) == 0) { // Face is facing the X axis.
+            // color = vec3(1, 0, 0);
+            lightmap_pixel.xy = 
+                position.yz 
+                % (LIGHTMAP_SIZE * POSITION_PRECISION) 
+                / (POSITION_PRECISION / tile_resolution);
+            lightmap_pixel.z = (position.x / POSITION_PRECISION) % LIGHTMAP_SIZE;
+        } else if ((face_normal & 0xE) == 2) { // Face is facing the Y axis.
+            // color = vec3(0, 1, 0);
+            lightmap_pixel.xy = 
+                position.xz
+                % (LIGHTMAP_SIZE * POSITION_PRECISION) 
+                / (POSITION_PRECISION / tile_resolution);
+            lightmap_pixel.z = (position.y / POSITION_PRECISION) % LIGHTMAP_SIZE + LIGHTMAP_SIZE;
+        } else if ((face_normal & 0xE) == 4) { // Face is facing the Z axis.
+            // color = vec3(0, 0, 1);
+            lightmap_pixel.xy = 
+                position.xy
+                % (LIGHTMAP_SIZE * POSITION_PRECISION) 
+                / (POSITION_PRECISION / tile_resolution);
+            lightmap_pixel.z = (position.z / POSITION_PRECISION) % LIGHTMAP_SIZE + LIGHTMAP_SIZE * 2;
+        }
+
+        lightmap_pixel.xy += square_offset;
+
+        uint lightmap_contents;
+        if (lod == 0) {
+            lightmap_contents = imageLoad(lightmap_atlas_l0, ivec3(lightmap_pixel)).r;
+        } else if (lod == 1) {
+            lightmap_contents = imageLoad(lightmap_atlas_l1, ivec3(lightmap_pixel)).r;
+        } else if (lod == 2) {
+            lightmap_contents = imageLoad(lightmap_atlas_l2, ivec3(lightmap_pixel)).r;
+        }
+
+        if (lightmap_contents > 0) {
+            color *= 0.5f;
+        }
     }
     if (pixel_coords.y < 16) {
         int lightmap_level = pixel_coords.y / 4;
@@ -59,7 +115,7 @@ void main() {
             }
         }
     }
-    if (pixel_coords.x < 256 && pixel_coords.y < 256) {
+    if (pixel_coords.x < 256 && pixel_coords.y < 256 && false) {
         ivec3 lightmap_pos = ivec3(pixel_coords.xy * 4, 3);
         if (imageLoad(lightmap_atlas_l2, lightmap_pos).r > 0) {
             color = vec3(1);

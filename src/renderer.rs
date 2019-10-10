@@ -254,7 +254,7 @@ impl RenderBuilder {
         let position_buffer = StorageImage::new(
             self.device.clone(),
             self.target_image.dimensions(),
-            Format::R16G16B16A16Sfloat,
+            Format::R16G16B16A16Uint,
             Some(self.queue.family()),
         )
         .unwrap();

@@ -4,7 +4,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, r16ui) uniform uimage3D l1;
 layout(set = 0, binding = 1, r16ui) uniform uimage3D l2;
-layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D position_out;
+layout(set = 0, binding = 2, rgba16ui) uniform writeonly uimage2D position_out;
 layout(set = 0, binding = 3, r16ui) uniform writeonly uimage2D hit_result_out;
 layout(set = 0, binding = 4, r32ui) uniform uimage3D lightmap_requirement_out;
 layout(set = 0, binding = 5, r32ui) uniform uimage1D total_required_lightmaps;
@@ -21,10 +21,16 @@ const uint L2_SIZE = WORLD_SIZE / L2_STEP;
 const uint MODE_L1 = 0;
 const uint MODE_L2 = 1;
 
+const uint NORMAL_x = 0;
+const uint NORMAL_y = 2;
+const uint NORMAL_z = 4;
+const uint POSITION_PRECISION = 64; // How much to scale hit result position by.
+
 struct HitResult {
     uint value;
     vec3 position;
     float distance;
+    uint normal;
 };
 
 #define PERFORM_L1_STEP(AXIS) \
@@ -32,10 +38,13 @@ struct HitResult {
     if (l1_pos. AXIS == l1_exit_planes. AXIS) { break; } \
     total_step = l1_to_boundary. AXIS ; \
     result.value = imageLoad(l1, l1_pos).r; \
-    if (result.value != 0) { break; } \
+    if (result.value != 0) { \
+        result.normal = NORMAL_##AXIS + (l1_step.AXIS) / 2; \
+        break; \
+    } \
     l1_to_boundary. AXIS += l1_advance_amount. AXIS ;
 
-#define PERFORM_L1_TRACE() \
+#define PERFORM_L1_TRACE(AXIS) \
         ivec3 l1_exit_planes = ivec3( \
             l2_pos.x * L2_STEP + (l1_step.x == 1 ? L2_STEP : - 1), \
             l2_pos.y * L2_STEP + (l1_step.y == 1 ? L2_STEP : - 1), \
@@ -90,15 +99,16 @@ struct HitResult {
                     PERFORM_L1_STEP(z); \
                 } \
             } \
-        } }
+        } } else { \
+            result.normal = NORMAL_##AXIS + (l1_step.AXIS) / 2; \
+        }
 
 #define PERFORM_L2_STEP(AXIS) \
     l2_pos. AXIS += l1_step. AXIS ; \
-    total_step = l2_to_boundary. AXIS ; \
     if (l2_pos. AXIS > L2_SIZE || l2_pos. AXIS < 0) { break; } \
     result.value = imageLoad(l2, l2_pos).r; \
     if (result.value != 0) { \
-        PERFORM_L1_TRACE(); \
+        PERFORM_L1_TRACE(AXIS); \
         if (result.value != 0) { break; } \
     } \
     l2_to_boundary. AXIS += l2_advance_amount. AXIS ;
@@ -153,7 +163,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     uint mode = MODE_L1;
     result.value = imageLoad(l2, l2_pos).r;
     if (result.value != 0) {
-        PERFORM_L1_TRACE();
+        PERFORM_L1_TRACE(x);
     }
     if (result.value == 0) { while (true) {
         if (l2_to_boundary.x < l2_to_boundary.y) {
@@ -172,18 +182,12 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     } }
     result.distance = total_step;
     result.position = origin + direction * result.distance;
-    // Shrink the resulting coordinate a bit to be *inside* the cube it hit.
-    // A coordinate at the very edge of the cube (say, 0.0) will be shrunk by
-    // 0.01, yielding 0.01 as the coordinate. All other coordinates are shrunk
-    // proportionately, with a coordinate at the center of a cube not being
-    // shrunk at all.
-    result.position += ((result.position - vec3(l1_pos)) - 0.5) * -0.05;
     if (result.value != 0) {
         uint lightmap_level = 0;
-        if (result.distance > 50) {
+        if (result.distance > /*5*/0) {
             lightmap_level++;
         }
-        if (result.distance > 100) {
+        if (result.distance > /*10*/0) {
             lightmap_level++;
         }
         uint old_value = imageAtomicMin(lightmap_requirement_out, l2_pos, lightmap_level);
@@ -208,6 +212,14 @@ void main() {
 
     HitResult result = trace_ray(camera_vectors.origin, ray_direction);
 
-    imageStore(position_out, ivec2(gl_GlobalInvocationID.xy), vec4(result.position, result.distance));
-    imageStore(hit_result_out, ivec2(gl_GlobalInvocationID.xy), ivec4(result.value));
+    imageStore(
+        position_out, 
+        ivec2(gl_GlobalInvocationID.xy), 
+        ivec4(result.position * POSITION_PRECISION, result.distance * POSITION_PRECISION)
+    );
+    imageStore(
+        hit_result_out, 
+        ivec2(gl_GlobalInvocationID.xy), 
+        ivec4(result.value | result.normal << 12)
+    );
 }
