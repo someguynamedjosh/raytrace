@@ -26,6 +26,7 @@ uint reserve_lightmap(uint lod, ivec3 region_coords) {
 
 void dump_lightmap(uint lod, uint index) {
     imageStore(lightmap_table, ivec3(index, 0, lod), ivec4(0));
+    imageStore(lightmap_table, ivec3(index, 4, lod), ivec4(0));
     uint dump_site = imageAtomicAdd(availability_table, ivec2(TABLE_SIZE - 1, lod), 1);
     dump_site %= TABLE_SIZE - 2;
     // Doesn't need to be atomic. We already reserved a spot.
@@ -34,7 +35,11 @@ void dump_lightmap(uint lod, uint index) {
 
 void mark_for_update(uint lod, uint index) {
     uint dump_site = imageAtomicAdd(lightmap_update_queue, int(QUEUE_LENGTH - 1), 1);
-    imageStore(lightmap_update_queue, int(dump_site), ivec4(lod << 12 | index));
+    uint num_samples = imageLoad(lightmap_table, ivec3(index, 4, lod)).r;
+    if (num_samples < 16) {
+        imageStore(lightmap_update_queue, int(dump_site), ivec4(lod << 12 | index));
+        imageStore(lightmap_table, ivec3(index, 4, lod), uvec4(num_samples + 1));
+    }
 }
 
 void main() {

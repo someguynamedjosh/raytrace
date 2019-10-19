@@ -78,10 +78,7 @@ void main() {
             lightmap_contents = imageLoad(lightmap_atlas_l2, ivec3(pixel_position)).r;
         }
 
-        if (lightmap_contents > 0) {
-            color *= 0.5;
-        }
-        // color = (pixel_position % uvec3(4)) / vec3(4.0);
+        color *= (16 - lightmap_contents) / 32.0 + 0.5;
     }
     if (pixel_coords.y < 16) {
         int lightmap_level = pixel_coords.y / 4;

@@ -257,9 +257,8 @@ void update_lod_##LOD##_lightmap_pixel(uvec3 atlas_pos, vec3 world_pos) { \
     vec3 sun_direction = normalize(vec3(0.5 + 0.1 * random(pixel_seed), 0.3 + 0.1 * random(pixel_seed + 1), 0.3)); \
     HitResult result = trace_ray(world_pos, sun_direction); \
     if (result.value > 0) { \
-        imageStore(lightmap_atlas_l##LOD, ivec3(atlas_pos), ivec4(0xFFFF)); \
-    } else { \
-        imageStore(lightmap_atlas_l##LOD, ivec3(atlas_pos), ivec4(0x0000)); \
+        uint old_value = imageLoad(lightmap_atlas_l##LOD, ivec3(atlas_pos)).r; \
+        imageStore(lightmap_atlas_l##LOD, ivec3(atlas_pos), uvec4(old_value + 1)); \
     } \
     pixel_seed++; \
 }
