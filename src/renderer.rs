@@ -135,20 +135,45 @@ impl RenderBuilder {
         for z in 0..WORLD_SIZE {
             for y in 0..WORLD_SIZE {
                 for x in 0..WORLD_SIZE {
-                    let offset = if x % 15 > 10 && y % 15 > 10 { 30 } else { 0 };
                     let (l2x, l2y, l2z) = (x / L2_STEP, y / L2_STEP, z / L2_STEP);
                     let l2_index = ((l2z * L2_SIZE) + l2y) * L2_SIZE + l2x;
-                    if z < (x + y + offset) / 4 {
+                    if z < 16 {
                         target[index] = 10;
                         l2[l2_index] = 10;
                     }
-                    if x == 0 && y == 10 {
-                        target[index] = 10;
-                        l2[l2_index] = 10;
-                    }
-                    if y == 0 && x == 30 {
-                        target[index] = 10;
-                        l2[l2_index] = 10;
+                    if x >= 128 && y < 128 {
+                        if x % 32 < 6 && y % 32 < 6 {
+                            let height = (x / 32 + y / 32) * 4 + 20;
+                            if z < height {
+                                target[index] = 10;
+                                l2[l2_index] = 10;
+                            }
+                        } else if x % 32 < 7 && y % 32 < 7 && z % 2 == 0 {
+                            let height = (x / 32 + y / 32) * 4 + 20;
+                            if z < height {
+                                target[index] = 10;
+                                l2[l2_index] = 10;
+                            }
+                        }
+                    } else if y < 128 {
+                        if x % 32 < 16 && y % 32 < 16 && z < 40 {
+                            if z < 32 {
+                                target[index] = 10;
+                                l2[l2_index] = 10;
+                            } else if x % 16 / 8 == y % 16 / 8 {
+                                target[index] = 10;
+                                l2[l2_index] = 10;
+                            } else if x % 8 / 4 == y % 8 / 4 {
+                                target[index] = 10;
+                                l2[l2_index] = 10;
+                            }
+                        } else if x % 16 == 7 && y % 16 == 7 && z < 32 {
+                            target[index] = 10;
+                            l2[l2_index] = 10;
+                        } else if x % 16 == 10 && y % 16 == 10 && z < 32 {
+                            target[index] = 10;
+                            l2[l2_index] = 10;
+                        }
                     }
                     index += 1;
                 }

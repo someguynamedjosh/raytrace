@@ -34,53 +34,54 @@ void main() {
         uvec4 position = imageLoad(position, pixel_coords).xyzw;
         color = position.xyz / POSITION_PRECISION_F / 256.0;
 
-        ivec3 lightmap_position = ivec3(position.xyz) / ivec3(POSITION_PRECISION * 16);
-        uint assignment = imageLoad(lightmap_assignment, lightmap_position).r;
+        uvec3 lightmap_region = uvec3(position.xyz) / uvec3(POSITION_PRECISION * 16);
+        uint assignment = imageLoad(lightmap_assignment, ivec3(lightmap_region)).r;
         uint lod = (assignment & 0xF000) >> 12;
         uint tile_resolution = lod == 0 ? LIGHTMAP_RES_L0 : (lod == 1 ? LIGHTMAP_RES_L1 : LIGHTMAP_RES_L2);
-        uvec3 lightmap_pixel;
+        uvec3 pixel_position;
 
         uint index = assignment & 0x0FFF;
         uint atlas_width = lod == 0 ? LIGHTMAP_ATLAS_WIDTH_L0 : (lod == 1 ? LIGHTMAP_ATLAS_WIDTH_L1 : LIGHTMAP_ATLAS_WIDTH_L2);
-        uvec2 square_offset = uvec2(index % atlas_width, index / atlas_width) * tile_resolution;
+        uvec2 lightmap_pos = uvec2(index % atlas_width, index / atlas_width);
 
         if ((face_normal & 0xE) == 0) { // Face is facing the X axis.
             // color = vec3(1, 0, 0);
-            lightmap_pixel.xy = 
+            pixel_position.xy = 
                 position.yz 
                 % (LIGHTMAP_SIZE * POSITION_PRECISION) 
                 / (POSITION_PRECISION / tile_resolution);
-            lightmap_pixel.z = (position.x / POSITION_PRECISION) % LIGHTMAP_SIZE;
+            pixel_position.z = (position.x / POSITION_PRECISION) % LIGHTMAP_SIZE;
         } else if ((face_normal & 0xE) == 2) { // Face is facing the Y axis.
             // color = vec3(0, 1, 0);
-            lightmap_pixel.xy = 
+            pixel_position.xy = 
                 position.xz
                 % (LIGHTMAP_SIZE * POSITION_PRECISION) 
                 / (POSITION_PRECISION / tile_resolution);
-            lightmap_pixel.z = (position.y / POSITION_PRECISION) % LIGHTMAP_SIZE + LIGHTMAP_SIZE;
+            pixel_position.z = (position.y / POSITION_PRECISION) % LIGHTMAP_SIZE + LIGHTMAP_SIZE;
         } else if ((face_normal & 0xE) == 4) { // Face is facing the Z axis.
             // color = vec3(0, 0, 1);
-            lightmap_pixel.xy = 
+            pixel_position.xy = 
                 position.xy
                 % (LIGHTMAP_SIZE * POSITION_PRECISION) 
                 / (POSITION_PRECISION / tile_resolution);
-            lightmap_pixel.z = (position.z / POSITION_PRECISION) % LIGHTMAP_SIZE + LIGHTMAP_SIZE * 2;
+            pixel_position.z = (position.z / POSITION_PRECISION) % LIGHTMAP_SIZE + LIGHTMAP_SIZE * 2;
         }
 
-        lightmap_pixel.xy += square_offset;
+        pixel_position.xy += lightmap_pos * LIGHTMAP_SIZE * tile_resolution;
 
         uint lightmap_contents;
         if (lod == 0) {
-            lightmap_contents = imageLoad(lightmap_atlas_l0, ivec3(lightmap_pixel)).r;
+            lightmap_contents = imageLoad(lightmap_atlas_l0, ivec3(pixel_position)).r;
         } else if (lod == 1) {
-            lightmap_contents = imageLoad(lightmap_atlas_l1, ivec3(lightmap_pixel)).r;
+            lightmap_contents = imageLoad(lightmap_atlas_l1, ivec3(pixel_position)).r;
         } else if (lod == 2) {
-            lightmap_contents = imageLoad(lightmap_atlas_l2, ivec3(lightmap_pixel)).r;
+            lightmap_contents = imageLoad(lightmap_atlas_l2, ivec3(pixel_position)).r;
         }
 
         if (lightmap_contents > 0) {
-            color *= 0.5f;
+            color *= 0.5;
         }
+        // color = (pixel_position % uvec3(4)) / vec3(4.0);
     }
     if (pixel_coords.y < 16) {
         int lightmap_level = pixel_coords.y / 4;
