@@ -64,6 +64,7 @@ mod update_lightmaps {
         path: "shaders/update_lightmaps.comp"
     }
 }
+pub use update_lightmaps::ty::PushData as UpdateLightmapsPushData;
 pub use update_lightmaps::Layout as UpdateLightmapsShaderLayout;
 pub use update_lightmaps::Shader as UpdateLightmapsShader;
 

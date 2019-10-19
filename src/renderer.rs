@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::shaders::{
     self, AssignLightmapsShaderLayout, BasicRaytraceShaderLayout, CameraVectorPushConstants,
-    FinalizeShaderLayout, UpdateLightmapsShaderLayout,
+    FinalizeShaderLayout, UpdateLightmapsShaderLayout, UpdateLightmapsPushData
 };
 use crate::util;
 
@@ -85,6 +85,7 @@ pub struct Renderer {
     lightmap_table: Arc<GenericImage>,
     lightmap_usage_buffer: Arc<GenericImage>,
     lightmap_update_queue: Arc<GenericImage>,
+    update_lightmaps_push_data: UpdateLightmapsPushData,
 
     lightmap_atlas_l0: Arc<GenericImage>,
     lightmap_atlas_l1: Arc<GenericImage>,
@@ -174,6 +175,9 @@ impl RenderBuilder {
                             target[index] = 10;
                             l2[l2_index] = 10;
                         }
+                    } else if y == 255 && x == 255 {
+                        target[index] = 10;
+                        l2[l2_index] = 10;
                     }
                     index += 1;
                 }
@@ -488,6 +492,9 @@ impl RenderBuilder {
             lightmap_table,
             lightmap_usage_buffer,
             lightmap_update_queue,
+            update_lightmaps_push_data: UpdateLightmapsPushData {
+                random_seed: 0,
+            },
 
             lightmap_atlas_l0,
             lightmap_atlas_l1,
@@ -544,6 +551,7 @@ impl Renderer {
                 .unwrap();
             self.image_update_requested = false;
         }
+        self.update_lightmaps_push_data.random_seed = (self.update_lightmaps_push_data.random_seed + 1) % 4096;
         add_to
             .clear_color_image(self.lightmap_operation_buffer.clone(), [3u32].into())
             .unwrap()
@@ -578,7 +586,7 @@ impl Renderer {
                 [LIGHTMAP_UPDATE_QUEUE_LENGTH / 64, 1, 1],
                 self.update_lightmaps_pipeline.clone(),
                 self.update_lightmaps_descriptors.clone(),
-                (),
+                self.update_lightmaps_push_data.clone(),
             )
             .unwrap()
             // Combine computed data into final image.

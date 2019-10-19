@@ -12,6 +12,10 @@ layout(set = 0, binding = 4, r32ui) uniform uimage3D lightmap_atlas_l0;
 layout(set = 0, binding = 5, r32ui) uniform uimage3D lightmap_atlas_l1;
 layout(set = 0, binding = 6, r32ui) uniform uimage3D lightmap_atlas_l2;
 
+layout(push_constant) uniform PushData {
+    uint random_seed;
+} push_data;
+
 const uint WORLD_SIZE = 256;
 const uint L1_STEP = 16;
 const float L1_STEPF = L1_STEP;
@@ -222,13 +226,42 @@ FUNCTION_MACRO(x, 2) FUNCTION_MACRO(y, 2) FUNCTION_MACRO(z, 2)
         // result.value > 0 ? 0xFFFF : 0x0000
     // ));
 
+uint pixel_seed = push_data.random_seed * 4096;
+
+// https://stackoverflow.com/questions/4200224/random-noise-functions-for-glsl
+// A single iteration of Bob Jenkins' One-At-A-Time hashing algorithm.
+uint hash( uint x ) {
+    x += ( x << 10u );
+    x ^= ( x >>  6u );
+    x += ( x <<  3u );
+    x ^= ( x >> 11u );
+    x += ( x << 15u );
+    return x;
+}
+// Construct a float with half-open range [0:1] using low 23 bits.
+// All zeroes yields 0.0, all ones yields the next smallest representable value below 1.0.
+float floatConstruct( uint m ) {
+    const uint ieeeMantissa = 0x007FFFFFu; // binary32 mantissa bitmask
+    const uint ieeeOne      = 0x3F800000u; // 1.0 in IEEE binary32
+    m &= ieeeMantissa;                     // Keep only mantissa bits (fractional part)
+    m |= ieeeOne;                          // Add fractional part to 1.0
+    float  f = uintBitsToFloat( m );       // Range [1:2]
+    return f - 1.0;                        // Range [0:1]
+}
+float random(uint seed) {
+    return floatConstruct(hash(seed));
+}
+
 #define LIGHTMAP_PIXEL_FUNC(LOD) \
-void update_lod_##LOD##_lightmap_pixel(ivec3 atlas_pos, vec3 world_pos) { \
-    if (mod(world_pos.x, 2) < 1.0) { \
-        imageStore(lightmap_atlas_l##LOD , atlas_pos, ivec4(0xFFFF)); \
+void update_lod_##LOD##_lightmap_pixel(uvec3 atlas_pos, vec3 world_pos) { \
+    vec3 sun_direction = normalize(vec3(0.5 + 0.1 * random(pixel_seed), 0.3 + 0.1 * random(pixel_seed + 1), 0.3)); \
+    HitResult result = trace_ray(world_pos, sun_direction); \
+    if (result.value > 0) { \
+        imageStore(lightmap_atlas_l##LOD, ivec3(atlas_pos), ivec4(0xFFFF)); \
     } else { \
-        imageStore(lightmap_atlas_l##LOD , atlas_pos, ivec4(0x0000)); \
+        imageStore(lightmap_atlas_l##LOD, ivec3(atlas_pos), ivec4(0x0000)); \
     } \
+    pixel_seed++; \
 }
 INSTANTIATE_LOD(LIGHTMAP_PIXEL_FUNC)
 
@@ -238,9 +271,9 @@ INSTANTIATE_LOD(LIGHTMAP_SQUARE_FUNC_CONSTANTS)
 
 #define LIGHTMAP_SQUARE_FUNC(AXIS, LOD) \
 void update_lod_##LOD##_axis_##AXIS##_lightmap_tile( \
-    ivec3 atlas_tile_pos, ivec3 world_region, vec3 world_pos \
+    uvec3 atlas_tile_pos, uvec3 world_region, vec3 world_pos \
 ) { \
-    ivec3 atlas_pos = atlas_tile_pos * ivec3(LOD_##LOD##_RES, LOD_##LOD##_RES, 1); \
+    uvec3 atlas_pos = atlas_tile_pos * uvec3(LOD_##LOD##_RES, LOD_##LOD##_RES, 1); \
     for (uint axis_b = 0; axis_b < LOD_##LOD##_RES; axis_b++) { \
         for (uint axis_c = 0; axis_c < LOD_##LOD##_RES; axis_c++) { \
             update_lod_##LOD##_lightmap_pixel(atlas_pos, world_pos); \
@@ -256,54 +289,50 @@ void update_lod_##LOD##_axis_##AXIS##_lightmap_tile( \
 INSTANTIATE_AXIS_LOD(LIGHTMAP_SQUARE_FUNC)
 
 #define LIGHTMAP_LAYER_FUNC(AXIS, LOD) \
-void update_lod_##LOD##_axis_##AXIS##_lightmap_layer(uint layer_index, ivec3 atlas_layer_pos, ivec3 world_region) { \
-    ivec3 atlas_tile_pos = atlas_layer_pos * ivec3(LIGHTMAP_SIZE, LIGHTMAP_SIZE, 1); \
-    ivec3 lower_world_pos = world_region * int(LIGHTMAP_SIZE); \
-    lower_world_pos.AXIS += int(layer_index); \
-    ivec3 upper_world_pos = lower_world_pos; \
-    lower_world_pos.AXIS -= 1; \
-    vec3 lower_offset = vec3(0.0), upper_offset = vec3(0.0); \
-    lower_offset.AXIS = -0.01; \
-    upper_offset.AXIS = 0.01; \
+void update_lod_##LOD##_axis_##AXIS##_lightmap_layer(uint layer_index, uvec3 atlas_layer_pos, uvec3 world_region) { \
+    uvec3 atlas_tile_pos = atlas_layer_pos * uvec3(LIGHTMAP_SIZE, LIGHTMAP_SIZE, 1); \
+    uvec3 upper_world_pos = world_region * LIGHTMAP_SIZE; \
+    upper_world_pos.AXIS += layer_index; \
+    uvec3 lower_pos_offset = uvec3(0); \
+    lower_pos_offset.AXIS += 1; \
+    vec3 float_offset = vec3(0.0); \
+    float_offset.AXIS = 0.01; \
     for (uint axis_b = 0; axis_b < LIGHTMAP_SIZE; axis_b++) { \
         for (uint axis_c = 0; axis_c < LIGHTMAP_SIZE; axis_c++) { \
-            bool upper_voxel = imageLoad(world_l0, upper_world_pos).r > 0; \
-            bool lower_voxel = imageLoad(world_l0, lower_world_pos).r > 0; \
+            bool upper_voxel = imageLoad(world_l0, ivec3(upper_world_pos)).r > 0; \
+            bool lower_voxel = imageLoad(world_l0, ivec3(upper_world_pos - lower_pos_offset)).r > 0; \
             if (upper_voxel && !lower_voxel) { /* Lower face showing */ \
-                update_lod_##LOD##_axis_##AXIS##_lightmap_tile(atlas_tile_pos, world_region, vec3(upper_world_pos) + lower_offset); \
+                update_lod_##LOD##_axis_##AXIS##_lightmap_tile(atlas_tile_pos, world_region, vec3(upper_world_pos) - float_offset); \
             } else if (!upper_voxel && lower_voxel) { /* Upper face showing */ \
-                update_lod_##LOD##_axis_##AXIS##_lightmap_tile(atlas_tile_pos, world_region, vec3(upper_world_pos) + upper_offset); \
+                update_lod_##LOD##_axis_##AXIS##_lightmap_tile(atlas_tile_pos, world_region, vec3(upper_world_pos) + float_offset); \
             } \
             atlas_tile_pos.y += 1; \
-            lower_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS += 1; \
             upper_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS += 1; \
         } \
         atlas_tile_pos.x += 1; \
-        lower_world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += 1; \
-        upper_world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += 1; \
-        lower_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS -= int(LIGHTMAP_SIZE); \
-        upper_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS -= int(LIGHTMAP_SIZE); \
         atlas_tile_pos.y -= int(LIGHTMAP_SIZE); \
+        upper_world_pos.AXIS##_ATLAS_X_AXIS_WORLD_AXIS += 1; \
+        upper_world_pos.AXIS##_ATLAS_Y_AXIS_WORLD_AXIS -= int(LIGHTMAP_SIZE); \
     } \
 }
 INSTANTIATE_AXIS_LOD(LIGHTMAP_LAYER_FUNC)
 
 #define LIGHTMAP_FUNC(LOD) \
-void update_lod_##LOD##_lightmap(ivec2 atlas_lightmap_pos, ivec3 world_region) { \
+void update_lod_##LOD##_lightmap(uvec2 atlas_lightmap_pos, uvec3 world_region) { \
     for (uint layer = 0; layer < LIGHTMAP_SIZE; layer++) { \
-        update_lod_##LOD##_axis_x_lightmap_layer(layer, ivec3(atlas_lightmap_pos, layer), world_region); \
+        update_lod_##LOD##_axis_x_lightmap_layer(layer, uvec3(atlas_lightmap_pos, layer), world_region); \
     } \
     for (uint layer = 0; layer < LIGHTMAP_SIZE; layer++) { \
         update_lod_##LOD##_axis_y_lightmap_layer( \
             layer, \
-            ivec3(atlas_lightmap_pos, layer + LIGHTMAP_SIZE),  \
+            uvec3(atlas_lightmap_pos, layer + LIGHTMAP_SIZE),  \
             world_region \
         ); \
     } \
     for (uint layer = 0; layer < LIGHTMAP_SIZE; layer++) { \
         update_lod_##LOD##_axis_z_lightmap_layer( \
             layer, \
-            ivec3(atlas_lightmap_pos, layer + LIGHTMAP_SIZE * 2),  \
+            uvec3(atlas_lightmap_pos, layer + LIGHTMAP_SIZE * 2),  \
             world_region \
         ); \
     } \
@@ -320,24 +349,24 @@ void main() {
     uint lightmap_id = imageLoad(lightmap_update_queue, int(queue_index)).r;
     uint lightmap_lod = (lightmap_id & 0xF000) >> 12;
     uint lightmap_index = lightmap_id & 0x0FFF;
-    ivec3 world_region;
-    world_region.x = int(imageLoad(lightmap_table, ivec3(lightmap_index, 1, lightmap_lod)).r);
-    world_region.y = int(imageLoad(lightmap_table, ivec3(lightmap_index, 2, lightmap_lod)).r);
-    world_region.z = int(imageLoad(lightmap_table, ivec3(lightmap_index, 3, lightmap_lod)).r);
+    uvec3 world_region;
+    world_region.x = imageLoad(lightmap_table, ivec3(lightmap_index, 1, lightmap_lod)).r;
+    world_region.y = imageLoad(lightmap_table, ivec3(lightmap_index, 2, lightmap_lod)).r;
+    world_region.z = imageLoad(lightmap_table, ivec3(lightmap_index, 3, lightmap_lod)).r;
     if (lightmap_lod == 0) {
-        ivec2 atlas_lightmap_pos = ivec2(
+        uvec2 atlas_lightmap_pos = uvec2(
             lightmap_index % LIGHTMAP_ATLAS_WIDTH_L0, 
             lightmap_index / LIGHTMAP_ATLAS_WIDTH_L0
         );
         update_lod_0_lightmap(atlas_lightmap_pos, world_region);
     } else if (lightmap_lod == 1) {
-        ivec2 atlas_lightmap_pos = ivec2(
+        uvec2 atlas_lightmap_pos = uvec2(
             lightmap_index % LIGHTMAP_ATLAS_WIDTH_L1, 
             lightmap_index / LIGHTMAP_ATLAS_WIDTH_L1
         );
         update_lod_1_lightmap(atlas_lightmap_pos, world_region);
     } else if (lightmap_lod == 2) {
-        ivec2 atlas_lightmap_pos = ivec2(
+        uvec2 atlas_lightmap_pos = uvec2(
             lightmap_index % LIGHTMAP_ATLAS_WIDTH_L2, 
             lightmap_index / LIGHTMAP_ATLAS_WIDTH_L2
         );
