@@ -4,10 +4,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, r16ui) uniform uimage3D l1;
 layout(set = 0, binding = 1, r16ui) uniform uimage3D l2;
-layout(set = 0, binding = 2, rgba16ui) uniform writeonly uimage2D position_out;
-layout(set = 0, binding = 3, r16ui) uniform writeonly uimage2D hit_result_out;
-layout(set = 0, binding = 4, r32ui) uniform uimage3D lightmap_requirement_out;
-layout(set = 0, binding = 5, r32ui) uniform uimage1D total_required_lightmaps;
+layout(set = 0, binding = 2, rgba8_snorm) uniform writeonly image2D final_output;
 
 layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
@@ -198,28 +195,13 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         result.position.z = (l1_pos.z + 1) * POSITION_PRECISION;
     }
 
-    l2_pos = ivec3(result.position / POSITION_PRECISION / 16);
-    if (result.value != 0) {
-        uint lightmap_level = 0;
-        if (result.distance > /*5*/0) {
-            lightmap_level++;
-        }
-        if (result.distance > /*10*/0) {
-            lightmap_level++;
-        }
-        uint old_value = imageAtomicMin(lightmap_requirement_out, l2_pos, lightmap_level);
-        if (old_value > lightmap_level) {
-            imageAtomicAdd(total_required_lightmaps, int(old_value), uint(-1));
-            imageAtomicAdd(total_required_lightmaps, int(lightmap_level), 1);
-        }
-    }
     return result;
 }
 
 void main() {
     vec3 ray_start = camera_vectors.origin;
 
-    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(position_out)) * 2.0 - vec2(1);
+    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(final_output)) * 2.0 - vec2(1);
     // Must be normalized. 
     vec3 ray_direction = normalize(
         camera_vectors.forward
@@ -228,15 +210,14 @@ void main() {
     );
 
     HitResult result = trace_ray(camera_vectors.origin, ray_direction);
+    vec3 color = vec3(0.3, 0.5, 1.0);
+    if (result.value > 0) {
+        color = vec3(1.0);
+    }
 
     imageStore(
-        position_out, 
+        final_output,
         ivec2(gl_GlobalInvocationID.xy), 
-        ivec4(result.position, result.distance * POSITION_PRECISION)
-    );
-    imageStore(
-        hit_result_out, 
-        ivec2(gl_GlobalInvocationID.xy), 
-        ivec4(result.value | result.normal << 12)
+        vec4(color, 1.0)
     );
 }
