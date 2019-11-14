@@ -25,7 +25,7 @@ const uint POSITION_PRECISION = 64; // How much to scale hit result position by.
 
 struct HitResult {
     uint value;
-    uvec3 position;
+    vec3 position;
     float distance;
     uint normal;
 };
@@ -178,22 +178,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         }
     } }
     result.distance = total_step;
-    vec3 position = origin + direction * result.distance;
-    result.position = uvec3(position * POSITION_PRECISION);
-
-    if (result.normal == NORMAL_x + 1) {
-        result.position.x = l1_pos.x * POSITION_PRECISION;
-    } else if (result.normal == NORMAL_y + 1) {
-        result.position.y = l1_pos.y * POSITION_PRECISION;
-    } else if (result.normal == NORMAL_z + 1) {
-        result.position.z = l1_pos.z * POSITION_PRECISION;
-    } else if (result.normal == NORMAL_x) {
-        result.position.x = (l1_pos.x + 1) * POSITION_PRECISION;
-    } else if (result.normal == NORMAL_y) {
-        result.position.y = (l1_pos.y + 1) * POSITION_PRECISION;
-    } else if (result.normal == NORMAL_z) {
-        result.position.z = (l1_pos.z + 1) * POSITION_PRECISION;
-    }
+    result.position = origin + direction * result.distance;
 
     return result;
 }
@@ -213,6 +198,10 @@ void main() {
     vec3 color = vec3(0.3, 0.5, 1.0);
     if (result.value > 0) {
         color = vec3(1.0);
+        HitResult sun = trace_ray(result.position, normalize(vec3(-1, -1, 0.5)));
+        if (sun.value > 0) {
+            color *= 0.5;
+        }
     }
 
     imageStore(
