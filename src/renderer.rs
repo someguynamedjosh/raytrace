@@ -21,8 +21,8 @@ type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderL
 type GenericImage = StorageImage<Format>;
 type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
 
-const WORLD_SIZE: usize = 256;
-const L2_STEP: usize = 16;
+const WORLD_SIZE: usize = 64;
+const L2_STEP: usize = 8;
 const L2_SIZE: usize = WORLD_SIZE / L2_STEP;
 
 // Positive Y (angle PI / 2) is forward
@@ -30,6 +30,7 @@ const L2_SIZE: usize = WORLD_SIZE / L2_STEP;
 // Positive Z is up
 // Heading starts at Positive X and goes clockwise (towards Positive Y).
 // Pitch starts at zero and positive pitch looks up at Positive Z.
+#[derive(Debug)]
 pub struct Camera {
     pub origin: Vector3<f32>,
     pub heading: Rad<f32>,
@@ -87,44 +88,25 @@ impl RenderBuilder {
                 for x in 0..WORLD_SIZE {
                     let (l2x, l2y, l2z) = (x / L2_STEP, y / L2_STEP, z / L2_STEP);
                     let l2_index = ((l2z * L2_SIZE) + l2y) * L2_SIZE + l2x;
-                    if z < 16 {
+                    if z < 8 {
                         target[index] = 10;
                         l2[l2_index] = 10;
                     }
-                    if x >= 128 && y < 128 {
-                        if x % 32 < 6 && y % 32 < 6 {
-                            let height = (x / 32 + y / 32) * 4 + 20;
-                            if z < height {
-                                target[index] = 10;
-                                l2[l2_index] = 10;
-                            }
-                        } else if x % 32 < 7 && y % 32 < 7 && z % 2 == 0 {
-                            let height = (x / 32 + y / 32) * 4 + 20;
-                            if z < height {
-                                target[index] = 10;
-                                l2[l2_index] = 10;
-                            }
-                        }
-                    } else if y < 128 {
-                        if x % 32 < 16 && y % 32 < 16 && z < 40 {
-                            if z < 32 {
-                                target[index] = 10;
-                                l2[l2_index] = 10;
-                            } else if x % 16 / 8 == y % 16 / 8 {
-                                target[index] = 10;
-                                l2[l2_index] = 10;
-                            } else if x % 8 / 4 == y % 8 / 4 {
-                                target[index] = 10;
-                                l2[l2_index] = 10;
-                            }
-                        } else if x % 16 == 7 && y % 16 == 7 && z < 32 {
+                    if x % 32 < 16 && y % 32 < 16 && z < 24 {
+                        if z < 16 {
                             target[index] = 10;
                             l2[l2_index] = 10;
-                        } else if x % 16 == 10 && y % 16 == 10 && z < 32 {
+                        } else if x % 16 / 8 == y % 16 / 8 {
+                            target[index] = 10;
+                            l2[l2_index] = 10;
+                        } else if x % 8 / 4 == y % 8 / 4 {
                             target[index] = 10;
                             l2[l2_index] = 10;
                         }
-                    } else if y == 255 && x == 255 {
+                    } else if x % 16 == 7 && y % 16 == 7 && z < 16 {
+                        target[index] = 10;
+                        l2[l2_index] = 10;
+                    } else if x % 16 == 10 && y % 16 == 10 && z < 16 {
                         target[index] = 10;
                         l2[l2_index] = 10;
                     }

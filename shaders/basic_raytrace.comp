@@ -10,8 +10,8 @@ layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
 } camera_vectors;
 
-const uint WORLD_SIZE = 256;
-const uint L2_STEP = 16;
+const uint WORLD_SIZE = 64;
+const uint L2_STEP = 8;
 const float L2_STEPF = L2_STEP;
 const uint L2_SIZE = WORLD_SIZE / L2_STEP;
 
@@ -239,7 +239,7 @@ void main() {
         {
             float r1 = random(result.position);
             float r2 = random(result.position + vec3(1.3, 1.4, 1.5));
-            HitResult sun = trace_ray(result.position, normalize(vec3(1 + r1 * 0.05, 1 + r2 * 0.05, 0.5)));
+            HitResult sun = trace_ray(result.position, normalize(vec3(1 + r1 * 0.05, 2 + r2 * 0.05, 1)));
             if (sun.value == 0) {
                 color += albedo * 0.6;
             }

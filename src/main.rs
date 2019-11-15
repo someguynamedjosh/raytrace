@@ -79,12 +79,12 @@ fn main() {
 
     let mut camera = Camera {
         origin: Vector3 {
-            x: 160.0,
-            y: 160.0,
-            z: 160.0,
+            x: 40.0,
+            y: 40.0,
+            z: 40.0,
         },
-        heading: Rad(1.5),
-        pitch: Rad(-1.0),
+        heading: Rad(-2.38),
+        pitch: Rad(-0.74),
     };
     let mut camera_movement = Vector3 {
         x: 0.0,
@@ -134,10 +134,10 @@ fn main() {
                 Err(err) => panic!("{:?}", err),
             };
 
-        let builder =
+        let mut builder =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                 .unwrap();
-        let builder = renderer.add_render_commands(builder, &camera);
+        builder = renderer.add_render_commands(builder, &camera);
         let builder = presenter.add_present_commands(
             builder,
             &dynamic_state,
