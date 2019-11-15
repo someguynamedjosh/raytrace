@@ -252,14 +252,14 @@ HitResult trace_diffuse(HitResult from) {
     return trace_ray(from.position, normalize(direction));
 }
 
-vec3 get_material_color(uint color) {
-    switch (color) {
+vec3 get_material_albedo(uint material) {
+    switch (material) {
         case 0:
         return vec3(1, 0, 1);
         case 1:
         return vec3(0.8);
         case 2:
-        return vec3(0.9, 0.4, 0.2);
+        return vec3(0.4, 0.3, 0.2);
         case 3:
         return vec3(0.2, 0.8, 0.2);
         case 4:
@@ -272,6 +272,29 @@ vec3 get_material_color(uint color) {
         return vec3(0.8, 0.2, 0.7);
         case 8:
         return vec3(0.2, 0.2, 0.2);
+    }
+}
+
+vec3 get_material_emission(uint material) {
+    switch (material) {
+        case 0:
+        return vec3(0);
+        case 1:
+        return vec3(0);
+        case 2:
+        return vec3(1.9, 0.8, 0.4);
+        case 3:
+        return vec3(0);
+        case 4:
+        return vec3(0);
+        case 5:
+        return vec3(0);
+        case 6:
+        return vec3(0);
+        case 7:
+        return vec3(0);
+        case 8:
+        return vec3(0);
     }
 }
 
@@ -293,7 +316,7 @@ void main() {
     HitResult primary = trace_ray(camera_vectors.origin, ray_direction);
     if (primary.value > 0) {
         color = vec3(0.0);
-        vec3 albedo1 = get_material_color(primary.value);
+        vec3 albedo1 = get_material_albedo(primary.value);
         HitResult sun1 = trace_sun(primary, sunangle);
         if (sun1.value == 0) {
             color += albedo1 * sunlight;
@@ -303,7 +326,7 @@ void main() {
             color += albedo1 * skylight;
         } else {
             vec3 color2 = vec3(0.0);
-            vec3 albedo2 = get_material_color(dif1.value);
+            vec3 albedo2 = get_material_albedo(dif1.value);
             HitResult sun2 = trace_sun(dif1, sunangle);
             if (sun2.value == 0) {
                 color2 += albedo2 * sunlight;
@@ -313,7 +336,7 @@ void main() {
                 color2 += albedo2 * skylight;
             } else {
                 vec3 color3 = vec3(0.0);
-                vec3 albedo3 = get_material_color(dif2.value);
+                vec3 albedo3 = get_material_albedo(dif2.value);
                 HitResult sun3 = trace_sun(dif2, sunangle);
                 if (sun3.value == 0) {
                     color3 += albedo3 * sunlight;
@@ -322,10 +345,13 @@ void main() {
                 if (dif3.value == 0) {
                     color3 += albedo3 * skylight;
                 }
+                color3 += get_material_emission(dif2.value);
                 color2 += albedo2 * color3;
             }
+            color2 += get_material_emission(dif1.value);
             color += albedo1 * color2;
         }
+        color += get_material_emission(primary.value);
     }
 
     imageStore(
