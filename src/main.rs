@@ -255,6 +255,7 @@ fn main() {
                 + amount * up * camera_movement.z
                 + amount * right * camera_movement.x
         };
+        println!("{:?}", camera);
         println!(
             "Frame took {}ms, average {} per frame.",
             frame_start.elapsed().as_millis(),

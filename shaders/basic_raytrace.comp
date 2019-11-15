@@ -2,26 +2,32 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, r16ui) uniform uimage3D l1;
-layout(set = 0, binding = 1, r16ui) uniform uimage3D l2;
+layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data;
+layout(set = 0, binding = 1, r16ui) uniform uimage3D piece_mip;
 layout(set = 0, binding = 2, rgba8_snorm) uniform writeonly image2D final_output;
 
 layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
 } camera_vectors;
 
-const uint WORLD_SIZE = 64;
-const uint L2_STEP = 8;
-const float L2_STEPF = L2_STEP;
-const uint L2_SIZE = WORLD_SIZE / L2_STEP;
+const uint PIECE_BLOCK_WIDTH = 8; // pieces are 8x8x8 blocks
+const uint CHUNK_PIECE_WIDTH = 8; // chunks are 8x8x8 pieces
+const uint CHUNK_BLOCK_WIDTH = CHUNK_PIECE_WIDTH * PIECE_BLOCK_WIDTH;
 
-const uint MODE_L1 = 0;
-const uint MODE_L2 = 1;
+const uint PIECE_BLOCK_VOLUME = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH;
+const uint CHUNK_PIECE_VOLUME = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
+const uint CHUNK_BLOCK_VOLUME = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
+
+const uint ROOT_CHUNK_WIDTH = 64; // root is 64x64x64 chunks.
+const uint ATLAS_CHUNK_WIDTH = 4; // atlas is 4x4x4 chunks
+const uint ATLAS_CHUNK_VOLUME = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
+
+const uint MODE_PIECE = 0;
+const uint MODE_CHUNK = 1;
 
 const uint NORMAL_x = 0;
 const uint NORMAL_y = 2;
 const uint NORMAL_z = 4;
-const uint POSITION_PRECISION = 64; // How much to scale hit result position by.
 
 const float PI = 3.1415926535897932384626433832795;
 
@@ -32,150 +38,139 @@ struct HitResult {
     uint normal;
 };
 
-#define PERFORM_L1_STEP(AXIS) \
-    l1_pos.AXIS += l1_step.AXIS; \
-    if (l1_pos.AXIS == l1_exit_planes.AXIS) { break; } \
-    total_step = l1_to_boundary.AXIS; \
-    result.value = imageLoad(l1, l1_pos).r; \
+#define PERFORM_BLOCK_STEP(AXIS) \
+    block_coord.AXIS += step.AXIS; \
+    if (block_coord.AXIS == piece_exit_planes.AXIS) { break; } \
+    total_step = next_block_distance.AXIS; \
+    result.value = imageLoad(block_data, block_coord).r; \
     if (result.value != 0) { \
-        result.normal = NORMAL_##AXIS + (l1_step.AXIS + 1) / 2; \
+        result.normal = NORMAL_##AXIS + (step.AXIS + 1) / 2; \
         break; \
     } \
-    l1_to_boundary.AXIS += l1_advance_amount.AXIS;
+    next_block_distance.AXIS += block_advance_amount.AXIS;
 
-#define PERFORM_L1_TRACE(AXIS) \
-        ivec3 l1_exit_planes = ivec3( \
-            l2_pos.x * L2_STEP + (l1_step.x == 1 ? L2_STEP : - 1), \
-            l2_pos.y * L2_STEP + (l1_step.y == 1 ? L2_STEP : - 1), \
-            l2_pos.z * L2_STEP + (l1_step.z == 1 ? L2_STEP : - 1) \
-        ); \
-        vec3 exact_pos = origin + direction * (total_step + 0.01); \
-        l1_pos = ivec3( \
-            floor(exact_pos.x), \
-            floor(exact_pos.y), \
-            floor(exact_pos.z) \
-        ); \
-        \
-        vec3 l1_to_boundary = vec3(0); \
-        if (l1_step.x == 1) { \
-            l1_to_boundary.x =  \
-                (1.0 - mod(exact_pos.x, 1.0))  \
-                * l1_advance_amount.x; \
-        } else { \
-            l1_to_boundary.x =  \
-                mod(exact_pos.x, 1.0) * l1_advance_amount.x; \
-        } \
-        if (l1_step.y == 1) { \
-            l1_to_boundary.y =  \
-                (1.0 - mod(exact_pos.y, 1.0))  \
-                * l1_advance_amount.y; \
-        } else { \
-            l1_to_boundary.y =  \
-                mod(exact_pos.y, 1.0) * l1_advance_amount.y; \
-        } \
-        if (l1_step.z == 1) { \
-            l1_to_boundary.z =  \
-                (1.0 - mod(exact_pos.z, 1.0))  \
-                * l1_advance_amount.z; \
-        } else { \
-            l1_to_boundary.z =  \
-                mod(exact_pos.z, 1.0) * l1_advance_amount.z; \
-        } \
-        l1_to_boundary += vec3(total_step); \
-        \
-        result.value = imageLoad(l1, l1_pos).r; \
-        if (result.value == 0) { while (true) { \
-            if (l1_to_boundary.x < l1_to_boundary.y) { \
-                if (l1_to_boundary.x < l1_to_boundary.z) { \
-                    PERFORM_L1_STEP(x); \
-                } else { \
-                    PERFORM_L1_STEP(z); \
-                } \
+#define PERFORM_PIECE_TRACE(AXIS) \
+    ivec3 piece_exit_planes = ivec3( \
+        piece_coord.x * PIECE_BLOCK_WIDTH + (step.x == 1 ? PIECE_BLOCK_WIDTH : -1), \
+        piece_coord.y * PIECE_BLOCK_WIDTH + (step.y == 1 ? PIECE_BLOCK_WIDTH : -1), \
+        piece_coord.z * PIECE_BLOCK_WIDTH + (step.z == 1 ? PIECE_BLOCK_WIDTH : -1) \
+    ); \
+    vec3 exact_pos = origin + direction * (total_step + 0.01); \
+    block_coord = ivec3( \
+        floor(exact_pos.x), \
+        floor(exact_pos.y), \
+        floor(exact_pos.z) \
+    ); \
+    \
+    vec3 next_block_distance = vec3(0); \
+    if (step.x == 1) { \
+        next_block_distance.x =  (1.0 - mod(exact_pos.x, 1.0)) * block_advance_amount.x; \
+    } else { \
+        next_block_distance.x =  mod(exact_pos.x, 1.0) * block_advance_amount.x; \
+    } \
+    if (step.y == 1) { \
+        next_block_distance.y = (1.0 - mod(exact_pos.y, 1.0)) * block_advance_amount.y; \
+    } else { \
+        next_block_distance.y = mod(exact_pos.y, 1.0) * block_advance_amount.y; \
+    } \
+    if (step.z == 1) { \
+        next_block_distance.z = (1.0 - mod(exact_pos.z, 1.0)) * block_advance_amount.z; \
+    } else { \
+        next_block_distance.z = mod(exact_pos.z, 1.0) * block_advance_amount.z; \
+    } \
+    next_block_distance += vec3(total_step); \
+    \
+    result.value = imageLoad(block_data, block_coord).r; \
+    if (result.value == 0) { while (true) { \
+        if (next_block_distance.x < next_block_distance.y) { \
+            if (next_block_distance.x < next_block_distance.z) { \
+                PERFORM_BLOCK_STEP(x); \
             } else { \
-                if (l1_to_boundary.y < l1_to_boundary.z) { \
-                    PERFORM_L1_STEP(y); \
-                } else { \
-                    PERFORM_L1_STEP(z); \
-                } \
+                PERFORM_BLOCK_STEP(z); \
             } \
-        } } else { \
-            result.normal = NORMAL_##AXIS + (l1_step.AXIS + 1) / 2; \
-        }
+        } else { \
+            if (next_block_distance.y < next_block_distance.z) { \
+                PERFORM_BLOCK_STEP(y); \
+            } else { \
+                PERFORM_BLOCK_STEP(z); \
+            } \
+        } \
+    } } else { \
+        result.normal = NORMAL_##AXIS + (step.AXIS + 1) / 2; \
+    }
 
-#define PERFORM_L2_STEP(AXIS) \
-    l2_pos.AXIS += l1_step.AXIS; \
-    if (l2_pos.AXIS > L2_SIZE || l2_pos.AXIS < 0) { break; } \
-    result.value = imageLoad(l2, l2_pos).r; \
+#define PERFORM_PIECE_STEP(AXIS) \
+    piece_coord.AXIS += step.AXIS; \
+    if (piece_coord.AXIS > CHUNK_PIECE_WIDTH || piece_coord.AXIS < 0) { break; } \
+    result.value = imageLoad(piece_mip, piece_coord).r; \
     if (result.value != 0) { \
-        PERFORM_L1_TRACE(AXIS); \
+        PERFORM_PIECE_TRACE(AXIS); \
         if (result.value != 0) { break; } \
     } \
-    l2_to_boundary.AXIS += l2_advance_amount.AXIS ;
+    next_piece_distance.AXIS += piece_advance_amount.AXIS ;
 
 HitResult trace_ray(vec3 origin, vec3 direction) {
-    ivec3 l1_pos = ivec3(0);
-    ivec3 l2_pos = ivec3(
+    ivec3 block_coord = ivec3(0);
+    ivec3 piece_coord = ivec3(
         floor(origin.x),
         floor(origin.y),
         floor(origin.z)
-    ) / ivec3(L2_STEP);
-    ivec3 l1_step = ivec3(
+    ) / ivec3(PIECE_BLOCK_WIDTH);
+    ivec3 step = ivec3(
         direction.x < 0 ? -1 : 1,
         direction.y < 0 ? -1 : 1,
         direction.z < 0 ? -1 : 1
     );
-    ivec3 l2_step = l1_step * ivec3(L2_STEP);
 
-    // How much we need to move along the vector to advance the current voxel
+    // How much we need to move along the vector to advance the current block 
     // coordinate by *exactly* 1.0 in the x, y, and z directions. 
-    vec3 l1_advance_amount = abs(vec3(
+    vec3 block_advance_amount = abs(vec3(
         1.0 / (direction.x + 1e-8),
         1.0 / (direction.y + 1e-8),
         1.0 / (direction.z + 1e-8)
     ));
-    // How much we need to move along the vector to advance the current voxel
-    // coordinate by *exactly* L2_STEPF in the x, y, and z directions. 
-    vec3 l2_advance_amount = l1_advance_amount * vec3(L2_STEPF);
-    // How much we need to move along the vector to reach the next voxel in the
-    // x, y, and z directions. In this case, since it is l2, 'voxel' refers to
-    // an 8x8x8 segment.
+    // How much we need to move along the vector to advance the current piece 
+    // coordinate by *exactly* 1 piece in the x, y, and z directions. 
+    vec3 piece_advance_amount = block_advance_amount * vec3(PIECE_BLOCK_WIDTH);
 
-    vec3 l2_to_boundary = vec3(0);
-    if (l1_step.x == 1) {
-        l2_to_boundary.x = (L2_STEPF - mod(origin.x, L2_STEPF)) * l1_advance_amount.x;
+    // How much we need to move along the vector to reach the next piece in the
+    // x, y, and z directions. 
+    vec3 next_piece_distance = vec3(0);
+    if (step.x == 1) {
+        next_piece_distance.x = (PIECE_BLOCK_WIDTH - mod(origin.x, PIECE_BLOCK_WIDTH)) * block_advance_amount.x;
     } else {
-        l2_to_boundary.x = mod(origin.x, L2_STEPF) * l1_advance_amount.x;
+        next_piece_distance.x = mod(origin.x, PIECE_BLOCK_WIDTH) * block_advance_amount.x;
     }
-    if (l1_step.y == 1) {
-        l2_to_boundary.y = (L2_STEPF - mod(origin.y, L2_STEPF)) * l1_advance_amount.y;
+    if (step.y == 1) {
+        next_piece_distance.y = (PIECE_BLOCK_WIDTH - mod(origin.y, PIECE_BLOCK_WIDTH)) * block_advance_amount.y;
     } else {
-        l2_to_boundary.y = mod(origin.y, L2_STEPF) * l1_advance_amount.y;
+        next_piece_distance.y = mod(origin.y, PIECE_BLOCK_WIDTH) * block_advance_amount.y;
     }
-    if (l1_step.z == 1) {
-        l2_to_boundary.z = (L2_STEPF - mod(origin.z, L2_STEPF)) * l1_advance_amount.z;
+    if (step.z == 1) {
+        next_piece_distance.z = (PIECE_BLOCK_WIDTH - mod(origin.z, PIECE_BLOCK_WIDTH)) * block_advance_amount.z;
     } else {
-        l2_to_boundary.z = mod(origin.z, L2_STEPF) * l1_advance_amount.z;
+        next_piece_distance.z = mod(origin.z, PIECE_BLOCK_WIDTH) * block_advance_amount.z;
     }
 
     HitResult result;
     float total_step = 0.0;
-    uint mode = MODE_L1;
-    result.value = imageLoad(l2, l2_pos).r;
+    uint mode = MODE_PIECE;
+    result.value = imageLoad(piece_mip, piece_coord).r;
     if (result.value != 0) {
-        PERFORM_L1_TRACE(x);
+        PERFORM_PIECE_TRACE(x);
     }
     if (result.value == 0) { while (true) {
-        if (l2_to_boundary.x < l2_to_boundary.y) {
-            if (l2_to_boundary.x < l2_to_boundary.z) {
-                PERFORM_L2_STEP(x);
+        if (next_piece_distance.x < next_piece_distance.y) {
+            if (next_piece_distance.x < next_piece_distance.z) {
+                PERFORM_PIECE_STEP(x);
             } else {
-                PERFORM_L2_STEP(z);
+                PERFORM_PIECE_STEP(z);
             }
         } else {
-            if (l2_to_boundary.y < l2_to_boundary.z) {
-                PERFORM_L2_STEP(y);
+            if (next_piece_distance.y < next_piece_distance.z) {
+                PERFORM_PIECE_STEP(y);
             } else {
-                PERFORM_L2_STEP(z);
+                PERFORM_PIECE_STEP(z);
             }
         }
     } }
