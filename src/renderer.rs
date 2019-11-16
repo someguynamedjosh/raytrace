@@ -29,8 +29,10 @@ const PIECE_BLOCK_VOLUME: u32 = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BL
 const CHUNK_PIECE_VOLUME: u32 = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
 const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const ROOT_CHUNK_WIDTH: u32 = 64; // root is 64x64x64 chunks.
+const ROOT_CHUNK_WIDTH: u32 = 16; // root is 64x64x64 chunks.
 const ATLAS_CHUNK_WIDTH: u32 = 4; // atlas is 4x4x4 chunks
+const ATLAS_PIECE_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_PIECE_WIDTH;
+const ATLAS_BLOCK_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 const ATLAS_CHUNK_VOLUME: u32 = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
 
 // Positive Y (angle PI / 2) is forward
@@ -51,9 +53,11 @@ pub struct Renderer {
     image_update_requested: bool,
 
     block_data: Arc<WorldData>,
-    block_data_image: Arc<WorldImage>,
+    block_data_atlas: Arc<WorldImage>,
     piece_mip: Arc<WorldData>,
-    piece_mip_image: Arc<WorldImage>,
+    piece_mip_atlas: Arc<WorldImage>,
+
+    root_image: Arc<WorldImage>,
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
@@ -135,18 +139,18 @@ impl RenderBuilder {
         let block_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
             BufferUsage::all(),
-            chunk.block_data.into_iter().map(|e| *e)
+            chunk.block_data.into_iter().map(|e| *e),
         )
         .unwrap();
 
         let piece_mip = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
             BufferUsage::all(),
-            chunk.piece_mip.into_iter().map(|e| *e)
+            chunk.piece_mip.into_iter().map(|e| *e),
         )
         .unwrap();
 
-        let block_data_image = StorageImage::new(
+        let block_data_atlas = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
                 width: CHUNK_BLOCK_WIDTH,
@@ -158,19 +162,19 @@ impl RenderBuilder {
         )
         .unwrap();
 
-        let piece_mip_image = StorageImage::new(
+        let piece_mip_atlas = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
-                width: CHUNK_PIECE_WIDTH,
-                height: CHUNK_PIECE_WIDTH,
-                depth: CHUNK_PIECE_WIDTH,
+                width: ATLAS_PIECE_WIDTH,
+                height: ATLAS_PIECE_WIDTH,
+                depth: ATLAS_PIECE_WIDTH,
             },
             Format::R16Uint,
             Some(self.queue.family()),
         )
         .unwrap();
 
-        (block_data, block_data_image, piece_mip, piece_mip_image)
+        (block_data, block_data_atlas, piece_mip, piece_mip_atlas)
     }
 
     fn build(self) -> Renderer {
@@ -179,7 +183,17 @@ impl RenderBuilder {
             _ => panic!("A non-2d image was passed as the target of a Renderer."),
         };
 
-        let (block_data, block_data_image, piece_mip, piece_mip_image)= self.make_world();
+        let (block_data, block_data_atlas, piece_mip, piece_mip_atlas) = self.make_world();
+        let root_image = StorageImage::new(
+            self.device.clone(),
+            Dimensions::Dim3d {
+                width: ROOT_CHUNK_WIDTH,
+                height: ROOT_CHUNK_WIDTH,
+                depth: ROOT_CHUNK_WIDTH,
+            },
+            Format::R16Uint,
+            Some(self.queue.family()),
+        ).unwrap();
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
 
@@ -193,9 +207,11 @@ impl RenderBuilder {
         );
         let basic_raytrace_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
             PersistentDescriptorSet::start(basic_raytrace_pipeline.clone(), 0)
-                .add_image(block_data_image.clone())
+                .add_image(block_data_atlas.clone())
                 .unwrap()
-                .add_image(piece_mip_image.clone())
+                .add_image(piece_mip_atlas.clone())
+                .unwrap()
+                .add_image(root_image.clone())
                 .unwrap()
                 .add_image(self.target_image.clone())
                 .unwrap()
@@ -208,10 +224,12 @@ impl RenderBuilder {
             target_height,
             image_update_requested: true,
 
-            block_data, 
-            block_data_image, 
-            piece_mip, 
-            piece_mip_image,
+            block_data,
+            block_data_atlas,
+            piece_mip,
+            piece_mip_atlas,
+
+            root_image,
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
@@ -243,9 +261,27 @@ impl Renderer {
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
         if self.image_update_requested {
             add_to = add_to
-                .copy_buffer_to_image(self.block_data.clone(), self.block_data_image.clone())
+                .clear_color_image(self.root_image.clone(), [0u32].into())
                 .unwrap()
-                .copy_buffer_to_image(self.piece_mip.clone(), self.piece_mip_image.clone())
+                .copy_buffer_to_image_dimensions(
+                    self.block_data.clone(),
+                    self.block_data_atlas.clone(),
+                    [0, 0, 0],
+                    [CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH],
+                    0,
+                    0,
+                    0,
+                )
+                .unwrap()
+                .copy_buffer_to_image_dimensions(
+                    self.piece_mip.clone(),
+                    self.piece_mip_atlas.clone(),
+                    [0, 0, 0],
+                    [CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH],
+                    0,
+                    0,
+                    0,
+                )
                 .unwrap();
             self.image_update_requested = false;
         }

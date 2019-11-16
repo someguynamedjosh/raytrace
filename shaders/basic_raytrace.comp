@@ -2,9 +2,10 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data;
-layout(set = 0, binding = 1, r16ui) uniform uimage3D piece_mip;
-layout(set = 0, binding = 2, rgba8_snorm) uniform writeonly image2D final_output;
+layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data_atlas;
+layout(set = 0, binding = 1, r16ui) uniform uimage3D piece_mip_atlas;
+layout(set = 0, binding = 2, r16ui) uniform uimage3D root;
+layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
 
 layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
@@ -22,9 +23,6 @@ const uint ROOT_CHUNK_WIDTH = 64; // root is 64x64x64 chunks.
 const uint ATLAS_CHUNK_WIDTH = 4; // atlas is 4x4x4 chunks
 const uint ATLAS_CHUNK_VOLUME = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
 
-const uint MODE_PIECE = 0;
-const uint MODE_CHUNK = 1;
-
 const uint NORMAL_x = 0;
 const uint NORMAL_y = 2;
 const uint NORMAL_z = 4;
@@ -38,17 +36,21 @@ struct HitResult {
     uint normal;
 };
 
+// breaks if a solid block is hit, continues if not. updates total_step in both cases.
 #define PERFORM_BLOCK_STEP(AXIS) \
     block_coord.AXIS += step.AXIS; \
-    if (block_coord.AXIS == piece_exit_planes.AXIS) { break; } \
     total_step = next_block_distance.AXIS; \
-    result.value = imageLoad(block_data, block_coord).r; \
+    if (block_coord.AXIS == piece_exit_planes.AXIS) { break; } \
+    result.value = imageLoad(block_data_atlas, block_coord).r; \
     if (result.value != 0) { \
         result.normal = NORMAL_##AXIS + (step.AXIS + 1) / 2; \
         break; \
     } \
     next_block_distance.AXIS += block_advance_amount.AXIS;
 
+// result contains any block found in this piece. If it is 0, no block was found in this piece.
+// total_step is updated to how far the ray went through the piece. If no block was found,
+// total_step will be the distance from the ray origin to the end of the piece.
 #define PERFORM_PIECE_TRACE(AXIS) \
     ivec3 piece_exit_planes = ivec3( \
         piece_coord.x * PIECE_BLOCK_WIDTH + (step.x == 1 ? PIECE_BLOCK_WIDTH : -1), \
@@ -60,7 +62,7 @@ struct HitResult {
         floor(exact_pos.x), \
         floor(exact_pos.y), \
         floor(exact_pos.z) \
-    ); \
+    ) % ivec3(CHUNK_BLOCK_WIDTH); \
     \
     vec3 next_block_distance = vec3(0); \
     if (step.x == 1) { \
@@ -80,7 +82,7 @@ struct HitResult {
     } \
     next_block_distance += vec3(total_step); \
     \
-    result.value = imageLoad(block_data, block_coord).r; \
+    result.value = imageLoad(block_data_atlas, block_coord).r; \
     if (result.value == 0) { while (true) { \
         if (next_block_distance.x < next_block_distance.y) { \
             if (next_block_distance.x < next_block_distance.z) { \
@@ -99,17 +101,73 @@ struct HitResult {
         result.normal = NORMAL_##AXIS + (step.AXIS + 1) / 2; \
     }
 
+// breaks if a solid block is hit, continues if not. updates total_step in both cases.
 #define PERFORM_PIECE_STEP(AXIS) \
     piece_coord.AXIS += step.AXIS; \
-    if (piece_coord.AXIS > CHUNK_PIECE_WIDTH || piece_coord.AXIS < 0) { break; } \
-    result.value = imageLoad(piece_mip, piece_coord).r; \
+    if (piece_coord.AXIS > CHUNK_PIECE_WIDTH || piece_coord.AXIS < 0) { \
+        total_step = next_piece_distance.AXIS; \
+        break; \
+    } \
+    result.value = imageLoad(piece_mip_atlas, piece_coord).r; \
     if (result.value != 0) { \
         PERFORM_PIECE_TRACE(AXIS); \
         if (result.value != 0) { break; } \
     } \
-    next_piece_distance.AXIS += piece_advance_amount.AXIS ;
+    next_piece_distance.AXIS += piece_advance_amount.AXIS;
+
+// result contains any block found in this chunk. If it is 0, no block was found in this chunk.
+// total_step is updated to how far the ray went through the chunk. If no block was found,
+// total_step will be the distance from the ray origin to the end of the chunk.
+#define PERFORM_CHUNK_TRACE() \
+    vec3 exact_pos = origin + direction * (total_step + 0.01); \
+    piece_coord = ivec3( \
+        floor(exact_pos.x), \
+        floor(exact_pos.y), \
+        floor(exact_pos.z) \
+    ) % ivec3(CHUNK_BLOCK_WIDTH) / ivec3(PIECE_BLOCK_WIDTH); \
+    /* How much we need to move along the vector to reach the next chunk in the */ \
+    /* x, y, and z directions. */ \
+    vec3 next_piece_distance = vec3(0); \
+    if (step.x == 1) { \
+        next_piece_distance.x = (PIECE_BLOCK_WIDTH - mod(exact_pos.x, PIECE_BLOCK_WIDTH)) * block_advance_amount.x; \
+    } else { \
+        next_piece_distance.x = mod(exact_pos.x, PIECE_BLOCK_WIDTH) * block_advance_amount.x; \
+    } \
+    if (step.y == 1) { \
+        next_piece_distance.y = (PIECE_BLOCK_WIDTH - mod(exact_pos.y, PIECE_BLOCK_WIDTH)) * block_advance_amount.y; \
+    } else { \
+        next_piece_distance.y = mod(exact_pos.y, PIECE_BLOCK_WIDTH) * block_advance_amount.y; \
+    } \
+    if (step.z == 1) { \
+        next_piece_distance.z = (PIECE_BLOCK_WIDTH - mod(exact_pos.z, PIECE_BLOCK_WIDTH)) * block_advance_amount.z; \
+    } else { \
+        next_piece_distance.z = mod(exact_pos.z, PIECE_BLOCK_WIDTH) * block_advance_amount.z; \
+    } \
+    next_piece_distance += vec3(total_step); \
+    \
+    result.value = imageLoad(piece_mip_atlas, piece_coord).r; \
+    if (result.value != 0) { \
+        PERFORM_PIECE_TRACE(x); /* todo: proper axis */ \
+    } \
+    if (result.value == 0) { while (true) { \
+        if (next_piece_distance.x < next_piece_distance.y) { \
+            if (next_piece_distance.x < next_piece_distance.z) { \
+                PERFORM_PIECE_STEP(x); \
+            } else { \
+                PERFORM_PIECE_STEP(z); \
+            } \
+        } else { \
+            if (next_piece_distance.y < next_piece_distance.z) { \
+                PERFORM_PIECE_STEP(y); \
+            } else { \
+                PERFORM_PIECE_STEP(z); \
+            } \
+        } \
+    } }
 
 HitResult trace_ray(vec3 origin, vec3 direction) {
+    HitResult result;
+    float total_step = 0.0;
     ivec3 block_coord = ivec3(0);
     ivec3 piece_coord = ivec3(
         floor(origin.x),
@@ -133,49 +191,17 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     // coordinate by *exactly* 1 piece in the x, y, and z directions. 
     vec3 piece_advance_amount = block_advance_amount * vec3(PIECE_BLOCK_WIDTH);
 
-    // How much we need to move along the vector to reach the next piece in the
-    // x, y, and z directions. 
-    vec3 next_piece_distance = vec3(0);
-    if (step.x == 1) {
-        next_piece_distance.x = (PIECE_BLOCK_WIDTH - mod(origin.x, PIECE_BLOCK_WIDTH)) * block_advance_amount.x;
-    } else {
-        next_piece_distance.x = mod(origin.x, PIECE_BLOCK_WIDTH) * block_advance_amount.x;
-    }
-    if (step.y == 1) {
-        next_piece_distance.y = (PIECE_BLOCK_WIDTH - mod(origin.y, PIECE_BLOCK_WIDTH)) * block_advance_amount.y;
-    } else {
-        next_piece_distance.y = mod(origin.y, PIECE_BLOCK_WIDTH) * block_advance_amount.y;
-    }
-    if (step.z == 1) {
-        next_piece_distance.z = (PIECE_BLOCK_WIDTH - mod(origin.z, PIECE_BLOCK_WIDTH)) * block_advance_amount.z;
-    } else {
-        next_piece_distance.z = mod(origin.z, PIECE_BLOCK_WIDTH) * block_advance_amount.z;
+    { PERFORM_CHUNK_TRACE();}
+    {
+        vec3 exact_pos = origin + direction * (total_step + 0.1);
+        origin += direction * total_step;
+        total_step = 0;
+        if (result.value == 0 && exact_pos.x > 0 && exact_pos.y > 0 && exact_pos.z > 0 && exact_pos.z < CHUNK_BLOCK_WIDTH) {
+        }
     }
 
-    HitResult result;
-    float total_step = 0.0;
-    uint mode = MODE_PIECE;
-    result.value = imageLoad(piece_mip, piece_coord).r;
-    if (result.value != 0) {
-        PERFORM_PIECE_TRACE(x);
-    }
-    if (result.value == 0) { while (true) {
-        if (next_piece_distance.x < next_piece_distance.y) {
-            if (next_piece_distance.x < next_piece_distance.z) {
-                PERFORM_PIECE_STEP(x);
-            } else {
-                PERFORM_PIECE_STEP(z);
-            }
-        } else {
-            if (next_piece_distance.y < next_piece_distance.z) {
-                PERFORM_PIECE_STEP(y);
-            } else {
-                PERFORM_PIECE_STEP(z);
-            }
-        }
-    } }
     result.distance = total_step;
-    result.position = origin + direction * result.distance;
+    result.position = origin + direction * (total_step + 0.01);
 
     return result;
 }
@@ -347,6 +373,8 @@ void main() {
             color += albedo1 * color2;
         }
         color += get_material_emission(primary.value);
+    } else {
+        color = vec3(primary.distance / 256.0);
     }
 
     imageStore(
