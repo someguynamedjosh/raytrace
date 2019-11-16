@@ -29,7 +29,7 @@ const PIECE_BLOCK_VOLUME: u32 = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BL
 const CHUNK_PIECE_VOLUME: u32 = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
 const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const ROOT_CHUNK_WIDTH: u32 = 16; // root is 64x64x64 chunks.
+const ROOT_CHUNK_WIDTH: u32 = 4; // root is 64x64x64 chunks.
 const ATLAS_CHUNK_WIDTH: u32 = 4; // atlas is 4x4x4 chunks
 const ATLAS_PIECE_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_PIECE_WIDTH;
 const ATLAS_BLOCK_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
@@ -153,9 +153,9 @@ impl RenderBuilder {
         let block_data_atlas = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
-                width: CHUNK_BLOCK_WIDTH,
-                height: CHUNK_BLOCK_WIDTH,
-                depth: CHUNK_BLOCK_WIDTH,
+                width: ATLAS_BLOCK_WIDTH,
+                height: ATLAS_BLOCK_WIDTH,
+                depth: ATLAS_BLOCK_WIDTH,
             },
             Format::R16Uint,
             Some(self.queue.family()),
@@ -261,12 +261,12 @@ impl Renderer {
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
         if self.image_update_requested {
             add_to = add_to
-                .clear_color_image(self.root_image.clone(), [0u32].into())
+                .clear_color_image(self.root_image.clone(), [21u32].into())
                 .unwrap()
                 .copy_buffer_to_image_dimensions(
                     self.block_data.clone(),
                     self.block_data_atlas.clone(),
-                    [0, 0, 0],
+                    [CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH],
                     [CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH],
                     0,
                     0,
@@ -276,7 +276,7 @@ impl Renderer {
                 .copy_buffer_to_image_dimensions(
                     self.piece_mip.clone(),
                     self.piece_mip_atlas.clone(),
-                    [0, 0, 0],
+                    [CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH],
                     [CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH],
                     0,
                     0,

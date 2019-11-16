@@ -19,9 +19,11 @@ const uint PIECE_BLOCK_VOLUME = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BL
 const uint CHUNK_PIECE_VOLUME = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
 const uint CHUNK_BLOCK_VOLUME = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const uint ROOT_CHUNK_WIDTH = 16; // root is 64x64x64 chunks.
+const uint ROOT_CHUNK_WIDTH = 4; // root is 64x64x64 chunks.
 const uint ATLAS_CHUNK_WIDTH = 4; // atlas is 4x4x4 chunks
 const uint ATLAS_CHUNK_VOLUME = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
+const uint UNLOADED_CHUNK_INDEX = 0xFFFF;
+const uint EMPTY_CHUNK_INDEX = 0xFFFE;
 
 const uint NORMAL_x = 0;
 const uint NORMAL_y = 2;
@@ -40,7 +42,7 @@ struct HitResult {
     block_coord.AXIS += step.AXIS; \
     total_step = next_block_distance.AXIS; \
     if (block_coord.AXIS == piece_exit_planes.AXIS) { break; } \
-    result.value = imageLoad(block_data_atlas, block_coord).r; \
+    result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
     if (result.value != 0) { \
         result.normal = int(NORMAL_##AXIS) + (step.AXIS + 1) / 2;\
         break; \
@@ -76,7 +78,7 @@ struct HitResult {
     } \
     next_block_distance += vec3(total_step); \
     block_coord %= ivec3(CHUNK_BLOCK_WIDTH); \
-    result.value = imageLoad(block_data_atlas, block_coord).r; \
+    result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
     if (result.value == 0) { for (int i = 0; i < 128; i++) { \
         if (next_block_distance.x < next_block_distance.y) { \
             if (next_block_distance.x < next_block_distance.z) { \
@@ -99,7 +101,7 @@ struct HitResult {
     piece_coord.AXIS += step.AXIS; \
     total_step = next_piece_distance.AXIS; \
     if (piece_coord.AXIS < 0 || piece_coord.AXIS == CHUNK_PIECE_WIDTH) { break; } \
-    result.value = imageLoad(piece_mip_atlas, piece_coord).r; \
+    result.value = imageLoad(piece_mip_atlas, piece_coord + atlas_offset * ivec3(CHUNK_PIECE_WIDTH)).r; \
     if (result.value != 0) { \
         PERFORM_PIECE_TRACE(AXIS); \
         if (result.value != 0) { break; } \
@@ -130,8 +132,8 @@ struct HitResult {
         next_piece_distance.z = (real_pos.z - piece_coord.z) * piece_advance_amount.z; \
     } \
     next_piece_distance += vec3(total_step); \
-    piece_coord = block_coord % ivec3(CHUNK_BLOCK_WIDTH) / ivec3(CHUNK_PIECE_WIDTH); \
-    result.value = imageLoad(piece_mip_atlas, piece_coord).r; \
+    piece_coord = block_coord % ivec3(CHUNK_BLOCK_WIDTH) / ivec3(PIECE_BLOCK_WIDTH); \
+    result.value = imageLoad(piece_mip_atlas, piece_coord + atlas_offset * ivec3(CHUNK_PIECE_WIDTH)).r; \
     if (result.value != 0) { \
         PERFORM_PIECE_TRACE(AXIS); \
     } \
@@ -155,7 +157,14 @@ struct HitResult {
     chunk_coord.AXIS += step.AXIS; \
     total_step = next_chunk_distance.AXIS; \
     if (chunk_coord.AXIS < 0 || chunk_coord.AXIS == ROOT_CHUNK_WIDTH) { break; } \
-    if (chunk_coord.z < 1) { \
+    chunk_index = imageLoad(root, chunk_coord).r; \
+    if (chunk_coord.z > 0) { \
+        chunk_index = EMPTY_CHUNK_INDEX; \
+    } \
+    if (chunk_index != EMPTY_CHUNK_INDEX) { \
+        atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
+        atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
+        atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
         PERFORM_CHUNK_TRACE(AXIS) \
     } \
     if (result.value != 0) { break; } \
@@ -164,10 +173,11 @@ struct HitResult {
 HitResult trace_ray(vec3 origin, vec3 direction) {
     HitResult result;
     float total_step = 0.0;
-    ivec3 block_coord, piece_coord;
+    ivec3 block_coord, piece_coord, atlas_offset;
     ivec3 piece_exit_planes, chunk_exit_planes;
     vec3 next_piece_distance, next_block_distance;
     ivec3 chunk_coord = ivec3(floor(origin / CHUNK_BLOCK_WIDTH));
+    uint chunk_index;
 
     ivec3 step = ivec3(
         direction.x < 0 ? -1 : 1,
@@ -204,7 +214,16 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     }
 
     result.value = 0;
-    if (chunk_coord.z < 1) { PERFORM_CHUNK_TRACE(x); }
+    chunk_index = imageLoad(root, chunk_coord).r;
+    if (chunk_coord.z > 0) {
+        chunk_index = EMPTY_CHUNK_INDEX;
+    }
+    if (chunk_index != EMPTY_CHUNK_INDEX) {
+        atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH);
+        atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH);
+        atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH);
+        PERFORM_CHUNK_TRACE(x);
+    }
     if (result.value == 0) { for (int i = 0; i < 128; i++) {
         if (next_chunk_distance.x < next_chunk_distance.y) {
             if (next_chunk_distance.x < next_chunk_distance.z) {
