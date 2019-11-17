@@ -9,6 +9,8 @@ use vulkano::format::Format;
 use vulkano::image::{Dimensions, StorageImage};
 use vulkano::pipeline::ComputePipeline;
 
+use noise::{NoiseFn, Perlin};
+
 use std::sync::Arc;
 
 use crate::shaders::{self, BasicRaytraceShaderLayout, CameraVectorPushConstants};
@@ -173,9 +175,14 @@ impl World {
     }
 
     fn generate(&mut self) {
+        let perlin = Perlin::new();
         for x in 0..ROOT_BLOCK_WIDTH as usize {
             for y in 0..ROOT_BLOCK_WIDTH as usize {
-                self.draw_block(x, y, (x + y) / 4, ((x + y) % 4 + 1) as u16);
+                let height = (perlin.get([x as f64 / 50.0, y as f64 / 50.0]) * 7.0 + 10.0) as usize;
+                println!("{}", height);
+                for z in 0..height {
+                    self.draw_block(x, y, z, 1);
+                }
             }
         }
     }
