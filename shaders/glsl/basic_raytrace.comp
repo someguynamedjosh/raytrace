@@ -11,16 +11,16 @@ layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
 } camera_vectors;
 
-const uint PIECE_BLOCK_WIDTH = 8; // pieces are 8x8x8 blocks
-const uint CHUNK_PIECE_WIDTH = 8; // chunks are 8x8x8 pieces
+const uint PIECE_BLOCK_WIDTH = 4; // pieces are 8x8x8 blocks
+const uint CHUNK_PIECE_WIDTH = 4; // chunks are 8x8x8 pieces
 const uint CHUNK_BLOCK_WIDTH = CHUNK_PIECE_WIDTH * PIECE_BLOCK_WIDTH;
 
 const uint PIECE_BLOCK_VOLUME = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH;
 const uint CHUNK_PIECE_VOLUME = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
 const uint CHUNK_BLOCK_VOLUME = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const uint ROOT_CHUNK_WIDTH = 4; // root is 64x64x64 chunks.
-const uint ATLAS_CHUNK_WIDTH = 4; // atlas is 4x4x4 chunks
+const uint ROOT_CHUNK_WIDTH = 32; // root is 64x64x64 chunks.
+const uint ATLAS_CHUNK_WIDTH = 16; // atlas is 4x4x4 chunks
 const uint ATLAS_CHUNK_VOLUME = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
 const uint EMPTY_CHUNK_INDEX = 0xFFFF;
 const uint UNLOADED_CHUNK_INDEX = 0xFFFE;

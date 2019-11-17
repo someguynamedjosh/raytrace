@@ -13,8 +13,8 @@ use noise::{NoiseFn, Perlin};
 
 use std::sync::Arc;
 
-use shaders::{self, BasicRaytraceShaderLayout, CameraVectorPushConstants};
 use crate::util;
+use shaders::{self, BasicRaytraceShaderLayout, CameraVectorPushConstants};
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
@@ -23,18 +23,18 @@ type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderL
 type GenericImage = StorageImage<Format>;
 type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
 
-const PIECE_BLOCK_WIDTH: u32 = 8; // pieces are 8x8x8 blocks
-const CHUNK_PIECE_WIDTH: u32 = 8; // chunks are 8x8x8 pieces
+const PIECE_BLOCK_WIDTH: u32 = 4; // pieces are 8x8x8 blocks
+const CHUNK_PIECE_WIDTH: u32 = 4; // chunks are 8x8x8 pieces
 const CHUNK_BLOCK_WIDTH: u32 = CHUNK_PIECE_WIDTH * PIECE_BLOCK_WIDTH;
 
 const PIECE_BLOCK_VOLUME: u32 = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH;
 const CHUNK_PIECE_VOLUME: u32 = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
 const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const ROOT_CHUNK_WIDTH: u32 = 4; // root is 64x64x64 chunks.
+const ROOT_CHUNK_WIDTH: u32 = 32; // root is 64x64x64 chunks.
 const ROOT_BLOCK_WIDTH: u32 = ROOT_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 const ROOT_CHUNK_VOLUME: u32 = ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH;
-const ATLAS_CHUNK_WIDTH: u32 = 4; // atlas is 4x4x4 chunks
+const ATLAS_CHUNK_WIDTH: u32 = 16; // atlas is 4x4x4 chunks
 const ATLAS_PIECE_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_PIECE_WIDTH;
 const ATLAS_BLOCK_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 const ATLAS_CHUNK_VOLUME: u32 = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
@@ -90,52 +90,10 @@ impl Chunk {
     }
 }
 
-fn generate_chunk() -> Chunk {
-    let mut chunk = Chunk::new();
-    let mut index = 0;
-    for z in 0..CHUNK_BLOCK_WIDTH {
-        for y in 0..CHUNK_BLOCK_WIDTH {
-            for x in 0..CHUNK_BLOCK_WIDTH {
-                let (mipx, mipy, mipz) = (
-                    x / PIECE_BLOCK_WIDTH,
-                    y / PIECE_BLOCK_WIDTH,
-                    z / PIECE_BLOCK_WIDTH,
-                );
-                let mip_index =
-                    (((mipz * CHUNK_PIECE_WIDTH) + mipy) * CHUNK_PIECE_WIDTH + mipx) as usize;
-                if z < 8 {
-                    chunk.block_data[index] = 1;
-                    chunk.piece_mip[mip_index] = 10;
-                }
-                if x % 32 < 16 && y % 32 < 16 && z < 24 {
-                    if z < 16 {
-                        chunk.block_data[index] = 2;
-                        chunk.piece_mip[mip_index] = 10;
-                    } else if x % 16 / 8 == y % 16 / 8 {
-                        chunk.block_data[index] = 3;
-                        chunk.piece_mip[mip_index] = 10;
-                    } else if x % 8 / 4 == y % 8 / 4 {
-                        chunk.block_data[index] = 4;
-                        chunk.piece_mip[mip_index] = 10;
-                    }
-                } else if x % 16 == 7 && y % 16 == 7 && z < 16 {
-                    chunk.block_data[index] = 5;
-                    chunk.piece_mip[mip_index] = 10;
-                } else if x % 16 == 10 && y % 16 == 10 && z < 16 {
-                    chunk.block_data[index] = 6;
-                    chunk.piece_mip[mip_index] = 10;
-                }
-                index += 1;
-            }
-        }
-    }
-    chunk
-}
-
 enum WorldChunk {
     Ungenerated,
     Empty,
-    Occupied(Box<Chunk>)
+    Occupied(Box<Chunk>),
 }
 
 impl Default for WorldChunk {
@@ -145,23 +103,38 @@ impl Default for WorldChunk {
 }
 
 struct World {
-    chunks: [WorldChunk; ROOT_CHUNK_VOLUME as usize]
+    chunks: Vec<WorldChunk>,
 }
 
 impl World {
     fn new() -> World {
         let mut world = World {
-            chunks: [WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated, WorldChunk::Ungenerated]
+            chunks: Vec::new()
         };
+        for _ in 0..ROOT_CHUNK_VOLUME {
+            world.chunks.push(WorldChunk::Ungenerated);
+        }
         world.generate();
         world.finalize();
         world
     }
 
     fn draw_block(&mut self, x: usize, y: usize, z: usize, value: u16) {
-        let (cx, cy, cz) = (x / CHUNK_BLOCK_WIDTH as usize, y / CHUNK_BLOCK_WIDTH as usize, z / CHUNK_BLOCK_WIDTH as usize);
-        let (bx, by, bz) = (x % CHUNK_BLOCK_WIDTH as usize, y % CHUNK_BLOCK_WIDTH as usize, z % CHUNK_BLOCK_WIDTH as usize);
-        let (px, py, pz) = (bx / PIECE_BLOCK_WIDTH as usize, by / PIECE_BLOCK_WIDTH as usize, bz / PIECE_BLOCK_WIDTH as usize);
+        let (cx, cy, cz) = (
+            x / CHUNK_BLOCK_WIDTH as usize,
+            y / CHUNK_BLOCK_WIDTH as usize,
+            z / CHUNK_BLOCK_WIDTH as usize,
+        );
+        let (bx, by, bz) = (
+            x % CHUNK_BLOCK_WIDTH as usize,
+            y % CHUNK_BLOCK_WIDTH as usize,
+            z % CHUNK_BLOCK_WIDTH as usize,
+        );
+        let (px, py, pz) = (
+            bx / PIECE_BLOCK_WIDTH as usize,
+            by / PIECE_BLOCK_WIDTH as usize,
+            bz / PIECE_BLOCK_WIDTH as usize,
+        );
         let chunk_index = (cz * ROOT_CHUNK_WIDTH as usize + cy) * ROOT_CHUNK_WIDTH as usize + cx;
         let block_index = (bz * CHUNK_BLOCK_WIDTH as usize + by) * CHUNK_BLOCK_WIDTH as usize + bx;
         let piece_index = (pz * CHUNK_PIECE_WIDTH as usize + py) * CHUNK_PIECE_WIDTH as usize + px;
@@ -178,8 +151,7 @@ impl World {
         let perlin = Perlin::new();
         for x in 0..ROOT_BLOCK_WIDTH as usize {
             for y in 0..ROOT_BLOCK_WIDTH as usize {
-                let height = (perlin.get([x as f64 / 50.0, y as f64 / 50.0]) * 7.0 + 10.0) as usize;
-                println!("{}", height);
+                let height = (perlin.get([x as f64 / 250.0, y as f64 / 250.0]) * 7.0 + 10.0) as usize;
                 for z in 0..height {
                     self.draw_block(x, y, z, 1);
                 }
@@ -211,7 +183,7 @@ impl RenderBuilder {
         Arc<WorldData>,
         Arc<WorldImage>,
     ) {
-        let chunk = generate_chunk();
+        let chunk = Chunk::new();
 
         let block_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
@@ -263,10 +235,11 @@ impl RenderBuilder {
         let (block_data, block_data_atlas, piece_mip, piece_mip_atlas) = self.make_world();
 
         let root_data = CpuAccessibleBuffer::from_iter(
-            self.device.clone(), 
-            BufferUsage::all(), 
-            (0..ROOT_CHUNK_VOLUME).map(|_| UNLOADED_CHUNK_INDEX)
-        ).unwrap();
+            self.device.clone(),
+            BufferUsage::all(),
+            (0..ROOT_CHUNK_VOLUME).map(|_| UNLOADED_CHUNK_INDEX),
+        )
+        .unwrap();
         let root_image = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
@@ -276,7 +249,8 @@ impl RenderBuilder {
             },
             Format::R16Uint,
             Some(self.queue.family()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
 
@@ -357,7 +331,11 @@ impl Renderer {
                 .copy_buffer_to_image_dimensions(
                     self.block_data.clone(),
                     self.block_data_atlas.clone(),
-                    [x * CHUNK_BLOCK_WIDTH, y * CHUNK_BLOCK_WIDTH, z * CHUNK_BLOCK_WIDTH],
+                    [
+                        x * CHUNK_BLOCK_WIDTH,
+                        y * CHUNK_BLOCK_WIDTH,
+                        z * CHUNK_BLOCK_WIDTH,
+                    ],
                     [CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH],
                     0,
                     0,
@@ -367,7 +345,11 @@ impl Renderer {
                 .copy_buffer_to_image_dimensions(
                     self.piece_mip.clone(),
                     self.piece_mip_atlas.clone(),
-                    [x * CHUNK_PIECE_WIDTH, y * CHUNK_PIECE_WIDTH, z * CHUNK_PIECE_WIDTH],
+                    [
+                        x * CHUNK_PIECE_WIDTH,
+                        y * CHUNK_PIECE_WIDTH,
+                        z * CHUNK_PIECE_WIDTH,
+                    ],
                     [CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH],
                     0,
                     0,
@@ -400,9 +382,12 @@ impl Renderer {
 
     pub fn read_feedback(&mut self) {
         let mut content = self.root_data.write().unwrap();
-        for i in 0..64 {
+        for i in 0..ROOT_CHUNK_VOLUME as usize {
             if content[i] == REQUEST_LOAD_CHUNK_INDEX {
                 if let WorldChunk::Occupied(chunk) = &mut self.world.chunks[i] {
+                    if self.chunk_upload_waiting {
+                        continue;
+                    }
                     self.chunk_upload_index += 1;
                     self.chunk_upload_waiting = true;
                     content[i] = self.chunk_upload_index;
@@ -417,7 +402,6 @@ impl Renderer {
                 } else {
                     content[i] = EMPTY_CHUNK_INDEX;
                 }
-                break;
             }
         }
     }
