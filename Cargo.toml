@@ -1,10 +1,10 @@
+[workspace]
+
 [package]
 name = "raytrace"
 version = "0.1.0"
 authors = ["Code_Cube <therealcodecube@gmail.com>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 vulkano = "0.14"
@@ -15,3 +15,4 @@ image = "0.22"
 winit = "0.19"
 time = "0.1.42"
 noise = "0.6.0"
+shaders = { path = "shaders" }

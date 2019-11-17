@@ -32,7 +32,6 @@ use std::sync::Arc;
 mod init;
 mod presenter;
 mod renderer;
-mod shaders;
 mod util;
 
 use presenter::Presenter;

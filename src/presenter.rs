@@ -12,7 +12,7 @@ use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 
 use std::sync::Arc;
 
-use crate::shaders::{self, ScreenFragmentShader, ScreenVertexShader};
+use shaders::{self, ScreenFragmentShader, ScreenVertexShader};
 
 #[derive(Clone, Debug, Default)]
 struct PresenterVertex {

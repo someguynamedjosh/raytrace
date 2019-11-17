@@ -816,6 +816,7 @@ dependencies = [
  "cgmath 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "image 0.22.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "noise 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "shaders 0.1.0",
  "time 0.1.42 (registry+https://github.com/rust-lang/crates.io-index)",
  "vulkano 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vulkano-shaders 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -907,6 +908,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cmake 0.1.42 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "shaders"
+version = "0.1.0"
+dependencies = [
+ "vulkano 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano-shaders 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

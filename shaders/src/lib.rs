@@ -4,15 +4,15 @@ use std::sync::Arc;
 
 // Unfortunately the shader! macro does not trigger a recompile whenever source code changes.
 fn _watchdog() {
-    let _source = include_bytes!("../shaders/basic_raytrace.comp");
-    let _source = include_bytes!("../shaders/screen.vert");
-    let _source = include_bytes!("../shaders/screen.frag");
+    let _source = include_bytes!("../glsl/basic_raytrace.comp");
+    let _source = include_bytes!("../glsl/screen.vert");
+    let _source = include_bytes!("../glsl/screen.frag");
 }
 
 mod basic_raytrace {
     vulkano_shaders::shader! {
         ty: "compute",
-        path: "shaders/basic_raytrace.comp"
+        path: "glsl/basic_raytrace.comp"
     }
 }
 pub use basic_raytrace::ty::CameraVectors as CameraVectorPushConstants;
@@ -22,7 +22,7 @@ pub use basic_raytrace::Shader as BasicRaytraceShader;
 mod screen_vs {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "shaders/screen.vert"
+        path: "glsl/screen.vert"
     }
 }
 pub use screen_fs::Layout as ScreenFragmentShaderLayout;
@@ -31,7 +31,7 @@ pub use screen_fs::Shader as ScreenFragmentShader;
 mod screen_fs {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "shaders/screen.frag"
+        path: "glsl/screen.frag"
     }
 }
 pub use screen_vs::Layout as ScreenVertexShaderLayout;

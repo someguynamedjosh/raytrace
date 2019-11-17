@@ -13,7 +13,7 @@ use noise::{NoiseFn, Perlin};
 
 use std::sync::Arc;
 
-use crate::shaders::{self, BasicRaytraceShaderLayout, CameraVectorPushConstants};
+use shaders::{self, BasicRaytraceShaderLayout, CameraVectorPushConstants};
 use crate::util;
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
