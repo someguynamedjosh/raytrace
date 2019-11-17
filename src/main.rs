@@ -152,28 +152,6 @@ fn main() {
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 
-        match future {
-            Ok(future) => {
-                previous_frame_end = Box::new(future) as Box<_>;
-            }
-            Err(FlushError::OutOfDate) => {
-                recreate_swapchain = true;
-                previous_frame_end = Box::new(sync::now(device.clone())) as Box<_>;
-            }
-            Err(e) => {
-                println!("{:?}", e);
-                previous_frame_end = Box::new(sync::now(device.clone())) as Box<_>;
-            }
-        }
-
-        // Note that in more complex programs it is likely that one of `acquire_next_image`,
-        // `command_buffer::submit`, or `present` will block for some time. This happens when the
-        // GPU's queue is full and the driver has to wait until the GPU finished some work.
-        //
-        // Unfortunately the Vulkan API doesn't provide any way to not wait or to detect when a
-        // wait would happen. Blocking may be the desired behavior, but if you don't want to
-        // block you should spawn a separate thread dedicated to submissions.
-
         // Handling the window events in order to close the program when the user wants to close
         // it.
         let mut done = false;
@@ -241,6 +219,24 @@ fn main() {
         if done {
             return;
         }
+
+        match future {
+            Ok(future) => {
+                future.wait(None).unwrap();
+                previous_frame_end = Box::new(sync::now(device.clone())) as Box<_>;
+            }
+            Err(FlushError::OutOfDate) => {
+                recreate_swapchain = true;
+                previous_frame_end = Box::new(sync::now(device.clone())) as Box<_>;
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                previous_frame_end = Box::new(sync::now(device.clone())) as Box<_>;
+            }
+        }
+
+        renderer.read_feedback();
+
         let elapsed = frame_start.elapsed().as_millis() as f32 / 1000.0;
         total_frame_time += frame_start.elapsed().as_millis();
         total_frames += 1;

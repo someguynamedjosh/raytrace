@@ -22,8 +22,9 @@ const uint CHUNK_BLOCK_VOLUME = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BL
 const uint ROOT_CHUNK_WIDTH = 4; // root is 64x64x64 chunks.
 const uint ATLAS_CHUNK_WIDTH = 4; // atlas is 4x4x4 chunks
 const uint ATLAS_CHUNK_VOLUME = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
-const uint UNLOADED_CHUNK_INDEX = 0xFFFF;
-const uint EMPTY_CHUNK_INDEX = 0xFFFE;
+const uint EMPTY_CHUNK_INDEX = 0xFFFF;
+const uint UNLOADED_CHUNK_INDEX = 0xFFFE;
+const uint REQUEST_LOAD_CHUNK_INDEX = 0xFFFD;
 
 const uint NORMAL_x = 0;
 const uint NORMAL_y = 2;
@@ -158,10 +159,12 @@ struct HitResult {
     total_step = next_chunk_distance.AXIS; \
     if (chunk_coord.AXIS < 0 || chunk_coord.AXIS == ROOT_CHUNK_WIDTH) { break; } \
     chunk_index = imageLoad(root, chunk_coord).r; \
-    if (chunk_coord.z > 0) { \
-        chunk_index = EMPTY_CHUNK_INDEX; \
-    } \
-    if (chunk_index != EMPTY_CHUNK_INDEX) { \
+    if (chunk_index == UNLOADED_CHUNK_INDEX) { \
+        imageStore(root, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
+        break; \
+    } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) { \
+        break; \
+    } else if (chunk_index != EMPTY_CHUNK_INDEX) { \
         atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
         atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
         atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
@@ -215,30 +218,32 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
 
     result.value = 0;
     chunk_index = imageLoad(root, chunk_coord).r;
-    if (chunk_coord.z > 0) {
-        chunk_index = EMPTY_CHUNK_INDEX;
-    }
-    if (chunk_index != EMPTY_CHUNK_INDEX) {
-        atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH);
-        atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH);
-        atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH);
-        PERFORM_CHUNK_TRACE(x);
-    }
-    if (result.value == 0) { for (int i = 0; i < 128; i++) {
-        if (next_chunk_distance.x < next_chunk_distance.y) {
-            if (next_chunk_distance.x < next_chunk_distance.z) {
-                PERFORM_CHUNK_STEP(x);
-            } else {
-                PERFORM_CHUNK_STEP(z);
-            }
-        } else {
-            if (next_chunk_distance.y < next_chunk_distance.z) {
-                PERFORM_CHUNK_STEP(y);
-            } else {
-                PERFORM_CHUNK_STEP(z);
-            }
+    if (chunk_index == UNLOADED_CHUNK_INDEX) {
+        imageStore(root, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX));
+    } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) {
+    } else {
+        if (chunk_index != EMPTY_CHUNK_INDEX) {
+            atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH);
+            atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH);
+            atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH);
+            PERFORM_CHUNK_TRACE(x);
         }
-    } }
+        if (result.value == 0) { for (int i = 0; i < 128; i++) {
+            if (next_chunk_distance.x < next_chunk_distance.y) {
+                if (next_chunk_distance.x < next_chunk_distance.z) {
+                    PERFORM_CHUNK_STEP(x);
+                } else {
+                    PERFORM_CHUNK_STEP(z);
+                }
+            } else {
+                if (next_chunk_distance.y < next_chunk_distance.z) {
+                    PERFORM_CHUNK_STEP(y);
+                } else {
+                    PERFORM_CHUNK_STEP(z);
+                }
+            }
+        } }
+    }
 
     result.distance = total_step;
     result.position = origin + direction * total_step;
@@ -451,3 +456,19 @@ void main() {
         vec4(color, 1.0)
     );
 }
+
+/*
+void main() {
+    uint index = imageLoad(root, ivec3(
+        gl_GlobalInvocationID.x / 4 % ROOT_CHUNK_WIDTH,
+        gl_GlobalInvocationID.x / 4 / ROOT_CHUNK_WIDTH % ROOT_CHUNK_WIDTH,
+        gl_GlobalInvocationID.y / 4 % ROOT_CHUNK_WIDTH
+    )).r;
+    if (index > 64) index = 64;
+    imageStore(
+        final_output,
+        ivec2(gl_GlobalInvocationID.xy), 
+        vec4(vec3(index) / 64.0, 1.0)
+    );
+}
+*/

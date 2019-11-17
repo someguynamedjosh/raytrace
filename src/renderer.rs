@@ -30,10 +30,15 @@ const CHUNK_PIECE_VOLUME: u32 = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PI
 const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
 const ROOT_CHUNK_WIDTH: u32 = 4; // root is 64x64x64 chunks.
+const ROOT_CHUNK_VOLUME: u32 = ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH;
 const ATLAS_CHUNK_WIDTH: u32 = 4; // atlas is 4x4x4 chunks
 const ATLAS_PIECE_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_PIECE_WIDTH;
 const ATLAS_BLOCK_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 const ATLAS_CHUNK_VOLUME: u32 = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
+
+const EMPTY_CHUNK_INDEX: u16 = 0xFFFF;
+const UNLOADED_CHUNK_INDEX: u16 = 0xFFFE;
+const REQUEST_LOAD_CHUNK_INDEX: u16 = 0xFFFD;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
@@ -50,13 +55,16 @@ pub struct Camera {
 pub struct Renderer {
     target_width: u32,
     target_height: u32,
-    image_update_requested: bool,
+
+    chunk_upload_waiting: bool,
+    chunk_upload_index: u16,
 
     block_data: Arc<WorldData>,
     block_data_atlas: Arc<WorldImage>,
     piece_mip: Arc<WorldData>,
     piece_mip_atlas: Arc<WorldImage>,
 
+    root_data: Arc<WorldData>,
     root_image: Arc<WorldImage>,
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
@@ -184,6 +192,12 @@ impl RenderBuilder {
         };
 
         let (block_data, block_data_atlas, piece_mip, piece_mip_atlas) = self.make_world();
+
+        let root_data = CpuAccessibleBuffer::from_iter(
+            self.device.clone(), 
+            BufferUsage::all(), 
+            (0..ROOT_CHUNK_VOLUME).map(|_| UNLOADED_CHUNK_INDEX)
+        ).unwrap();
         let root_image = StorageImage::new(
             self.device.clone(),
             Dimensions::Dim3d {
@@ -222,13 +236,16 @@ impl RenderBuilder {
         Renderer {
             target_width,
             target_height,
-            image_update_requested: true,
+
+            chunk_upload_waiting: false,
+            chunk_upload_index: 0,
 
             block_data,
             block_data_atlas,
             piece_mip,
             piece_mip_atlas,
 
+            root_data,
             root_image,
 
             basic_raytrace_pipeline,
@@ -259,14 +276,17 @@ impl Renderer {
         let camera_pos = camera.origin;
         let util::TripleEulerVector { forward, up, right } =
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
-        if self.image_update_requested {
+        if self.chunk_upload_waiting {
+            let (x, y, z) = (
+                self.chunk_upload_index as u32 % ATLAS_CHUNK_WIDTH,
+                self.chunk_upload_index as u32 / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH,
+                self.chunk_upload_index as u32 / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH,
+            );
             add_to = add_to
-                .clear_color_image(self.root_image.clone(), [21u32].into())
-                .unwrap()
                 .copy_buffer_to_image_dimensions(
                     self.block_data.clone(),
                     self.block_data_atlas.clone(),
-                    [CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH],
+                    [x * CHUNK_BLOCK_WIDTH, y * CHUNK_BLOCK_WIDTH, z * CHUNK_BLOCK_WIDTH],
                     [CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH, CHUNK_BLOCK_WIDTH],
                     0,
                     0,
@@ -276,17 +296,18 @@ impl Renderer {
                 .copy_buffer_to_image_dimensions(
                     self.piece_mip.clone(),
                     self.piece_mip_atlas.clone(),
-                    [CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH],
+                    [x * CHUNK_PIECE_WIDTH, y * CHUNK_PIECE_WIDTH, z * CHUNK_PIECE_WIDTH],
                     [CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH],
                     0,
                     0,
                     0,
                 )
                 .unwrap();
-            self.image_update_requested = false;
+            self.chunk_upload_waiting = false;
         }
         add_to
-            // Do initial raytrace to determine which voxels are on screen.
+            .copy_buffer_to_image(self.root_data.clone(), self.root_image.clone())
+            .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.basic_raytrace_pipeline.clone(),
@@ -302,5 +323,34 @@ impl Renderer {
                 },
             )
             .unwrap()
+            .copy_image_to_buffer(self.root_image.clone(), self.root_data.clone())
+            .unwrap()
+    }
+
+    pub fn read_feedback(&mut self) {
+        let mut content = self.root_data.write().unwrap();
+        for i in 0..64 {
+            print!("{:x?} ", content[i]);
+            if content[i] == REQUEST_LOAD_CHUNK_INDEX {
+                if i > 16 {
+                    content[i] = EMPTY_CHUNK_INDEX;
+                } else {
+                    self.chunk_upload_index += 1;
+                    self.chunk_upload_waiting = true;
+                    content[i] = self.chunk_upload_index;
+                    let chunk = generate_chunk();
+                    let mut block_data = self.block_data.write().unwrap();
+                    let mut piece_mip = self.piece_mip.write().unwrap();
+                    for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
+                        block_data[block_index] = chunk.block_data[block_index];
+                    }
+                    for piece_index in 0..CHUNK_PIECE_VOLUME as usize {
+                        piece_mip[piece_index] = chunk.piece_mip[piece_index];
+                    }
+                }
+                println!("fedback");
+                break;
+            }
+        }
     }
 }
