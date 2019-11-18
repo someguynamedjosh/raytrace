@@ -128,7 +128,7 @@ struct HitResult {
 #define PERFORM_REGION_TRACE(AXIS) \
     vec3 real_pos = origin + direction * total_step; \
     vec3 fake_pos = real_pos; \
-    fake_pos.AXIS += step.AXIS * 0.1; \
+    fake_pos.AXIS += step.AXIS * 0.01; \
     block_coord = ivec3(floor(fake_pos)); \
     chunk_coord = block_coord / ivec3(CHUNK_BLOCK_WIDTH); \
     real_pos /= vec3(CHUNK_BLOCK_WIDTH); \
@@ -358,13 +358,13 @@ vec3 get_material_albedo(uint material) {
         case 0:
         return vec3(1, 0, 1);
         case 1:
-        return vec3(0.8);
+        return vec3(0.3, 0.9, 0.1);
         case 2:
         return vec3(0.4, 0.3, 0.2);
         case 3:
-        return vec3(0.2, 0.8, 0.2);
+        return vec3(0.4);
         case 4:
-        return vec3(0.2, 0.4, 0.9);
+        return vec3(0.6, 0.2, 0.1);
         case 5:
         return vec3(0.2, 0.8, 0.7);
         case 6:

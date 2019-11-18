@@ -9,7 +9,8 @@ use vulkano::format::Format;
 use vulkano::image::{Dimensions, StorageImage};
 use vulkano::pipeline::ComputePipeline;
 
-use noise::{NoiseFn, Perlin};
+use rand::{self, RngCore};
+use noise::{NoiseFn, HybridMulti};
 
 use std::sync::Arc;
 
@@ -150,12 +151,47 @@ impl World {
     }
 
     fn generate(&mut self) {
-        let perlin = Perlin::new();
+        let mut perlin = HybridMulti::new();
+        perlin.octaves = 4;
+        perlin.frequency = 0.4;
+        perlin.lacunarity = 2.3;
+        perlin.persistence = 0.6;
+        let mut micro = HybridMulti::new();
+        micro.octaves = 1;
+        micro.frequency = 30.0;
+        micro.lacunarity = 2.0;
+        micro.persistence = 1.0;
+        let mut random = rand::thread_rng();
         for x in 0..ROOT_BLOCK_WIDTH as usize {
             for y in 0..ROOT_BLOCK_WIDTH as usize {
-                let height = (perlin.get([x as f64 / 250.0, y as f64 / 250.0]) * 7.0 + 10.0) as usize;
+                let coord = [x as f64 / 250.0, y as f64 / 250.0];
+                let mut height = (perlin.get(coord) * 4.0 + micro.get(coord) * 0.0 + 20.0) as usize;
+                if x == 200 && y == 200 {
+                    height += 8;
+                }
                 for z in 0..height {
-                    self.draw_block(x, y, z, 1);
+                    self.draw_block(x, y, z, if z == height - 1 { 1 } else { 3 });
+                }
+                if x > 15 && y > 15 && x < ROOT_BLOCK_WIDTH as usize - 15 && y < ROOT_BLOCK_WIDTH as usize - 15 && random.next_u32() % 10000 == 1 {
+                    for z in height..height + 4 {
+                        self.draw_block(x, y, z, 3);
+                        self.draw_block(x+1, y, z, 3);
+                        self.draw_block(x, y+1, z, 3);
+                        self.draw_block(x-1, y, z, 3);
+                        self.draw_block(x, y-1, z, 3);
+                    }
+                    for dx in 0..11 { for dy in 0..11 { for dz in 0..11 {
+                        let radius = (dx as isize - 5).abs() + (dy as isize - 5).abs() + (dz as isize - 5).abs();
+                        if radius < 8 {
+                            if dx == 5 || dy == 5 || dz == 5 {
+                                if radius < 7 {
+                                    self.draw_block(x + dx - 5, y + dy - 5, height + dz + 4, 3);
+                                }
+                            } else {
+                                self.draw_block(x + dx - 5, y + dy - 5, height + dz + 4, 2);
+                            }
+                        }
+                    }}}
                 }
             }
         }
