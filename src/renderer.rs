@@ -180,6 +180,7 @@ impl RenderBuilder {
     fn make_world(
         &self,
     ) -> (
+        World,
         Vec<Arc<WorldData>>,
         Arc<WorldImage>,
         Arc<WorldData>,
@@ -187,6 +188,8 @@ impl RenderBuilder {
         Arc<WorldData>,
         Arc<WorldImage>,
     ) {
+        let world = World::new();
+
         let upload_buffers = (0..NUM_UPLOAD_BUFFERS).map(|_| {
             CpuAccessibleBuffer::from_iter(
                 self.device.clone(),
@@ -230,7 +233,7 @@ impl RenderBuilder {
         let region_map_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(), 
             BufferUsage::all(), 
-            (0..ROOT_REGION_VOLUME).map(|_| UNLOADED_CHUNK_INDEX)
+            (0..ROOT_REGION_VOLUME as usize).map(|i| if world.regions[i] { 1 } else { EMPTY_CHUNK_INDEX })
         )
         .unwrap();
 
@@ -246,7 +249,7 @@ impl RenderBuilder {
         )
         .unwrap();
 
-        (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map)
+        (world, upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map)
     }
 
     fn build(self) -> Renderer {
@@ -255,7 +258,7 @@ impl RenderBuilder {
             _ => panic!("A non-2d image was passed as the target of a Renderer."),
         };
 
-        let (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map) = self.make_world();
+        let (world, upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map) = self.make_world();
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
 
@@ -295,7 +298,7 @@ impl RenderBuilder {
             region_map_data,
             region_map,
 
-            world: World::new(),
+            world,
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
@@ -386,11 +389,17 @@ impl Renderer {
                 region_map[region_index] = EMPTY_CHUNK_INDEX;
                 continue;
             }
-            region_map[region_index] = 1;
+            let rx = region_index % ROOT_REGION_WIDTH as usize;
+            let ry = region_index / ROOT_REGION_WIDTH as usize % ROOT_REGION_WIDTH as usize;
+            let rz = region_index / ROOT_REGION_WIDTH as usize / ROOT_REGION_WIDTH as usize;
+            let rx = rx * REGION_CHUNK_WIDTH as usize;
+            let ry = ry * REGION_CHUNK_WIDTH as usize;
+            let rz = rz * REGION_CHUNK_WIDTH as usize;
+            let offset = (rz * ROOT_CHUNK_WIDTH as usize + ry) * ROOT_CHUNK_WIDTH as usize + rx;
             for x in 0..REGION_CHUNK_WIDTH as usize {
                 for y in 0..REGION_CHUNK_WIDTH as usize {
                     for z in 0..REGION_CHUNK_WIDTH as usize {
-                        let chunk_index = (z * ROOT_CHUNK_WIDTH as usize + y) * ROOT_CHUNK_WIDTH as usize + x + region_index;
+                        let chunk_index = (z * ROOT_CHUNK_WIDTH as usize + y) * ROOT_CHUNK_WIDTH as usize + x + offset;
                         if chunk_map[chunk_index] != REQUEST_LOAD_CHUNK_INDEX { continue; }
                         if let WorldChunk::Occupied(chunk) = &mut self.world.chunks[chunk_index] {
                             chunk_map[chunk_index] = self.chunk_upload_index;
@@ -410,6 +419,7 @@ impl Renderer {
                     }
                 }
             }
+            region_map[region_index] = 1;
         }
     }
 }

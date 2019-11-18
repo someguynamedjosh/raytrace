@@ -47,7 +47,7 @@ struct HitResult {
 #define PERFORM_BLOCK_STEP(AXIS) \
     block_coord.AXIS += step.AXIS; \
     total_step = next_block_distance.AXIS; \
-    if (block_coord.AXIS == CHUNK_BLOCK_WIDTH || block_coord.AXIS == -1) { break; } \
+    if (block_coord.AXIS == chunk_exit_planes.AXIS) { break; } \
     result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
     if (result.value != 0) { \
         result.normal = int(NORMAL_##AXIS) + (step.AXIS + 1) / 2;\
@@ -63,24 +63,29 @@ struct HitResult {
     \
     if (step.x == 1) { \
         next_block_distance.x = (block_coord.x + 1 - real_pos.x) * block_advance_amount.x; \
+        chunk_exit_planes.x = int(CHUNK_BLOCK_WIDTH); \
     } else { \
         next_block_distance.x = (real_pos.x - block_coord.x) * block_advance_amount.x; \
+        chunk_exit_planes.x = -1; \
     } \
     if (step.y == 1) { \
         next_block_distance.y = (block_coord.y + 1 - real_pos.y) * block_advance_amount.y; \
+        chunk_exit_planes.y = int(CHUNK_BLOCK_WIDTH); \
     } else { \
         next_block_distance.y = (real_pos.y - block_coord.y) * block_advance_amount.y; \
+        chunk_exit_planes.y = -1; \
     } \
     if (step.z == 1) { \
         next_block_distance.z = (block_coord.z + 1 - real_pos.z) * block_advance_amount.z; \
+        chunk_exit_planes.z = int(CHUNK_BLOCK_WIDTH); \
     } else { \
         next_block_distance.z = (real_pos.z - block_coord.z) * block_advance_amount.z; \
+        chunk_exit_planes.z = -1; \
     } \
     next_block_distance += vec3(total_step); \
     block_coord %= ivec3(CHUNK_BLOCK_WIDTH); \
     result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
-    result.value = 1; \
-    if (result.value == 0) { for (int i = 0; i < 32; i++) { \
+    if (result.value == 0) { for (int i = 0; i < 128; i++) { \
         if (next_block_distance.x < next_block_distance.y) { \
             if (next_block_distance.x < next_block_distance.z) { \
                 PERFORM_BLOCK_STEP(x); \
@@ -123,7 +128,7 @@ struct HitResult {
 #define PERFORM_REGION_TRACE(AXIS) \
     vec3 real_pos = origin + direction * total_step; \
     vec3 fake_pos = real_pos; \
-    fake_pos.AXIS += step.AXIS * 0.01; \
+    fake_pos.AXIS += step.AXIS * 0.1; \
     block_coord = ivec3(floor(fake_pos)); \
     chunk_coord = block_coord / ivec3(CHUNK_BLOCK_WIDTH); \
     real_pos /= vec3(CHUNK_BLOCK_WIDTH); \
@@ -151,7 +156,6 @@ struct HitResult {
     } \
     next_chunk_distance += vec3(total_step); \
     \
-    result.value = 0; \
     chunk_index = imageLoad(chunk_map, chunk_coord).r; \
     if (chunk_index == UNLOADED_CHUNK_INDEX) { \
         imageStore(chunk_map, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
@@ -166,9 +170,9 @@ struct HitResult {
             atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
             atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
             atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
-            PERFORM_CHUNK_TRACE(x); \
+            PERFORM_CHUNK_TRACE(AXIS); \
         } \
-        if (result.value == 0) { for (int i = 0; i < 32; i++) { \
+        if (result.value == 0) { for (int i = 0; i < 128; i++) { \
             if (next_chunk_distance.x < next_chunk_distance.y) { \
                 if (next_chunk_distance.x < next_chunk_distance.z) { \
                     PERFORM_CHUNK_STEP(x); \
@@ -190,10 +194,7 @@ struct HitResult {
     total_step = next_region_distance.AXIS; \
     if (region_coord.AXIS < 0 || region_coord.AXIS == ROOT_REGION_WIDTH) { break; } \
     region_content = imageLoad(region_map, region_coord).r; \
-    if (region_content == UNLOADED_CHUNK_INDEX) { \
-        imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
-        break; \
-    } else if (region_content != EMPTY_CHUNK_INDEX) { \
+    if (region_content != EMPTY_CHUNK_INDEX) { \
         PERFORM_REGION_TRACE(AXIS); \
     } \
     if (result.value != 0) { break; } \
@@ -203,7 +204,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     HitResult result;
     float total_step = 0.0;
     ivec3 block_coord, chunk_coord, region_coord, atlas_offset;
-    ivec3 region_exit_planes;
+    ivec3 region_exit_planes, chunk_exit_planes;
     vec3 next_piece_distance, next_block_distance, next_region_distance;
     uint chunk_index, region_content;
 
@@ -242,29 +243,24 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
 
     result.value = 0;
     region_content = imageLoad(region_map, region_coord).r;
-    if (region_content == UNLOADED_CHUNK_INDEX) {
-        imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX));
-    } else if (region_content == REQUEST_LOAD_CHUNK_INDEX) {
-    } else {
-        if (region_content != EMPTY_CHUNK_INDEX) {
-            do { PERFORM_REGION_TRACE(x); } while (false);
-        }
-        if (result.value == 0) { for (int i = 0; i < 32; i++) {
-            if (next_region_distance.x < next_region_distance.y) {
-                if (next_region_distance.x < next_region_distance.z) {
-                    PERFORM_REGION_STEP(x);
-                } else {
-                    PERFORM_REGION_STEP(z);
-                }
-            } else {
-                if (next_region_distance.y < next_region_distance.z) {
-                    PERFORM_REGION_STEP(y);
-                } else {
-                    PERFORM_REGION_STEP(z);
-                }
-            }
-        } }
+    if (region_content != EMPTY_CHUNK_INDEX) {
+        do { PERFORM_REGION_TRACE(x); } while (false);
     }
+    if (result.value == 0) { for (int i = 0; i < 128; i++) {
+        if (next_region_distance.x < next_region_distance.y) {
+            if (next_region_distance.x < next_region_distance.z) {
+                PERFORM_REGION_STEP(x);
+            } else {
+                PERFORM_REGION_STEP(z);
+            }
+        } else {
+            if (next_region_distance.y < next_region_distance.z) {
+                PERFORM_REGION_STEP(y);
+            } else {
+                PERFORM_REGION_STEP(z);
+            }
+        }
+    } }
 
     if (result.value == UNLOADED_CHUNK_INDEX) {
         result.value = 0;
@@ -435,7 +431,6 @@ void main() {
     vec3 sunangle = vec3(1, 2, 1);
     vec3 color = skylight;
     HitResult primary = trace_ray(camera_vectors.origin, ray_direction);
-    if (true) { color = get_material_albedo(primary.value); } else 
     if (primary.value > 0) {
         color = vec3(0.0);
         vec3 albedo1 = get_material_albedo(primary.value);

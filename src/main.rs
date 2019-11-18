@@ -80,7 +80,7 @@ fn main() {
         origin: Vector3 {
             x: 40.0,
             y: 40.0,
-            z: 40.0,
+            z: 80.0,
         },
         heading: Rad(-2.38),
         pitch: Rad(-0.74),
