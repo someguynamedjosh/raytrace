@@ -29,23 +29,21 @@ use winit::{ElementState, Event, KeyboardInput, VirtualKeyCode, Window, WindowEv
 
 use std::sync::Arc;
 
-mod init;
-mod presenter;
-mod renderer;
+mod render;
 mod util;
+mod world;
 
-use presenter::Presenter;
-use renderer::{Camera, Renderer};
+use render::{Camera, Presenter, Renderer, InitResult};
 
 fn main() {
-    let init::InitResult {
+    let InitResult {
         device,
         queue,
         surface,
         mut events_loop,
         mut swapchain,
         swapchain_images,
-    } = init::init();
+    } = render::init();
     let window = surface.window();
     println!("Vulkan started.");
 

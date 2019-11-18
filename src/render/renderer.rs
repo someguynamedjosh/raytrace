@@ -10,12 +10,13 @@ use vulkano::image::{Dimensions, StorageImage};
 use vulkano::pipeline::ComputePipeline;
 
 use rand::{self, RngCore};
-use noise::{NoiseFn, HybridMulti};
 
 use std::sync::Arc;
 
 use crate::util;
+use crate::world::{World, WorldChunk};
 use shaders::{self, BasicRaytraceShaderLayout, RaytracePushData};
+use super::constants::*;
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
@@ -24,27 +25,7 @@ type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderL
 type GenericImage = StorageImage<Format>;
 type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
 
-const CHUNK_BLOCK_WIDTH: u32 = 8;
-const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
-
-const REGION_CHUNK_WIDTH: u32 = 8;
-const REGION_BLOCK_WIDTH: u32 = REGION_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
-
-const ROOT_REGION_WIDTH: u32 = 16;
-const ROOT_REGION_VOLUME: u32 = ROOT_REGION_WIDTH * ROOT_REGION_WIDTH * ROOT_REGION_WIDTH;
-const ROOT_CHUNK_WIDTH: u32 = ROOT_REGION_WIDTH * REGION_CHUNK_WIDTH;
-const ROOT_CHUNK_VOLUME: u32 = ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH;
-const ROOT_BLOCK_WIDTH: u32 = ROOT_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
-
-const ATLAS_CHUNK_WIDTH: u32 = 64; 
-const ATLAS_BLOCK_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
-const ATLAS_CHUNK_VOLUME: u32 = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
-
 const NUM_UPLOAD_BUFFERS: usize = 32;
-
-const EMPTY_CHUNK_INDEX: u16 = 0xFFFF;
-const UNLOADED_CHUNK_INDEX: u16 = 0xFFFE;
-const REQUEST_LOAD_CHUNK_INDEX: u16 = 0xFFFD;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
@@ -79,133 +60,6 @@ pub struct Renderer {
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
 
     sun_pos: f32,
-}
-
-struct Chunk {
-    pub block_data: [u16; CHUNK_BLOCK_VOLUME as usize],
-}
-
-impl Chunk {
-    fn new() -> Chunk {
-        Chunk {
-            block_data: [0; CHUNK_BLOCK_VOLUME as usize],
-        }
-    }
-}
-
-enum WorldChunk {
-    Ungenerated,
-    Empty,
-    Occupied(Box<Chunk>),
-}
-
-impl Default for WorldChunk {
-    fn default() -> Self {
-        WorldChunk::Ungenerated
-    }
-}
-
-struct World {
-    chunks: Vec<WorldChunk>,
-    regions: [bool; ROOT_REGION_VOLUME as usize],
-}
-
-impl World {
-    fn new() -> World {
-        let mut world = World {
-            chunks: Vec::new(),
-            regions: [false; ROOT_REGION_VOLUME as usize]
-        };
-        for _ in 0..ROOT_CHUNK_VOLUME {
-            world.chunks.push(WorldChunk::Ungenerated);
-        }
-        world.generate();
-        world.finalize();
-        world
-    }
-
-    fn draw_block(&mut self, x: usize, y: usize, z: usize, value: u16) {
-        let (cx, cy, cz) = (
-            x / CHUNK_BLOCK_WIDTH as usize,
-            y / CHUNK_BLOCK_WIDTH as usize,
-            z / CHUNK_BLOCK_WIDTH as usize,
-        );
-        let (rx, ry, rz) = (
-            cx / REGION_CHUNK_WIDTH as usize,
-            cy / REGION_CHUNK_WIDTH as usize,
-            cz / REGION_CHUNK_WIDTH as usize,
-        );
-        let (bx, by, bz) = (
-            x % CHUNK_BLOCK_WIDTH as usize,
-            y % CHUNK_BLOCK_WIDTH as usize,
-            z % CHUNK_BLOCK_WIDTH as usize,
-        );
-        let chunk_index = (cz * ROOT_CHUNK_WIDTH as usize + cy) * ROOT_CHUNK_WIDTH as usize + cx;
-        let region_index = (rz * ROOT_REGION_WIDTH as usize + ry) * ROOT_REGION_WIDTH as usize + rx;
-        let block_index = (bz * CHUNK_BLOCK_WIDTH as usize + by) * CHUNK_BLOCK_WIDTH as usize + bx;
-        if let WorldChunk::Ungenerated = self.chunks[chunk_index] {
-            self.chunks[chunk_index] = WorldChunk::Occupied(Box::new(Chunk::new()));
-        }
-        if let WorldChunk::Occupied(chunk) = &mut self.chunks[chunk_index] {
-            chunk.block_data[block_index] = value;
-        }
-        self.regions[region_index] = true;
-    }
-
-    fn generate(&mut self) {
-        let mut perlin = HybridMulti::new();
-        perlin.octaves = 4;
-        perlin.frequency = 0.4;
-        perlin.lacunarity = 2.3;
-        perlin.persistence = 0.6;
-        let mut micro = HybridMulti::new();
-        micro.octaves = 1;
-        micro.frequency = 30.0;
-        micro.lacunarity = 2.0;
-        micro.persistence = 1.0;
-        let mut random = rand::thread_rng();
-        for x in 0..ROOT_BLOCK_WIDTH as usize {
-            for y in 0..ROOT_BLOCK_WIDTH as usize {
-                let coord = [x as f64 / 250.0, y as f64 / 250.0];
-                let mut height = (perlin.get(coord) * 4.0 + micro.get(coord) * 0.0 + 20.0) as usize;
-                if x == 200 && y == 200 {
-                    height += 8;
-                }
-                for z in 0..height {
-                    self.draw_block(x, y, z, if z == height - 1 { 1 } else { 3 });
-                }
-                if x > 15 && y > 15 && x < ROOT_BLOCK_WIDTH as usize - 15 && y < ROOT_BLOCK_WIDTH as usize - 15 && random.next_u32() % 10000 == 1 {
-                    for z in height..height + 4 {
-                        self.draw_block(x, y, z, 3);
-                        self.draw_block(x+1, y, z, 3);
-                        self.draw_block(x, y+1, z, 3);
-                        self.draw_block(x-1, y, z, 3);
-                        self.draw_block(x, y-1, z, 3);
-                    }
-                    for dx in 0..11 { for dy in 0..11 { for dz in 0..11 {
-                        let radius = (dx as isize - 5).abs() + (dy as isize - 5).abs() + (dz as isize - 5).abs();
-                        if radius < 8 {
-                            if dx == 5 || dy == 5 || dz == 5 {
-                                if radius < 7 {
-                                    self.draw_block(x + dx - 5, y + dy - 5, height + dz + 4, 3);
-                                }
-                            } else {
-                                self.draw_block(x + dx - 5, y + dy - 5, height + dz + 4, 2);
-                            }
-                        }
-                    }}}
-                }
-            }
-        }
-    }
-
-    fn finalize(&mut self) {
-        for i in 0..ROOT_CHUNK_VOLUME as usize {
-            if let WorldChunk::Ungenerated = self.chunks[i] {
-                self.chunks[i] = WorldChunk::Empty;
-            }
-        }
-    }
 }
 
 struct RenderBuilder {
