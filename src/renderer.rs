@@ -15,7 +15,7 @@ use noise::{NoiseFn, HybridMulti};
 use std::sync::Arc;
 
 use crate::util;
-use shaders::{self, BasicRaytraceShaderLayout, CameraVectorPushConstants};
+use shaders::{self, BasicRaytraceShaderLayout, RaytracePushData};
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
@@ -30,13 +30,13 @@ const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BL
 const REGION_CHUNK_WIDTH: u32 = 8;
 const REGION_BLOCK_WIDTH: u32 = REGION_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const ROOT_REGION_WIDTH: u32 = 8;
+const ROOT_REGION_WIDTH: u32 = 16;
 const ROOT_REGION_VOLUME: u32 = ROOT_REGION_WIDTH * ROOT_REGION_WIDTH * ROOT_REGION_WIDTH;
 const ROOT_CHUNK_WIDTH: u32 = ROOT_REGION_WIDTH * REGION_CHUNK_WIDTH;
 const ROOT_CHUNK_VOLUME: u32 = ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH;
 const ROOT_BLOCK_WIDTH: u32 = ROOT_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const ATLAS_CHUNK_WIDTH: u32 = 32; 
+const ATLAS_CHUNK_WIDTH: u32 = 64; 
 const ATLAS_BLOCK_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 const ATLAS_CHUNK_VOLUME: u32 = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
 
@@ -77,6 +77,8 @@ pub struct Renderer {
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
+
+    sun_pos: f32,
 }
 
 struct Chunk {
@@ -225,6 +227,7 @@ impl RenderBuilder {
         Arc<WorldImage>,
     ) {
         let world = World::new();
+        println!("World generated.");
 
         let upload_buffers = (0..NUM_UPLOAD_BUFFERS).map(|_| {
             CpuAccessibleBuffer::from_iter(
@@ -284,6 +287,7 @@ impl RenderBuilder {
             Some(self.queue.family())
         )
         .unwrap();
+        println!("Buffers created.");
 
         (world, upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map)
     }
@@ -338,6 +342,8 @@ impl RenderBuilder {
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
+
+            sun_pos: 0.0,
         }
     }
 }
@@ -361,6 +367,8 @@ impl Renderer {
         mut add_to: AutoCommandBufferBuilder,
         camera: &Camera,
     ) -> AutoCommandBufferBuilder {
+        self.sun_pos += 0.02;
+        self.sun_pos %= 3.1415 * 2.0;
         let camera_pos = camera.origin;
         let util::TripleEulerVector { forward, up, right } =
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
@@ -396,7 +404,7 @@ impl Renderer {
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.basic_raytrace_pipeline.clone(),
                 self.basic_raytrace_descriptors.clone(),
-                CameraVectorPushConstants {
+                RaytracePushData {
                     _dummy0: [0; 4],
                     _dummy1: [0; 4],
                     _dummy2: [0; 4],
@@ -404,6 +412,8 @@ impl Renderer {
                     forward: [forward.x, forward.y, forward.z],
                     right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
                     up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
+                    sun_angle: self.sun_pos,
+                    seed: rand::thread_rng().next_u32()
                 },
             )
             .unwrap()

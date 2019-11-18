@@ -15,7 +15,7 @@ mod basic_raytrace {
         path: "glsl/basic_raytrace.comp"
     }
 }
-pub use basic_raytrace::ty::CameraVectors as CameraVectorPushConstants;
+pub use basic_raytrace::ty::PushData as RaytracePushData;
 pub use basic_raytrace::Layout as BasicRaytraceShaderLayout;
 pub use basic_raytrace::Shader as BasicRaytraceShader;
 

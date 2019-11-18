@@ -47,6 +47,7 @@ fn main() {
         swapchain_images,
     } = init::init();
     let window = surface.window();
+    println!("Vulkan started.");
 
     let presenter = Presenter::new(
         device.clone(),
@@ -59,6 +60,7 @@ fn main() {
         queue.clone(),
         presenter.get_presented_image(),
     );
+    println!("Renderer initialized.");
 
     // Dynamic viewports allow us to recreate just the viewport when the window is resized
     // Otherwise we would have to recreate the whole pipeline.
