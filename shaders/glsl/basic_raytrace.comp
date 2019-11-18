@@ -3,25 +3,30 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data_atlas;
-layout(set = 0, binding = 1, r16ui) uniform uimage3D piece_mip_atlas;
-layout(set = 0, binding = 2, r16ui) uniform uimage3D root;
+layout(set = 0, binding = 1, r16ui) uniform uimage3D chunk_map;
+layout(set = 0, binding = 2, r16ui) uniform uimage3D region_map;
 layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
 
 layout(push_constant) uniform CameraVectors {
     vec3 origin, forward, up, right;
 } camera_vectors;
 
-const uint PIECE_BLOCK_WIDTH = 4; // pieces are 8x8x8 blocks
-const uint CHUNK_PIECE_WIDTH = 4; // chunks are 8x8x8 pieces
-const uint CHUNK_BLOCK_WIDTH = CHUNK_PIECE_WIDTH * PIECE_BLOCK_WIDTH;
-
-const uint PIECE_BLOCK_VOLUME = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH;
-const uint CHUNK_PIECE_VOLUME = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
+const uint CHUNK_BLOCK_WIDTH = 8;
 const uint CHUNK_BLOCK_VOLUME = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const uint ROOT_CHUNK_WIDTH = 32; // root is 64x64x64 chunks.
-const uint ATLAS_CHUNK_WIDTH = 16; // atlas is 4x4x4 chunks
+const uint REGION_CHUNK_WIDTH = 8;
+const uint REGION_BLOCK_WIDTH = REGION_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
+
+const uint ROOT_REGION_WIDTH = 8;
+const uint ROOT_REGION_VOLUME = ROOT_REGION_WIDTH * ROOT_REGION_WIDTH * ROOT_REGION_WIDTH;
+const uint ROOT_CHUNK_WIDTH = ROOT_REGION_WIDTH * REGION_CHUNK_WIDTH;
+const uint ROOT_CHUNK_VOLUME = ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH;
+const uint ROOT_BLOCK_WIDTH = ROOT_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
+
+const uint ATLAS_CHUNK_WIDTH = 32; 
+const uint ATLAS_BLOCK_WIDTH = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 const uint ATLAS_CHUNK_VOLUME = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
+
 const uint EMPTY_CHUNK_INDEX = 0xFFFF;
 const uint UNLOADED_CHUNK_INDEX = 0xFFFE;
 const uint REQUEST_LOAD_CHUNK_INDEX = 0xFFFD;
@@ -42,7 +47,7 @@ struct HitResult {
 #define PERFORM_BLOCK_STEP(AXIS) \
     block_coord.AXIS += step.AXIS; \
     total_step = next_block_distance.AXIS; \
-    if (block_coord.AXIS == piece_exit_planes.AXIS) { break; } \
+    if (block_coord.AXIS == CHUNK_BLOCK_WIDTH || block_coord.AXIS == -1) { break; } \
     result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
     if (result.value != 0) { \
         result.normal = int(NORMAL_##AXIS) + (step.AXIS + 1) / 2;\
@@ -50,7 +55,7 @@ struct HitResult {
     } \
     next_block_distance.AXIS += block_advance_amount.AXIS;
 
-#define PERFORM_PIECE_TRACE(AXIS) \
+#define PERFORM_CHUNK_TRACE(AXIS) \
     vec3 real_pos = origin + direction * total_step; \
     vec3 fake_pos = real_pos; \
     fake_pos.AXIS += step.AXIS * 0.01; \
@@ -58,29 +63,24 @@ struct HitResult {
     \
     if (step.x == 1) { \
         next_block_distance.x = (block_coord.x + 1 - real_pos.x) * block_advance_amount.x; \
-        piece_exit_planes.x = (piece_coord.x + 1) * int(PIECE_BLOCK_WIDTH); \
     } else { \
         next_block_distance.x = (real_pos.x - block_coord.x) * block_advance_amount.x; \
-        piece_exit_planes.x = piece_coord.x * int(PIECE_BLOCK_WIDTH) - 1; \
     } \
     if (step.y == 1) { \
         next_block_distance.y = (block_coord.y + 1 - real_pos.y) * block_advance_amount.y; \
-        piece_exit_planes.y = (piece_coord.y + 1) * int(PIECE_BLOCK_WIDTH); \
     } else { \
         next_block_distance.y = (real_pos.y - block_coord.y) * block_advance_amount.y; \
-        piece_exit_planes.y = piece_coord.y * int(PIECE_BLOCK_WIDTH) - 1; \
     } \
     if (step.z == 1) { \
         next_block_distance.z = (block_coord.z + 1 - real_pos.z) * block_advance_amount.z; \
-        piece_exit_planes.z = (piece_coord.z + 1) * int(PIECE_BLOCK_WIDTH); \
     } else { \
         next_block_distance.z = (real_pos.z - block_coord.z) * block_advance_amount.z; \
-        piece_exit_planes.z = piece_coord.z * int(PIECE_BLOCK_WIDTH) - 1; \
     } \
     next_block_distance += vec3(total_step); \
     block_coord %= ivec3(CHUNK_BLOCK_WIDTH); \
     result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
-    if (result.value == 0) { for (int i = 0; i < 128; i++) { \
+    result.value = 1; \
+    if (result.value == 0) { for (int i = 0; i < 32; i++) { \
         if (next_block_distance.x < next_block_distance.y) { \
             if (next_block_distance.x < next_block_distance.z) { \
                 PERFORM_BLOCK_STEP(x); \
@@ -98,71 +98,18 @@ struct HitResult {
         result.normal = int(NORMAL_##AXIS) + (step.AXIS + 1) / 2; \
     }
 
-#define PERFORM_PIECE_STEP(AXIS) \
-    piece_coord.AXIS += step.AXIS; \
-    total_step = next_piece_distance.AXIS; \
-    if (piece_coord.AXIS < 0 || piece_coord.AXIS == CHUNK_PIECE_WIDTH) { break; } \
-    result.value = imageLoad(piece_mip_atlas, piece_coord + atlas_offset * ivec3(CHUNK_PIECE_WIDTH)).r; \
-    if (result.value != 0) { \
-        PERFORM_PIECE_TRACE(AXIS); \
-        if (result.value != 0) { break; } \
-    } \
-    next_piece_distance.AXIS += piece_advance_amount.AXIS;
-
-#define PERFORM_CHUNK_TRACE(AXIS) \
-    vec3 real_pos = origin + direction * total_step; \
-    vec3 fake_pos = real_pos; \
-    fake_pos.AXIS += step.AXIS * 0.01; \
-    block_coord = ivec3(floor(fake_pos)); \
-    piece_coord = block_coord / ivec3(CHUNK_PIECE_WIDTH); \
-    real_pos /= PIECE_BLOCK_WIDTH; \
-    \
-    if (step.x == 1) { \
-        next_piece_distance.x = (piece_coord.x + 1 - real_pos.x) * piece_advance_amount.x; \
-    } else { \
-        next_piece_distance.x = (real_pos.x - piece_coord.x) * piece_advance_amount.x; \
-    } \
-    if (step.y == 1) { \
-        next_piece_distance.y = (piece_coord.y + 1 - real_pos.y) * piece_advance_amount.y; \
-    } else { \
-        next_piece_distance.y = (real_pos.y - piece_coord.y) * piece_advance_amount.y; \
-    } \
-    if (step.z == 1) { \
-        next_piece_distance.z = (piece_coord.z + 1 - real_pos.z) * piece_advance_amount.z; \
-    } else { \
-        next_piece_distance.z = (real_pos.z - piece_coord.z) * piece_advance_amount.z; \
-    } \
-    next_piece_distance += vec3(total_step); \
-    piece_coord = block_coord % ivec3(CHUNK_BLOCK_WIDTH) / ivec3(PIECE_BLOCK_WIDTH); \
-    result.value = imageLoad(piece_mip_atlas, piece_coord + atlas_offset * ivec3(CHUNK_PIECE_WIDTH)).r; \
-    if (result.value != 0) { \
-        PERFORM_PIECE_TRACE(AXIS); \
-    } \
-    if (result.value == 0) { for (int i = 0; i < 128; i++) { \
-        if (next_piece_distance.x < next_piece_distance.y) { \
-            if (next_piece_distance.x < next_piece_distance.z) { \
-                PERFORM_PIECE_STEP(x); \
-            } else { \
-                PERFORM_PIECE_STEP(z); \
-            } \
-        } else { \
-            if (next_piece_distance.y < next_piece_distance.z) { \
-                PERFORM_PIECE_STEP(y); \
-            } else { \
-                PERFORM_PIECE_STEP(z); \
-            } \
-        } \
-    } }
-
 #define PERFORM_CHUNK_STEP(AXIS) \
     chunk_coord.AXIS += step.AXIS; \
     total_step = next_chunk_distance.AXIS; \
-    if (chunk_coord.AXIS < 0 || chunk_coord.AXIS == ROOT_CHUNK_WIDTH) { break; } \
-    chunk_index = imageLoad(root, chunk_coord).r; \
+    if (chunk_coord.AXIS == region_exit_planes.AXIS) { break; } \
+    chunk_index = imageLoad(chunk_map, chunk_coord).r; \
     if (chunk_index == UNLOADED_CHUNK_INDEX) { \
-        imageStore(root, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
+        imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
+        imageStore(chunk_map, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
+        result.value = UNLOADED_CHUNK_INDEX; \
         break; \
     } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) { \
+        result.value = UNLOADED_CHUNK_INDEX; \
         break; \
     } else if (chunk_index != EMPTY_CHUNK_INDEX) { \
         atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
@@ -173,14 +120,94 @@ struct HitResult {
     if (result.value != 0) { break; } \
     next_chunk_distance.AXIS += chunk_advance_amount.AXIS;
 
+#define PERFORM_REGION_TRACE(AXIS) \
+    vec3 real_pos = origin + direction * total_step; \
+    vec3 fake_pos = real_pos; \
+    fake_pos.AXIS += step.AXIS * 0.01; \
+    block_coord = ivec3(floor(fake_pos)); \
+    chunk_coord = block_coord / ivec3(CHUNK_BLOCK_WIDTH); \
+    real_pos /= vec3(CHUNK_BLOCK_WIDTH); \
+    vec3 next_chunk_distance = vec3(0); \
+    if (step.x == 1) { \
+        next_chunk_distance.x = (chunk_coord.x + 1 - real_pos.x) * chunk_advance_amount.x; \
+        region_exit_planes.x = int((region_coord.x + 1) * REGION_CHUNK_WIDTH); \
+    } else { \
+        next_chunk_distance.x = (real_pos.x - chunk_coord.x) * chunk_advance_amount.x; \
+        region_exit_planes.x = int(region_coord.x * REGION_CHUNK_WIDTH) - 1; \
+    } \
+    if (step.y == 1) { \
+        next_chunk_distance.y = (chunk_coord.y + 1 - real_pos.y) * chunk_advance_amount.y; \
+        region_exit_planes.y = int((region_coord.y + 1) * REGION_CHUNK_WIDTH); \
+    } else { \
+        next_chunk_distance.y = (real_pos.y - chunk_coord.y) * chunk_advance_amount.y; \
+        region_exit_planes.y = int(region_coord.y * REGION_CHUNK_WIDTH) - 1; \
+    } \
+    if (step.z == 1) { \
+        next_chunk_distance.z = (chunk_coord.z + 1 - real_pos.z) * chunk_advance_amount.z; \
+        region_exit_planes.z = int((region_coord.z + 1) * REGION_CHUNK_WIDTH); \
+    } else { \
+        next_chunk_distance.z = (real_pos.z - chunk_coord.z) * chunk_advance_amount.z; \
+        region_exit_planes.z = int(region_coord.z * REGION_CHUNK_WIDTH) - 1; \
+    } \
+    next_chunk_distance += vec3(total_step); \
+    \
+    result.value = 0; \
+    chunk_index = imageLoad(chunk_map, chunk_coord).r; \
+    if (chunk_index == UNLOADED_CHUNK_INDEX) { \
+        imageStore(chunk_map, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
+        imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
+        result.value = UNLOADED_CHUNK_INDEX; \
+        break; \
+    } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) { \
+        result.value = UNLOADED_CHUNK_INDEX; \
+        break; \
+    } else { \
+        if (chunk_index != EMPTY_CHUNK_INDEX) { \
+            atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
+            atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
+            atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
+            PERFORM_CHUNK_TRACE(x); \
+        } \
+        if (result.value == 0) { for (int i = 0; i < 32; i++) { \
+            if (next_chunk_distance.x < next_chunk_distance.y) { \
+                if (next_chunk_distance.x < next_chunk_distance.z) { \
+                    PERFORM_CHUNK_STEP(x); \
+                } else { \
+                    PERFORM_CHUNK_STEP(z); \
+                } \
+            } else { \
+                if (next_chunk_distance.y < next_chunk_distance.z) { \
+                    PERFORM_CHUNK_STEP(y); \
+                } else { \
+                    PERFORM_CHUNK_STEP(z); \
+                } \
+            } \
+        } } \
+    }
+
+#define PERFORM_REGION_STEP(AXIS) \
+    region_coord.AXIS += step.AXIS; \
+    total_step = next_region_distance.AXIS; \
+    if (region_coord.AXIS < 0 || region_coord.AXIS == ROOT_REGION_WIDTH) { break; } \
+    region_content = imageLoad(region_map, region_coord).r; \
+    if (region_content == UNLOADED_CHUNK_INDEX) { \
+        imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
+        break; \
+    } else if (region_content != EMPTY_CHUNK_INDEX) { \
+        PERFORM_REGION_TRACE(AXIS); \
+    } \
+    if (result.value != 0) { break; } \
+    next_region_distance.AXIS += region_advance_amount.AXIS;
+
 HitResult trace_ray(vec3 origin, vec3 direction) {
     HitResult result;
     float total_step = 0.0;
-    ivec3 block_coord, piece_coord, atlas_offset;
-    ivec3 piece_exit_planes, chunk_exit_planes;
-    vec3 next_piece_distance, next_block_distance;
-    ivec3 chunk_coord = ivec3(floor(origin / CHUNK_BLOCK_WIDTH));
-    uint chunk_index;
+    ivec3 block_coord, chunk_coord, region_coord, atlas_offset;
+    ivec3 region_exit_planes;
+    vec3 next_piece_distance, next_block_distance, next_region_distance;
+    uint chunk_index, region_content;
+
+    region_coord = ivec3(floor(origin / REGION_BLOCK_WIDTH));
 
     ivec3 step = ivec3(
         direction.x < 0 ? -1 : 1,
@@ -194,55 +221,53 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         1.0 / (direction.y + 1e-8),
         1.0 / (direction.z + 1e-8)
     ));
-    // How much we need to move along the vector to advance the current piece 
-    // coordinate by *exactly* 1 piece in the x, y, and z directions. 
-    vec3 piece_advance_amount = block_advance_amount * vec3(PIECE_BLOCK_WIDTH);
     vec3 chunk_advance_amount = block_advance_amount * vec3(CHUNK_BLOCK_WIDTH);
+    vec3 region_advance_amount = block_advance_amount * vec3(REGION_BLOCK_WIDTH);
 
-    vec3 next_chunk_distance = vec3(0);
     if (step.x == 1) {
-        next_chunk_distance.x = (CHUNK_BLOCK_WIDTH - mod(origin.x, CHUNK_BLOCK_WIDTH)) * block_advance_amount.x;
+        next_region_distance.x = (region_coord.x + 1 - origin.x / REGION_BLOCK_WIDTH) * region_advance_amount.x;
     } else {
-        next_chunk_distance.x = mod(origin.x, CHUNK_BLOCK_WIDTH) * block_advance_amount.x;
+        next_region_distance.x = (origin.x / REGION_BLOCK_WIDTH - region_coord.x) * region_advance_amount.x;
     }
     if (step.y == 1) {
-        next_chunk_distance.y = (CHUNK_BLOCK_WIDTH - mod(origin.y, CHUNK_BLOCK_WIDTH)) * block_advance_amount.y;
+        next_region_distance.y = (region_coord.y + 1 - origin.y / REGION_BLOCK_WIDTH) * region_advance_amount.y;
     } else {
-        next_chunk_distance.y = mod(origin.y, CHUNK_BLOCK_WIDTH) * block_advance_amount.y;
+        next_region_distance.y = (origin.y / REGION_BLOCK_WIDTH - region_coord.y) * region_advance_amount.y;
     }
     if (step.z == 1) {
-        next_chunk_distance.z = (CHUNK_BLOCK_WIDTH - mod(origin.z, CHUNK_BLOCK_WIDTH)) * block_advance_amount.z;
+        next_region_distance.z = (region_coord.z + 1 - origin.z / REGION_BLOCK_WIDTH) * region_advance_amount.z;
     } else {
-        next_chunk_distance.z = mod(origin.z, CHUNK_BLOCK_WIDTH) * block_advance_amount.z;
+        next_region_distance.z = (origin.z / REGION_BLOCK_WIDTH - region_coord.z) * region_advance_amount.z;
     }
 
     result.value = 0;
-    chunk_index = imageLoad(root, chunk_coord).r;
-    if (chunk_index == UNLOADED_CHUNK_INDEX) {
-        imageStore(root, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX));
-    } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) {
+    region_content = imageLoad(region_map, region_coord).r;
+    if (region_content == UNLOADED_CHUNK_INDEX) {
+        imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX));
+    } else if (region_content == REQUEST_LOAD_CHUNK_INDEX) {
     } else {
-        if (chunk_index != EMPTY_CHUNK_INDEX) {
-            atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH);
-            atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH);
-            atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH);
-            PERFORM_CHUNK_TRACE(x);
+        if (region_content != EMPTY_CHUNK_INDEX) {
+            do { PERFORM_REGION_TRACE(x); } while (false);
         }
-        if (result.value == 0) { for (int i = 0; i < 128; i++) {
-            if (next_chunk_distance.x < next_chunk_distance.y) {
-                if (next_chunk_distance.x < next_chunk_distance.z) {
-                    PERFORM_CHUNK_STEP(x);
+        if (result.value == 0) { for (int i = 0; i < 32; i++) {
+            if (next_region_distance.x < next_region_distance.y) {
+                if (next_region_distance.x < next_region_distance.z) {
+                    PERFORM_REGION_STEP(x);
                 } else {
-                    PERFORM_CHUNK_STEP(z);
+                    PERFORM_REGION_STEP(z);
                 }
             } else {
-                if (next_chunk_distance.y < next_chunk_distance.z) {
-                    PERFORM_CHUNK_STEP(y);
+                if (next_region_distance.y < next_region_distance.z) {
+                    PERFORM_REGION_STEP(y);
                 } else {
-                    PERFORM_CHUNK_STEP(z);
+                    PERFORM_REGION_STEP(z);
                 }
             }
         } }
+    }
+
+    if (result.value == UNLOADED_CHUNK_INDEX) {
+        result.value = 0;
     }
 
     result.distance = total_step;
@@ -410,6 +435,7 @@ void main() {
     vec3 sunangle = vec3(1, 2, 1);
     vec3 color = skylight;
     HitResult primary = trace_ray(camera_vectors.origin, ray_direction);
+    if (true) { color = get_material_albedo(primary.value); } else 
     if (primary.value > 0) {
         color = vec3(0.0);
         vec3 albedo1 = get_material_albedo(primary.value);
@@ -459,7 +485,7 @@ void main() {
 
 /*
 void main() {
-    uint index = imageLoad(root, ivec3(
+    uint index = imageLoad(chunk_map, ivec3(
         gl_GlobalInvocationID.x / 4 % ROOT_CHUNK_WIDTH,
         gl_GlobalInvocationID.x / 4 / ROOT_CHUNK_WIDTH % ROOT_CHUNK_WIDTH,
         gl_GlobalInvocationID.y / 4 % ROOT_CHUNK_WIDTH

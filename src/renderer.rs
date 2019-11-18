@@ -23,21 +23,23 @@ type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderL
 type GenericImage = StorageImage<Format>;
 type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
 
-const PIECE_BLOCK_WIDTH: u32 = 4; // pieces are 8x8x8 blocks
-const CHUNK_PIECE_WIDTH: u32 = 4; // chunks are 8x8x8 pieces
-const CHUNK_BLOCK_WIDTH: u32 = CHUNK_PIECE_WIDTH * PIECE_BLOCK_WIDTH;
-
-const PIECE_BLOCK_VOLUME: u32 = PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH * PIECE_BLOCK_WIDTH;
-const CHUNK_PIECE_VOLUME: u32 = CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH * CHUNK_PIECE_WIDTH;
+const CHUNK_BLOCK_WIDTH: u32 = 8;
 const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 
-const ROOT_CHUNK_WIDTH: u32 = 32; // root is 64x64x64 chunks.
-const ROOT_BLOCK_WIDTH: u32 = ROOT_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
+const REGION_CHUNK_WIDTH: u32 = 8;
+const REGION_BLOCK_WIDTH: u32 = REGION_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
+
+const ROOT_REGION_WIDTH: u32 = 8;
+const ROOT_REGION_VOLUME: u32 = ROOT_REGION_WIDTH * ROOT_REGION_WIDTH * ROOT_REGION_WIDTH;
+const ROOT_CHUNK_WIDTH: u32 = ROOT_REGION_WIDTH * REGION_CHUNK_WIDTH;
 const ROOT_CHUNK_VOLUME: u32 = ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH * ROOT_CHUNK_WIDTH;
-const ATLAS_CHUNK_WIDTH: u32 = 16; // atlas is 4x4x4 chunks
-const ATLAS_PIECE_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_PIECE_WIDTH;
+const ROOT_BLOCK_WIDTH: u32 = ROOT_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
+
+const ATLAS_CHUNK_WIDTH: u32 = 32; 
 const ATLAS_BLOCK_WIDTH: u32 = ATLAS_CHUNK_WIDTH * CHUNK_BLOCK_WIDTH;
 const ATLAS_CHUNK_VOLUME: u32 = ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH * ATLAS_CHUNK_WIDTH;
+
+const NUM_UPLOAD_BUFFERS: usize = 32;
 
 const EMPTY_CHUNK_INDEX: u16 = 0xFFFF;
 const UNLOADED_CHUNK_INDEX: u16 = 0xFFFE;
@@ -59,16 +61,16 @@ pub struct Renderer {
     target_width: u32,
     target_height: u32,
 
-    chunk_upload_waiting: bool,
     chunk_upload_index: u16,
 
-    block_data: Arc<WorldData>,
+    upload_buffers: Vec<Arc<WorldData>>,
+    upload_destinations: Vec<u16>,
     block_data_atlas: Arc<WorldImage>,
-    piece_mip: Arc<WorldData>,
-    piece_mip_atlas: Arc<WorldImage>,
 
-    root_data: Arc<WorldData>,
-    root_image: Arc<WorldImage>,
+    chunk_map_data: Arc<WorldData>,
+    chunk_map: Arc<WorldImage>,
+    region_map_data: Arc<WorldData>,
+    region_map: Arc<WorldImage>,
 
     world: World,
 
@@ -78,14 +80,12 @@ pub struct Renderer {
 
 struct Chunk {
     pub block_data: [u16; CHUNK_BLOCK_VOLUME as usize],
-    pub piece_mip: [u16; CHUNK_PIECE_VOLUME as usize],
 }
 
 impl Chunk {
     fn new() -> Chunk {
         Chunk {
             block_data: [0; CHUNK_BLOCK_VOLUME as usize],
-            piece_mip: [0; CHUNK_PIECE_VOLUME as usize],
         }
     }
 }
@@ -104,12 +104,14 @@ impl Default for WorldChunk {
 
 struct World {
     chunks: Vec<WorldChunk>,
+    regions: [bool; ROOT_REGION_VOLUME as usize],
 }
 
 impl World {
     fn new() -> World {
         let mut world = World {
-            chunks: Vec::new()
+            chunks: Vec::new(),
+            regions: [false; ROOT_REGION_VOLUME as usize]
         };
         for _ in 0..ROOT_CHUNK_VOLUME {
             world.chunks.push(WorldChunk::Ungenerated);
@@ -125,26 +127,26 @@ impl World {
             y / CHUNK_BLOCK_WIDTH as usize,
             z / CHUNK_BLOCK_WIDTH as usize,
         );
+        let (rx, ry, rz) = (
+            cx / REGION_CHUNK_WIDTH as usize,
+            cy / REGION_CHUNK_WIDTH as usize,
+            cz / REGION_CHUNK_WIDTH as usize,
+        );
         let (bx, by, bz) = (
             x % CHUNK_BLOCK_WIDTH as usize,
             y % CHUNK_BLOCK_WIDTH as usize,
             z % CHUNK_BLOCK_WIDTH as usize,
         );
-        let (px, py, pz) = (
-            bx / PIECE_BLOCK_WIDTH as usize,
-            by / PIECE_BLOCK_WIDTH as usize,
-            bz / PIECE_BLOCK_WIDTH as usize,
-        );
         let chunk_index = (cz * ROOT_CHUNK_WIDTH as usize + cy) * ROOT_CHUNK_WIDTH as usize + cx;
+        let region_index = (rz * ROOT_REGION_WIDTH as usize + ry) * ROOT_REGION_WIDTH as usize + rx;
         let block_index = (bz * CHUNK_BLOCK_WIDTH as usize + by) * CHUNK_BLOCK_WIDTH as usize + bx;
-        let piece_index = (pz * CHUNK_PIECE_WIDTH as usize + py) * CHUNK_PIECE_WIDTH as usize + px;
         if let WorldChunk::Ungenerated = self.chunks[chunk_index] {
             self.chunks[chunk_index] = WorldChunk::Occupied(Box::new(Chunk::new()));
         }
         if let WorldChunk::Occupied(chunk) = &mut self.chunks[chunk_index] {
             chunk.block_data[block_index] = value;
-            chunk.piece_mip[piece_index] += 1;
         }
+        self.regions[region_index] = true;
     }
 
     fn generate(&mut self) {
@@ -178,26 +180,21 @@ impl RenderBuilder {
     fn make_world(
         &self,
     ) -> (
+        Vec<Arc<WorldData>>,
+        Arc<WorldImage>,
         Arc<WorldData>,
         Arc<WorldImage>,
         Arc<WorldData>,
         Arc<WorldImage>,
     ) {
-        let chunk = Chunk::new();
-
-        let block_data = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::all(),
-            chunk.block_data.into_iter().map(|e| *e),
-        )
-        .unwrap();
-
-        let piece_mip = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::all(),
-            chunk.piece_mip.into_iter().map(|e| *e),
-        )
-        .unwrap();
+        let upload_buffers = (0..NUM_UPLOAD_BUFFERS).map(|_| {
+            CpuAccessibleBuffer::from_iter(
+                self.device.clone(),
+                BufferUsage::all(),
+                (0..CHUNK_BLOCK_VOLUME).map(|_| 0)
+            )
+            .unwrap()
+        }).collect();
 
         let block_data_atlas = StorageImage::new(
             self.device.clone(),
@@ -211,19 +208,45 @@ impl RenderBuilder {
         )
         .unwrap();
 
-        let piece_mip_atlas = StorageImage::new(
-            self.device.clone(),
-            Dimensions::Dim3d {
-                width: ATLAS_PIECE_WIDTH,
-                height: ATLAS_PIECE_WIDTH,
-                depth: ATLAS_PIECE_WIDTH,
-            },
-            Format::R16Uint,
-            Some(self.queue.family()),
+        let chunk_map_data = CpuAccessibleBuffer::from_iter(
+            self.device.clone(), 
+            BufferUsage::all(), 
+            (0..ROOT_CHUNK_VOLUME).map(|_| UNLOADED_CHUNK_INDEX)
         )
         .unwrap();
 
-        (block_data, block_data_atlas, piece_mip, piece_mip_atlas)
+        let chunk_map = StorageImage::new(
+            self.device.clone(), 
+            Dimensions::Dim3d {
+                width: ROOT_CHUNK_WIDTH,
+                height: ROOT_CHUNK_WIDTH,
+                depth: ROOT_CHUNK_WIDTH
+            }, 
+            Format::R16Uint, 
+            Some(self.queue.family())
+        )
+        .unwrap();
+
+        let region_map_data = CpuAccessibleBuffer::from_iter(
+            self.device.clone(), 
+            BufferUsage::all(), 
+            (0..ROOT_REGION_VOLUME).map(|_| UNLOADED_CHUNK_INDEX)
+        )
+        .unwrap();
+
+        let region_map = StorageImage::new(
+            self.device.clone(), 
+            Dimensions::Dim3d {
+                width: ROOT_REGION_WIDTH,
+                height: ROOT_REGION_WIDTH,
+                depth: ROOT_REGION_WIDTH
+            }, 
+            Format::R16Uint, 
+            Some(self.queue.family())
+        )
+        .unwrap();
+
+        (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map)
     }
 
     fn build(self) -> Renderer {
@@ -232,25 +255,7 @@ impl RenderBuilder {
             _ => panic!("A non-2d image was passed as the target of a Renderer."),
         };
 
-        let (block_data, block_data_atlas, piece_mip, piece_mip_atlas) = self.make_world();
-
-        let root_data = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::all(),
-            (0..ROOT_CHUNK_VOLUME).map(|_| UNLOADED_CHUNK_INDEX),
-        )
-        .unwrap();
-        let root_image = StorageImage::new(
-            self.device.clone(),
-            Dimensions::Dim3d {
-                width: ROOT_CHUNK_WIDTH,
-                height: ROOT_CHUNK_WIDTH,
-                depth: ROOT_CHUNK_WIDTH,
-            },
-            Format::R16Uint,
-            Some(self.queue.family()),
-        )
-        .unwrap();
+        let (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map) = self.make_world();
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
 
@@ -266,9 +271,9 @@ impl RenderBuilder {
             PersistentDescriptorSet::start(basic_raytrace_pipeline.clone(), 0)
                 .add_image(block_data_atlas.clone())
                 .unwrap()
-                .add_image(piece_mip_atlas.clone())
+                .add_image(chunk_map.clone())
                 .unwrap()
-                .add_image(root_image.clone())
+                .add_image(region_map.clone())
                 .unwrap()
                 .add_image(self.target_image.clone())
                 .unwrap()
@@ -280,16 +285,15 @@ impl RenderBuilder {
             target_width,
             target_height,
 
-            chunk_upload_waiting: false,
             chunk_upload_index: 0,
 
-            block_data,
+            upload_buffers,
+            upload_destinations: Vec::new(),
             block_data_atlas,
-            piece_mip,
-            piece_mip_atlas,
-
-            root_data,
-            root_image,
+            chunk_map_data,
+            chunk_map,
+            region_map_data,
+            region_map,
 
             world: World::new(),
 
@@ -321,15 +325,15 @@ impl Renderer {
         let camera_pos = camera.origin;
         let util::TripleEulerVector { forward, up, right } =
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
-        if self.chunk_upload_waiting {
+        for (source, destination) in self.upload_destinations.iter().enumerate() {
             let (x, y, z) = (
-                self.chunk_upload_index as u32 % ATLAS_CHUNK_WIDTH,
-                self.chunk_upload_index as u32 / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH,
-                self.chunk_upload_index as u32 / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH,
+                *destination as u32 % ATLAS_CHUNK_WIDTH,
+                *destination as u32 / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH,
+                *destination as u32 / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH,
             );
             add_to = add_to
                 .copy_buffer_to_image_dimensions(
-                    self.block_data.clone(),
+                    self.upload_buffers[source].clone(),
                     self.block_data_atlas.clone(),
                     [
                         x * CHUNK_BLOCK_WIDTH,
@@ -341,25 +345,13 @@ impl Renderer {
                     0,
                     0,
                 )
-                .unwrap()
-                .copy_buffer_to_image_dimensions(
-                    self.piece_mip.clone(),
-                    self.piece_mip_atlas.clone(),
-                    [
-                        x * CHUNK_PIECE_WIDTH,
-                        y * CHUNK_PIECE_WIDTH,
-                        z * CHUNK_PIECE_WIDTH,
-                    ],
-                    [CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH, CHUNK_PIECE_WIDTH],
-                    0,
-                    0,
-                    0,
-                )
                 .unwrap();
-            self.chunk_upload_waiting = false;
         }
+        self.upload_destinations.clear();
         add_to
-            .copy_buffer_to_image(self.root_data.clone(), self.root_image.clone())
+            .copy_buffer_to_image(self.chunk_map_data.clone(), self.chunk_map.clone())
+            .unwrap()
+            .copy_buffer_to_image(self.region_map_data.clone(), self.region_map.clone())
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
@@ -376,31 +368,46 @@ impl Renderer {
                 },
             )
             .unwrap()
-            .copy_image_to_buffer(self.root_image.clone(), self.root_data.clone())
+            .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
+            .unwrap()
+            .copy_image_to_buffer(self.region_map.clone(), self.region_map_data.clone())
             .unwrap()
     }
 
     pub fn read_feedback(&mut self) {
-        let mut content = self.root_data.write().unwrap();
-        for i in 0..ROOT_CHUNK_VOLUME as usize {
-            if content[i] == REQUEST_LOAD_CHUNK_INDEX {
-                if let WorldChunk::Occupied(chunk) = &mut self.world.chunks[i] {
-                    if self.chunk_upload_waiting {
-                        continue;
+        let mut chunk_map = self.chunk_map_data.write().unwrap();
+        let mut region_map = self.region_map_data.write().unwrap();
+        let mut current_buffer = 0;
+        for region_index in 0..ROOT_REGION_VOLUME as usize {
+            let region_content = region_map[region_index];
+            if region_content != REQUEST_LOAD_CHUNK_INDEX { continue; }
+            let region_occupied = self.world.regions[region_index];
+            if !region_occupied {
+                region_map[region_index] = EMPTY_CHUNK_INDEX;
+                continue;
+            }
+            region_map[region_index] = 1;
+            for x in 0..REGION_CHUNK_WIDTH as usize {
+                for y in 0..REGION_CHUNK_WIDTH as usize {
+                    for z in 0..REGION_CHUNK_WIDTH as usize {
+                        let chunk_index = (z * ROOT_CHUNK_WIDTH as usize + y) * ROOT_CHUNK_WIDTH as usize + x + region_index;
+                        if chunk_map[chunk_index] != REQUEST_LOAD_CHUNK_INDEX { continue; }
+                        if let WorldChunk::Occupied(chunk) = &mut self.world.chunks[chunk_index] {
+                            chunk_map[chunk_index] = self.chunk_upload_index;
+                            self.upload_destinations.push(self.chunk_upload_index);
+                            self.chunk_upload_index += 1;
+                            let mut upload_buffer = self.upload_buffers[current_buffer].write().unwrap();
+                            for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
+                                upload_buffer[block_index] = chunk.block_data[block_index];
+                            }
+                            current_buffer += 1;
+                            if current_buffer == NUM_UPLOAD_BUFFERS {
+                                return;
+                            }
+                        } else {
+                            chunk_map[chunk_index] = EMPTY_CHUNK_INDEX;
+                        }
                     }
-                    self.chunk_upload_index += 1;
-                    self.chunk_upload_waiting = true;
-                    content[i] = self.chunk_upload_index;
-                    let mut block_data = self.block_data.write().unwrap();
-                    let mut piece_mip = self.piece_mip.write().unwrap();
-                    for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
-                        block_data[block_index] = chunk.block_data[block_index];
-                    }
-                    for piece_index in 0..CHUNK_PIECE_VOLUME as usize {
-                        piece_mip[piece_index] = chunk.piece_mip[piece_index];
-                    }
-                } else {
-                    content[i] = EMPTY_CHUNK_INDEX;
                 }
             }
         }
