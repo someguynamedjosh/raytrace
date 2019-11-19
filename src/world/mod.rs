@@ -76,36 +76,26 @@ impl World {
 
     fn generate(&mut self) {
         let mut perlin = HybridMulti::new();
-        perlin.octaves = 4;
-        perlin.frequency = 0.04;
+        perlin.octaves = 1;
+        perlin.frequency = 0.7;
         perlin.lacunarity = 4.0;
         perlin.persistence = 0.5;
         let mut micro = HybridMulti::new();
-        micro.octaves = 1;
-        micro.frequency = 30.0;
+        micro.octaves = 2;
+        micro.frequency = 3.0;
         micro.lacunarity = 2.0;
-        micro.persistence = 1.0;
+        micro.persistence = 0.5;
         let mut random = rand::thread_rng();
-        let height =
-            |x, y| (perlin.get([x as f64 / 250.0, y as f64 / 250.0]) * 30.0 + 60.0) as usize;
+        let height = |x, y| {
+            let coord = [x as f64 / 250.0, y as f64 / 250.0];
+            let mut height = perlin.get(coord).powf(2.0) * 30.0 + 30.0;
+            height *= micro.get(coord) * 0.1 + 0.7;
+            height += 30.0;
+            height as usize
+        };
         for x in 2..ROOT_BLOCK_WIDTH as usize {
             for y in 2..ROOT_BLOCK_WIDTH as usize {
                 let mut h0 = height(x, y);
-                let (mut h1, mut h2, mut h3, mut h4) = (
-                    height(x + 2, y + 2),
-                    height(x - 2, y + 2),
-                    height(x + 2, y - 2),
-                    height(x - 2, y - 2),
-                );
-                h0 -= h0 % 4;
-                h1 -= h1 % 4;
-                h2 -= h2 % 4;
-                h3 -= h3 % 4;
-                h4 -= h4 % 4;
-                let lip = h1 < h0 || h2 < h0 || h3 < h0 || h4 < h0;
-                if lip {
-                    h0 += 1;
-                }
                 if x == 200 && y == 200 {
                     h0 += 8;
                 }
@@ -115,11 +105,7 @@ impl World {
                         y,
                         z,
                         if z == h0 - 1 {
-                            if lip {
-                                1
-                            } else {
-                                4
-                            }
+                            1
                         } else {
                             3
                         },
