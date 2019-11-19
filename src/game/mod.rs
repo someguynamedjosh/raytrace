@@ -29,6 +29,8 @@ impl Game {
 
         set.add_control("sunup", VirtualKeyCode::R);
         set.add_control("sundown", VirtualKeyCode::F);
+
+        set.add_control("screenshot", VirtualKeyCode::P);
         set
     }
 

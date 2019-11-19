@@ -12,6 +12,8 @@ use vulkano::pipeline::ComputePipeline;
 use rand::{self, RngCore};
 
 use std::sync::Arc;
+use std::io::prelude::*;
+use std::fs::File;
 
 use super::constants::*;
 use crate::game::Game;
@@ -22,6 +24,7 @@ use shaders::{self, BasicRaytraceShaderLayout, RaytracePushData};
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
 type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
+type ScreenshotData = CpuAccessibleBuffer<[u8]>;
 
 type GenericImage = StorageImage<Format>;
 type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
@@ -55,6 +58,7 @@ impl Camera {
 }
 
 pub struct Renderer {
+    target_image: Arc<GenericImage>,
     target_width: u32,
     target_height: u32,
 
@@ -71,6 +75,9 @@ pub struct Renderer {
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
+
+    screenshot_data: Arc<ScreenshotData>,
+    screenshot_counter: u32,
 }
 
 struct RenderBuilder<'a> {
@@ -210,7 +217,14 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap(),
         );
 
+        let screenshot_data = CpuAccessibleBuffer::from_iter(
+            self.device.clone(), 
+            BufferUsage::all(), 
+            (0..(target_width * target_height * 4)).map(|_| 0u8)
+        ).unwrap();
+
         Renderer {
+            target_image: self.target_image,
             target_width,
             target_height,
 
@@ -226,6 +240,9 @@ impl<'a> RenderBuilder<'a> {
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
+
+            screenshot_data,
+            screenshot_counter: 0,
         }
     }
 }
@@ -300,6 +317,8 @@ impl Renderer {
                 },
             )
             .unwrap()
+            .copy_image_to_buffer(self.target_image.clone(), self.screenshot_data.clone())
+            .unwrap()
             .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
             .unwrap()
             .copy_image_to_buffer(self.region_map.clone(), self.region_map_data.clone())
@@ -307,6 +326,16 @@ impl Renderer {
     }
 
     pub fn read_feedback(&mut self, game: &Game) {
+        if game.borrow_controls().is_held("screenshot") {
+            let filename = format!("denoiser/training/{:0>4}.dat", self.screenshot_counter);
+            let screenshot_data = self.screenshot_data.read().unwrap();
+            let mut buffer = File::create(filename).unwrap();
+            buffer.write_all(&screenshot_data).unwrap();
+            println!("Wrote screenshot {}", self.screenshot_counter);
+
+            self.screenshot_counter += 1;
+        }
+
         let mut chunk_map = self.chunk_map_data.write().unwrap();
         let mut region_map = self.region_map_data.write().unwrap();
         let mut current_buffer = 0;
