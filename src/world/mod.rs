@@ -77,27 +77,47 @@ impl World {
     fn generate(&mut self) {
         let mut perlin = HybridMulti::new();
         perlin.octaves = 4;
-        perlin.frequency = 0.4;
-        perlin.lacunarity = 2.3;
-        perlin.persistence = 0.6;
+        perlin.frequency = 0.04;
+        perlin.lacunarity = 4.0;
+        perlin.persistence = 0.5;
         let mut micro = HybridMulti::new();
         micro.octaves = 1;
         micro.frequency = 30.0;
         micro.lacunarity = 2.0;
         micro.persistence = 1.0;
         let mut random = rand::thread_rng();
-        for x in 0..ROOT_BLOCK_WIDTH as usize {
-            for y in 0..ROOT_BLOCK_WIDTH as usize {
-                let coord = [x as f64 / 250.0, y as f64 / 250.0];
-                let mut height = (perlin.get(coord) * 4.0 + micro.get(coord) * 0.0 + 20.0) as usize;
-                if x == 200 && y == 200 {
-                    height += 8;
+        let height = |x, y| {
+            (perlin.get([x as f64 / 250.0, y as f64 / 250.0]) * 30.0 + 60.0) as usize
+        };
+        for x in 2..ROOT_BLOCK_WIDTH as usize {
+            for y in 2..ROOT_BLOCK_WIDTH as usize {
+                let mut h0 = height(x, y);
+                let (mut h1, mut h2, mut h3, mut h4) = (height(x + 2, y + 2), height(x - 2, y + 2), height(x + 2, y - 2), height(x - 2, y - 2));
+                h0 -= h0 % 4;
+                h1 -= h1 % 4;
+                h2 -= h2 % 4;
+                h3 -= h3 % 4;
+                h4 -= h4 % 4;
+                let lip = h1 < h0 || h2 < h0 || h3 < h0 || h4 < h0;
+                if lip {
+                    h0 += 1;
                 }
-                for z in 0..height {
-                    self.draw_block(x, y, z, if z == height - 1 { 1 } else { 3 });
+                if x == 200 && y == 200 {
+                    h0 += 8;
+                }
+                for z in 0..h0 {
+                    self.draw_block(x, y, z, if z == h0 - 1 { 
+                        if lip {
+                            1
+                        } else {
+                            4
+                        }
+                    } else { 
+                        3 
+                    });
                 }
                 if x > 15 && y > 15 && x < ROOT_BLOCK_WIDTH as usize - 15 && y < ROOT_BLOCK_WIDTH as usize - 15 && random.next_u32() % 10000 == 1 {
-                    for z in height..height + 4 {
+                    for z in h0..h0 + 4 {
                         self.draw_block(x, y, z, 3);
                         self.draw_block(x+1, y, z, 3);
                         self.draw_block(x, y+1, z, 3);
@@ -109,10 +129,10 @@ impl World {
                         if radius < 8 {
                             if dx == 5 || dy == 5 || dz == 5 {
                                 if radius < 7 {
-                                    self.draw_block(x + dx - 5, y + dy - 5, height + dz + 4, 3);
+                                    self.draw_block(x + dx - 5, y + dy - 5, h0 + dz + 4, 3);
                                 }
                             } else {
-                                self.draw_block(x + dx - 5, y + dy - 5, height + dz + 4, 2);
+                                self.draw_block(x + dx - 5, y + dy - 5, h0 + dz + 4, 2);
                             }
                         }
                     }}}

@@ -38,7 +38,7 @@ impl Game {
         };
         result.camera.origin.x = 40.0;
         result.camera.origin.y = 40.0;
-        result.camera.origin.z = 40.0;
+        result.camera.origin.z = 80.0;
         result
     }
 
