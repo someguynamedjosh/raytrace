@@ -13,11 +13,11 @@ use rand::{self, RngCore};
 
 use std::sync::Arc;
 
+use super::constants::*;
 use crate::game::Game;
 use crate::util;
-use crate::world::{WorldChunk};
+use crate::world::WorldChunk;
 use shaders::{self, BasicRaytraceShaderLayout, RaytracePushData};
-use super::constants::*;
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
@@ -43,7 +43,11 @@ pub struct Camera {
 impl Camera {
     pub fn new() -> Camera {
         Camera {
-            origin: Vector3 { x: 0.0, y: 0.0, z: 0.0 },
+            origin: Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
             heading: Rad(1.0),
             pitch: Rad(0.0),
         }
@@ -89,14 +93,16 @@ impl<'a> RenderBuilder<'a> {
     ) {
         let world = self.game.borrow_world();
 
-        let upload_buffers = (0..NUM_UPLOAD_BUFFERS).map(|_| {
-            CpuAccessibleBuffer::from_iter(
-                self.device.clone(),
-                BufferUsage::all(),
-                (0..CHUNK_BLOCK_VOLUME).map(|_| 0)
-            )
-            .unwrap()
-        }).collect();
+        let upload_buffers = (0..NUM_UPLOAD_BUFFERS)
+            .map(|_| {
+                CpuAccessibleBuffer::from_iter(
+                    self.device.clone(),
+                    BufferUsage::all(),
+                    (0..CHUNK_BLOCK_VOLUME).map(|_| 0),
+                )
+                .unwrap()
+            })
+            .collect();
 
         let block_data_atlas = StorageImage::new(
             self.device.clone(),
@@ -111,45 +117,58 @@ impl<'a> RenderBuilder<'a> {
         .unwrap();
 
         let chunk_map_data = CpuAccessibleBuffer::from_iter(
-            self.device.clone(), 
-            BufferUsage::all(), 
-            (0..ROOT_CHUNK_VOLUME).map(|_| UNLOADED_CHUNK_INDEX)
+            self.device.clone(),
+            BufferUsage::all(),
+            (0..ROOT_CHUNK_VOLUME).map(|_| UNLOADED_CHUNK_INDEX),
         )
         .unwrap();
 
         let chunk_map = StorageImage::new(
-            self.device.clone(), 
+            self.device.clone(),
             Dimensions::Dim3d {
                 width: ROOT_CHUNK_WIDTH,
                 height: ROOT_CHUNK_WIDTH,
-                depth: ROOT_CHUNK_WIDTH
-            }, 
-            Format::R16Uint, 
-            Some(self.queue.family())
+                depth: ROOT_CHUNK_WIDTH,
+            },
+            Format::R16Uint,
+            Some(self.queue.family()),
         )
         .unwrap();
 
         let region_map_data = CpuAccessibleBuffer::from_iter(
-            self.device.clone(), 
-            BufferUsage::all(), 
-            (0..ROOT_REGION_VOLUME as usize).map(|i| if world.regions[i] { 1 } else { EMPTY_CHUNK_INDEX })
+            self.device.clone(),
+            BufferUsage::all(),
+            (0..ROOT_REGION_VOLUME as usize).map(|i| {
+                if world.regions[i] {
+                    1
+                } else {
+                    EMPTY_CHUNK_INDEX
+                }
+            }),
         )
         .unwrap();
 
         let region_map = StorageImage::new(
-            self.device.clone(), 
+            self.device.clone(),
             Dimensions::Dim3d {
                 width: ROOT_REGION_WIDTH,
                 height: ROOT_REGION_WIDTH,
-                depth: ROOT_REGION_WIDTH
-            }, 
-            Format::R16Uint, 
-            Some(self.queue.family())
+                depth: ROOT_REGION_WIDTH,
+            },
+            Format::R16Uint,
+            Some(self.queue.family()),
         )
         .unwrap();
         println!("Buffers created.");
 
-        (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map)
+        (
+            upload_buffers,
+            block_data_atlas,
+            chunk_map_data,
+            chunk_map,
+            region_map_data,
+            region_map,
+        )
     }
 
     fn build(self) -> Renderer {
@@ -158,7 +177,14 @@ impl<'a> RenderBuilder<'a> {
             _ => panic!("A non-2d image was passed as the target of a Renderer."),
         };
 
-        let (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map) = self.make_world();
+        let (
+            upload_buffers,
+            block_data_atlas,
+            chunk_map_data,
+            chunk_map,
+            region_map_data,
+            region_map,
+        ) = self.make_world();
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
 
@@ -215,7 +241,7 @@ impl Renderer {
             device,
             queue,
             target_image,
-            game
+            game,
         }
         .build()
     }
@@ -270,7 +296,7 @@ impl Renderer {
                     right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
                     up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
                     sun_angle: game.get_sun_angle(),
-                    seed: rand::thread_rng().next_u32()
+                    seed: rand::thread_rng().next_u32(),
                 },
             )
             .unwrap()
@@ -286,7 +312,9 @@ impl Renderer {
         let mut current_buffer = 0;
         for region_index in 0..ROOT_REGION_VOLUME as usize {
             let region_content = region_map[region_index];
-            if region_content != REQUEST_LOAD_CHUNK_INDEX { continue; }
+            if region_content != REQUEST_LOAD_CHUNK_INDEX {
+                continue;
+            }
             let region_occupied = game.borrow_world().regions[region_index];
             if !region_occupied {
                 region_map[region_index] = EMPTY_CHUNK_INDEX;
@@ -302,13 +330,21 @@ impl Renderer {
             for x in 0..REGION_CHUNK_WIDTH as usize {
                 for y in 0..REGION_CHUNK_WIDTH as usize {
                     for z in 0..REGION_CHUNK_WIDTH as usize {
-                        let chunk_index = (z * ROOT_CHUNK_WIDTH as usize + y) * ROOT_CHUNK_WIDTH as usize + x + offset;
-                        if chunk_map[chunk_index] != REQUEST_LOAD_CHUNK_INDEX { continue; }
-                        if let WorldChunk::Occupied(chunk) = &game.borrow_world().chunks[chunk_index] {
+                        let chunk_index = (z * ROOT_CHUNK_WIDTH as usize + y)
+                            * ROOT_CHUNK_WIDTH as usize
+                            + x
+                            + offset;
+                        if chunk_map[chunk_index] != REQUEST_LOAD_CHUNK_INDEX {
+                            continue;
+                        }
+                        if let WorldChunk::Occupied(chunk) =
+                            &game.borrow_world().chunks[chunk_index]
+                        {
                             chunk_map[chunk_index] = self.chunk_upload_index;
                             self.upload_destinations.push(self.chunk_upload_index);
                             self.chunk_upload_index += 1;
-                            let mut upload_buffer = self.upload_buffers[current_buffer].write().unwrap();
+                            let mut upload_buffer =
+                                self.upload_buffers[current_buffer].write().unwrap();
                             for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
                                 upload_buffer[block_index] = chunk.block_data[block_index];
                             }

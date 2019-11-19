@@ -1,6 +1,6 @@
 use crate::render::constants::*;
 
-use noise::{NoiseFn, HybridMulti};
+use noise::{HybridMulti, NoiseFn};
 use rand::{self, RngCore};
 
 pub struct Chunk {
@@ -36,7 +36,7 @@ impl World {
     pub fn new() -> World {
         let mut world = World {
             chunks: Vec::new(),
-            regions: [false; ROOT_REGION_VOLUME as usize]
+            regions: [false; ROOT_REGION_VOLUME as usize],
         };
         for _ in 0..ROOT_CHUNK_VOLUME {
             world.chunks.push(WorldChunk::Ungenerated);
@@ -86,13 +86,17 @@ impl World {
         micro.lacunarity = 2.0;
         micro.persistence = 1.0;
         let mut random = rand::thread_rng();
-        let height = |x, y| {
-            (perlin.get([x as f64 / 250.0, y as f64 / 250.0]) * 30.0 + 60.0) as usize
-        };
+        let height =
+            |x, y| (perlin.get([x as f64 / 250.0, y as f64 / 250.0]) * 30.0 + 60.0) as usize;
         for x in 2..ROOT_BLOCK_WIDTH as usize {
             for y in 2..ROOT_BLOCK_WIDTH as usize {
                 let mut h0 = height(x, y);
-                let (mut h1, mut h2, mut h3, mut h4) = (height(x + 2, y + 2), height(x - 2, y + 2), height(x + 2, y - 2), height(x - 2, y - 2));
+                let (mut h1, mut h2, mut h3, mut h4) = (
+                    height(x + 2, y + 2),
+                    height(x - 2, y + 2),
+                    height(x + 2, y - 2),
+                    height(x - 2, y - 2),
+                );
                 h0 -= h0 % 4;
                 h1 -= h1 % 4;
                 h2 -= h2 % 4;
@@ -106,36 +110,52 @@ impl World {
                     h0 += 8;
                 }
                 for z in 0..h0 {
-                    self.draw_block(x, y, z, if z == h0 - 1 { 
-                        if lip {
-                            1
+                    self.draw_block(
+                        x,
+                        y,
+                        z,
+                        if z == h0 - 1 {
+                            if lip {
+                                1
+                            } else {
+                                4
+                            }
                         } else {
-                            4
-                        }
-                    } else { 
-                        3 
-                    });
+                            3
+                        },
+                    );
                 }
-                if x > 15 && y > 15 && x < ROOT_BLOCK_WIDTH as usize - 15 && y < ROOT_BLOCK_WIDTH as usize - 15 && random.next_u32() % 10000 == 1 {
+                if x > 15
+                    && y > 15
+                    && x < ROOT_BLOCK_WIDTH as usize - 15
+                    && y < ROOT_BLOCK_WIDTH as usize - 15
+                    && random.next_u32() % 10000 == 1
+                {
                     for z in h0..h0 + 4 {
                         self.draw_block(x, y, z, 3);
-                        self.draw_block(x+1, y, z, 3);
-                        self.draw_block(x, y+1, z, 3);
-                        self.draw_block(x-1, y, z, 3);
-                        self.draw_block(x, y-1, z, 3);
+                        self.draw_block(x + 1, y, z, 3);
+                        self.draw_block(x, y + 1, z, 3);
+                        self.draw_block(x - 1, y, z, 3);
+                        self.draw_block(x, y - 1, z, 3);
                     }
-                    for dx in 0..11 { for dy in 0..11 { for dz in 0..11 {
-                        let radius = (dx as isize - 5).abs() + (dy as isize - 5).abs() + (dz as isize - 5).abs();
-                        if radius < 8 {
-                            if dx == 5 || dy == 5 || dz == 5 {
-                                if radius < 7 {
-                                    self.draw_block(x + dx - 5, y + dy - 5, h0 + dz + 4, 3);
+                    for dx in 0..11 {
+                        for dy in 0..11 {
+                            for dz in 0..11 {
+                                let radius = (dx as isize - 5).abs()
+                                    + (dy as isize - 5).abs()
+                                    + (dz as isize - 5).abs();
+                                if radius < 8 {
+                                    if dx == 5 || dy == 5 || dz == 5 {
+                                        if radius < 7 {
+                                            self.draw_block(x + dx - 5, y + dy - 5, h0 + dz + 4, 3);
+                                        }
+                                    } else {
+                                        self.draw_block(x + dx - 5, y + dy - 5, h0 + dz + 4, 2);
+                                    }
                                 }
-                            } else {
-                                self.draw_block(x + dx - 5, y + dy - 5, h0 + dz + 4, 2);
                             }
                         }
-                    }}}
+                    }
                 }
             }
         }

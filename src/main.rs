@@ -32,7 +32,7 @@ mod render;
 mod util;
 mod world;
 
-use render::{Presenter, Renderer, InitResult};
+use render::{InitResult, Presenter, Renderer};
 
 fn main() {
     let InitResult {

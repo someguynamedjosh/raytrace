@@ -1,5 +1,5 @@
-use winit::VirtualKeyCode;
 use std::collections::HashMap;
+use winit::VirtualKeyCode;
 
 struct Control {
     last_state: bool,
