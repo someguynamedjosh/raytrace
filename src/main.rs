@@ -16,8 +16,6 @@
 // and that you want to learn Vulkan. This means that for example it won't go into details about
 // what a vertex or a shader is.
 
-use cgmath::{InnerSpace, Rad, Vector3};
-
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
 use vulkano::image::SwapchainImage;
@@ -29,11 +27,12 @@ use winit::{ElementState, Event, KeyboardInput, VirtualKeyCode, Window, WindowEv
 
 use std::sync::Arc;
 
+mod game;
 mod render;
 mod util;
 mod world;
 
-use render::{Camera, Presenter, Renderer, InitResult};
+use render::{Presenter, Renderer, InitResult};
 
 fn main() {
     let InitResult {
@@ -47,6 +46,9 @@ fn main() {
     let window = surface.window();
     println!("Vulkan started.");
 
+    let mut game = game::Game::new();
+    println!("Game initialized.");
+
     let presenter = Presenter::new(
         device.clone(),
         queue.clone(),
@@ -57,6 +59,7 @@ fn main() {
         device.clone(),
         queue.clone(),
         presenter.get_presented_image(),
+        &game,
     );
     println!("Renderer initialized.");
 
@@ -76,25 +79,10 @@ fn main() {
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>;
 
-    let mut camera = Camera {
-        origin: Vector3 {
-            x: 40.0,
-            y: 40.0,
-            z: 80.0,
-        },
-        heading: Rad(-2.38),
-        pitch: Rad(-0.74),
-    };
-    let mut camera_movement = Vector3 {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-    };
-
     let mut total_frames = 0;
     let mut total_frame_time = 0;
+    let mut frame_start = std::time::Instant::now();
     loop {
-        let frame_start = std::time::Instant::now();
         previous_frame_end.cleanup_finished();
         if recreate_swapchain {
             let dimensions = if let Some(dimensions) = window.get_inner_size() {
@@ -136,7 +124,7 @@ fn main() {
         let mut builder =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                 .unwrap();
-        builder = renderer.add_render_commands(builder, &camera);
+        builder = renderer.add_render_commands(builder, &game);
         let builder = presenter.add_present_commands(
             builder,
             &dynamic_state,
@@ -151,9 +139,8 @@ fn main() {
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 
-        // Handling the window events in order to close the program when the user wants to close
-        // it.
         let mut done = false;
+        game.borrow_controls_mut().tick();
         events_loop.poll_events(|ev| match ev {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
@@ -162,10 +149,7 @@ fn main() {
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
-            } => {
-                camera.heading.0 = (-position.x / 80.0) as f32;
-                camera.pitch.0 = ((256.0 - position.y) / 200.0) as f32;
-            }
+            } => game.on_mouse_move(position.x, position.y),
             Event::WindowEvent {
                 event:
                     WindowEvent::KeyboardInput {
@@ -179,14 +163,8 @@ fn main() {
                     },
                 ..
             } => match code {
-                VirtualKeyCode::W => camera_movement.y = 1.0,
-                VirtualKeyCode::S => camera_movement.y = -1.0,
-                VirtualKeyCode::D => camera_movement.x = 1.0,
-                VirtualKeyCode::A => camera_movement.x = -1.0,
-                VirtualKeyCode::E => camera_movement.z = 1.0,
-                VirtualKeyCode::Q => camera_movement.z = -1.0,
                 VirtualKeyCode::Escape => done = true,
-                _ => (),
+                _ => game.borrow_controls_mut().on_pressed(code),
             },
             Event::WindowEvent {
                 event:
@@ -200,15 +178,7 @@ fn main() {
                         ..
                     },
                 ..
-            } => match code {
-                VirtualKeyCode::W => camera_movement.y = 0.0,
-                VirtualKeyCode::S => camera_movement.y = 0.0,
-                VirtualKeyCode::D => camera_movement.x = 0.0,
-                VirtualKeyCode::A => camera_movement.x = 0.0,
-                VirtualKeyCode::E => camera_movement.z = 0.0,
-                VirtualKeyCode::Q => camera_movement.z = 0.0,
-                _ => (),
-            },
+            } => game.borrow_controls_mut().on_released(code),
             Event::WindowEvent {
                 event: WindowEvent::Resized(_),
                 ..
@@ -218,6 +188,9 @@ fn main() {
         if done {
             return;
         }
+        let dt = frame_start.elapsed().as_millis() as f32 / 1000.0;
+        game.tick(dt);
+        frame_start = std::time::Instant::now();
 
         match future {
             Ok(future) => {
@@ -234,23 +207,10 @@ fn main() {
             }
         }
 
-        renderer.read_feedback();
+        renderer.read_feedback(&game);
 
-        let elapsed = frame_start.elapsed().as_millis() as f32 / 1000.0;
-        total_frame_time += frame_start.elapsed().as_millis();
+        total_frame_time += (dt * 1000.0) as i64;
         total_frames += 1;
-        camera.origin += {
-            let amount = elapsed * 50.0;
-            let util::TripleEulerVector { forward, up, right } =
-                util::compute_triple_euler_vector(camera.heading, camera.pitch);
-            let forward = forward.normalize();
-            let up = up.normalize();
-            let right = right.normalize();
-            amount * forward * camera_movement.y
-                + amount * up * camera_movement.z
-                + amount * right * camera_movement.x
-        };
-        println!("{:?}", camera);
         println!(
             "Frame took {}ms, average {} per frame.",
             frame_start.elapsed().as_millis(),

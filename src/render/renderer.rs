@@ -13,8 +13,9 @@ use rand::{self, RngCore};
 
 use std::sync::Arc;
 
+use crate::game::Game;
 use crate::util;
-use crate::world::{World, WorldChunk};
+use crate::world::{WorldChunk};
 use shaders::{self, BasicRaytraceShaderLayout, RaytracePushData};
 use super::constants::*;
 
@@ -39,6 +40,16 @@ pub struct Camera {
     pub pitch: Rad<f32>,
 }
 
+impl Camera {
+    pub fn new() -> Camera {
+        Camera {
+            origin: Vector3 { x: 0.0, y: 0.0, z: 0.0 },
+            heading: Rad(1.0),
+            pitch: Rad(0.0),
+        }
+    }
+}
+
 pub struct Renderer {
     target_width: u32,
     target_height: u32,
@@ -54,25 +65,21 @@ pub struct Renderer {
     region_map_data: Arc<WorldData>,
     region_map: Arc<WorldImage>,
 
-    world: World,
-
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
-
-    sun_pos: f32,
 }
 
-struct RenderBuilder {
+struct RenderBuilder<'a> {
     device: Arc<Device>,
     queue: Arc<Queue>,
     target_image: Arc<GenericImage>,
+    game: &'a Game,
 }
 
-impl RenderBuilder {
+impl<'a> RenderBuilder<'a> {
     fn make_world(
         &self,
     ) -> (
-        World,
         Vec<Arc<WorldData>>,
         Arc<WorldImage>,
         Arc<WorldData>,
@@ -80,8 +87,7 @@ impl RenderBuilder {
         Arc<WorldData>,
         Arc<WorldImage>,
     ) {
-        let world = World::new();
-        println!("World generated.");
+        let world = self.game.borrow_world();
 
         let upload_buffers = (0..NUM_UPLOAD_BUFFERS).map(|_| {
             CpuAccessibleBuffer::from_iter(
@@ -143,7 +149,7 @@ impl RenderBuilder {
         .unwrap();
         println!("Buffers created.");
 
-        (world, upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map)
+        (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map)
     }
 
     fn build(self) -> Renderer {
@@ -152,7 +158,7 @@ impl RenderBuilder {
             _ => panic!("A non-2d image was passed as the target of a Renderer."),
         };
 
-        let (world, upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map) = self.make_world();
+        let (upload_buffers, block_data_atlas, chunk_map_data, chunk_map, region_map_data, region_map) = self.make_world();
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
 
@@ -192,12 +198,8 @@ impl RenderBuilder {
             region_map_data,
             region_map,
 
-            world,
-
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
-
-            sun_pos: 0.0,
         }
     }
 }
@@ -207,11 +209,13 @@ impl Renderer {
         device: Arc<Device>,
         queue: Arc<Queue>,
         target_image: Arc<GenericImage>,
+        game: &Game,
     ) -> Renderer {
         RenderBuilder {
             device,
             queue,
             target_image,
+            game
         }
         .build()
     }
@@ -219,10 +223,9 @@ impl Renderer {
     pub fn add_render_commands(
         &mut self,
         mut add_to: AutoCommandBufferBuilder,
-        camera: &Camera,
+        game: &Game,
     ) -> AutoCommandBufferBuilder {
-        self.sun_pos += 0.02;
-        self.sun_pos %= 3.1415 * 2.0;
+        let camera = game.borrow_camera();
         let camera_pos = camera.origin;
         let util::TripleEulerVector { forward, up, right } =
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
@@ -266,7 +269,7 @@ impl Renderer {
                     forward: [forward.x, forward.y, forward.z],
                     right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
                     up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
-                    sun_angle: self.sun_pos,
+                    sun_angle: game.get_sun_angle(),
                     seed: rand::thread_rng().next_u32()
                 },
             )
@@ -277,14 +280,14 @@ impl Renderer {
             .unwrap()
     }
 
-    pub fn read_feedback(&mut self) {
+    pub fn read_feedback(&mut self, game: &Game) {
         let mut chunk_map = self.chunk_map_data.write().unwrap();
         let mut region_map = self.region_map_data.write().unwrap();
         let mut current_buffer = 0;
         for region_index in 0..ROOT_REGION_VOLUME as usize {
             let region_content = region_map[region_index];
             if region_content != REQUEST_LOAD_CHUNK_INDEX { continue; }
-            let region_occupied = self.world.regions[region_index];
+            let region_occupied = game.borrow_world().regions[region_index];
             if !region_occupied {
                 region_map[region_index] = EMPTY_CHUNK_INDEX;
                 continue;
@@ -301,7 +304,7 @@ impl Renderer {
                     for z in 0..REGION_CHUNK_WIDTH as usize {
                         let chunk_index = (z * ROOT_CHUNK_WIDTH as usize + y) * ROOT_CHUNK_WIDTH as usize + x + offset;
                         if chunk_map[chunk_index] != REQUEST_LOAD_CHUNK_INDEX { continue; }
-                        if let WorldChunk::Occupied(chunk) = &mut self.world.chunks[chunk_index] {
+                        if let WorldChunk::Occupied(chunk) = &game.borrow_world().chunks[chunk_index] {
                             chunk_map[chunk_index] = self.chunk_upload_index;
                             self.upload_destinations.push(self.chunk_upload_index);
                             self.chunk_upload_index += 1;
