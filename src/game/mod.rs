@@ -26,6 +26,9 @@ impl Game {
         set.add_control("right", VirtualKeyCode::D);
         set.add_control("forward", VirtualKeyCode::W);
         set.add_control("backward", VirtualKeyCode::S);
+
+        set.add_control("sunup", VirtualKeyCode::R);
+        set.add_control("sundown", VirtualKeyCode::F);
         set
     }
 
@@ -44,7 +47,11 @@ impl Game {
 
     // Called after all controls have been updated.
     pub fn tick(&mut self, dt: f32) {
-        self.sun_angle += dt * 0.5;
+        if self.controls.is_held("sunup") {
+            self.sun_angle += dt * 1.0;
+        } else if self.controls.is_held("sundown") {
+            self.sun_angle -= dt * 1.0;
+        }
 
         let dx: f32 = if self.controls.is_held("left") {
             -1.0
