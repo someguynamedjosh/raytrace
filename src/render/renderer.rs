@@ -218,6 +218,8 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap(),
         );
 
+        println!("Pipeline created.");
+
         let screenshot_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(), 
             BufferUsage::all(), 

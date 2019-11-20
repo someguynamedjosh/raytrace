@@ -35,7 +35,7 @@ mod world;
 
 use render::{InitResult, Presenter, Renderer};
 
-const SAMPLE_SIZE: usize = 50000;
+const SAMPLE_SIZE: usize = 2000;
 const WARMUP_TIME: usize = 200;
 
 fn main() {
