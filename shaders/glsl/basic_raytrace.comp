@@ -272,17 +272,17 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     result.position = origin + direction * total_step;
 
     if (result.normal == NORMAL_x) {
-        result.position += vec3(0.02, 0, 0);
+        result.position += vec3(0.002, 0, 0);
     } else if (result.normal == NORMAL_x + 1) {
-        result.position -= vec3(0.02, 0, 0);
+        result.position -= vec3(0.002, 0, 0);
     } else if (result.normal == NORMAL_y) {
-        result.position += vec3(0, 0.02, 0);
+        result.position += vec3(0, 0.002, 0);
     } else if (result.normal == NORMAL_y + 1) {
-        result.position -= vec3(0, 0.02, 0);
+        result.position -= vec3(0, 0.002, 0);
     } else if (result.normal == NORMAL_z) {
-        result.position += vec3(0, 0, 0.02);
+        result.position += vec3(0, 0, 0.002);
     } else if (result.normal == NORMAL_z + 1) {
-        result.position -= vec3(0, 0, 0.02);
+        result.position -= vec3(0, 0, 0.002);
     }
 
     return result;
