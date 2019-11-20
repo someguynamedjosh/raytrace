@@ -25,6 +25,7 @@ use vulkano::sync::{self, FlushError, GpuFuture};
 
 use winit::{ElementState, Event, KeyboardInput, VirtualKeyCode, Window, WindowEvent};
 
+use std::env;
 use std::sync::Arc;
 
 mod game;
@@ -34,7 +35,17 @@ mod world;
 
 use render::{InitResult, Presenter, Renderer};
 
+const SAMPLE_SIZE: usize = 50000;
+const WARMUP_TIME: usize = 200;
+
 fn main() {
+    let args: Vec<_> = env::args().collect();
+    let mut capture_counter = if args.len() > 1 {
+        SAMPLE_SIZE + WARMUP_TIME
+    } else {
+        0
+    };
+
     let InitResult {
         device,
         queue,
@@ -141,50 +152,52 @@ fn main() {
 
         let mut done = false;
         game.borrow_controls_mut().tick();
-        events_loop.poll_events(|ev| match ev {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => done = true,
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } => game.on_mouse_move(position.x, position.y),
-            Event::WindowEvent {
-                event:
-                    WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: ElementState::Pressed,
-                                virtual_keycode: Some(code),
-                                ..
-                            },
-                        ..
-                    },
-                ..
-            } => match code {
-                VirtualKeyCode::Escape => done = true,
-                _ => game.borrow_controls_mut().on_pressed(code),
-            },
-            Event::WindowEvent {
-                event:
-                    WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: ElementState::Released,
-                                virtual_keycode: Some(code),
-                                ..
-                            },
-                        ..
-                    },
-                ..
-            } => game.borrow_controls_mut().on_released(code),
-            Event::WindowEvent {
-                event: WindowEvent::Resized(_),
-                ..
-            } => recreate_swapchain = true,
-            _ => (),
-        });
+        if capture_counter == 0 {
+            events_loop.poll_events(|ev| match ev {
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => done = true,
+                Event::WindowEvent {
+                    event: WindowEvent::CursorMoved { position, .. },
+                    ..
+                } => game.on_mouse_move(position.x, position.y),
+                Event::WindowEvent {
+                    event:
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    state: ElementState::Pressed,
+                                    virtual_keycode: Some(code),
+                                    ..
+                                },
+                            ..
+                        },
+                    ..
+                } => match code {
+                    VirtualKeyCode::Escape => done = true,
+                    _ => game.borrow_controls_mut().on_pressed(code),
+                },
+                Event::WindowEvent {
+                    event:
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    state: ElementState::Released,
+                                    virtual_keycode: Some(code),
+                                    ..
+                                },
+                            ..
+                        },
+                    ..
+                } => game.borrow_controls_mut().on_released(code),
+                Event::WindowEvent {
+                    event: WindowEvent::Resized(_),
+                    ..
+                } => recreate_swapchain = true,
+                _ => (),
+            }); 
+        } 
         if done {
             return;
         }
@@ -204,6 +217,17 @@ fn main() {
             Err(e) => {
                 println!("{:?}", e);
                 previous_frame_end = Box::new(sync::now(device.clone())) as Box<_>;
+            }
+        }
+
+        if capture_counter > 0 {
+            capture_counter -= 1;
+            if capture_counter < SAMPLE_SIZE {
+                renderer.capture();
+            }
+            if capture_counter == 0 {
+                renderer.finish_capture();
+                return;
             }
         }
 

@@ -60,7 +60,7 @@ struct HitResult {
 #define PERFORM_CHUNK_TRACE(AXIS) \
     vec3 real_pos = origin + direction * total_step; \
     vec3 fake_pos = real_pos; \
-    fake_pos.AXIS += step.AXIS * 0.01; \
+    fake_pos.AXIS += step.AXIS * 0.001; \
     block_coord = ivec3(floor(fake_pos)); \
     \
     if (step.x == 1) { \

@@ -12,7 +12,7 @@ use vulkano::pipeline::ComputePipeline;
 use rand::{self, RngCore};
 
 use std::sync::Arc;
-use std::io::prelude::*;
+use std::io::{prelude::*, BufWriter};
 use std::fs::File;
 
 use super::constants::*;
@@ -77,6 +77,7 @@ pub struct Renderer {
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
 
     screenshot_data: Arc<ScreenshotData>,
+    screenshot_accumulator: Vec<u32>,
     screenshot_counter: u32,
 }
 
@@ -242,6 +243,7 @@ impl<'a> RenderBuilder<'a> {
             basic_raytrace_descriptors,
 
             screenshot_data,
+            screenshot_accumulator: (0..(target_width * target_height * 4)).map(|_| 0u32).collect(),
             screenshot_counter: 0,
         }
     }
@@ -295,6 +297,7 @@ impl Renderer {
                 .unwrap();
         }
         self.upload_destinations.clear();
+        let seed = rand::thread_rng().next_u32();
         add_to
             .copy_buffer_to_image(self.chunk_map_data.clone(), self.chunk_map.clone())
             .unwrap()
@@ -313,7 +316,7 @@ impl Renderer {
                     right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
                     up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
                     sun_angle: game.get_sun_angle(),
-                    seed: rand::thread_rng().next_u32(),
+                    seed: seed,
                 },
             )
             .unwrap()
@@ -326,16 +329,6 @@ impl Renderer {
     }
 
     pub fn read_feedback(&mut self, game: &Game) {
-        if game.borrow_controls().is_held("screenshot") {
-            let filename = format!("denoiser/training/{:0>4}.dat", self.screenshot_counter);
-            let screenshot_data = self.screenshot_data.read().unwrap();
-            let mut buffer = File::create(filename).unwrap();
-            buffer.write_all(&screenshot_data).unwrap();
-            println!("Wrote screenshot {}", self.screenshot_counter);
-
-            self.screenshot_counter += 1;
-        }
-
         let mut chunk_map = self.chunk_map_data.write().unwrap();
         let mut region_map = self.region_map_data.write().unwrap();
         let mut current_buffer = 0;
@@ -389,5 +382,28 @@ impl Renderer {
             }
             region_map[region_index] = 1;
         }
+    }
+
+    pub fn capture(&mut self) {
+        let screenshot_data = self.screenshot_data.read().unwrap();
+        for (target, value) in self.screenshot_accumulator.iter_mut().zip(screenshot_data.iter()) {
+            *target += *value as u32;
+        }
+
+        if self.screenshot_counter < 100 {
+            let filename = format!("denoiser/training/{:0>2}.dat", self.screenshot_counter);
+            let mut buffer = File::create(filename).unwrap();
+            buffer.write_all(&screenshot_data).unwrap();
+        }
+
+        self.screenshot_counter += 1;
+    }
+
+    pub fn finish_capture(&mut self) {
+        let mut buffer = BufWriter::new(File::create("denoiser/training/sum.dat").unwrap());
+        for value in &self.screenshot_accumulator {
+            buffer.write(&[(*value / self.screenshot_counter) as u8]).unwrap();
+        }
+        buffer.flush().unwrap();
     }
 }

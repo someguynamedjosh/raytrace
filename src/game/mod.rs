@@ -5,6 +5,8 @@ use crate::render::Camera;
 use crate::util;
 use crate::world::World;
 
+use std::env;
+
 pub mod control;
 
 use control::ControlSet;
@@ -29,21 +31,29 @@ impl Game {
 
         set.add_control("sunup", VirtualKeyCode::R);
         set.add_control("sundown", VirtualKeyCode::F);
-
-        set.add_control("screenshot", VirtualKeyCode::P);
         set
     }
 
     pub fn new() -> Game {
+        let args: Vec<_> = env::args().collect();
         let mut result = Game {
             camera: Camera::new(),
             world: World::new(),
             controls: Self::make_controls(),
             sun_angle: 0.0,
         };
-        result.camera.origin.x = 40.0;
-        result.camera.origin.y = 40.0;
-        result.camera.origin.z = 80.0;
+        if args.len() > 1 {
+            result.camera.origin.x = args[1].parse().unwrap();
+            result.camera.origin.y = args[2].parse().unwrap();
+            result.camera.origin.z = args[3].parse().unwrap();
+            result.camera.heading.0 = args[4].parse().unwrap();
+            result.camera.pitch.0 = args[5].parse().unwrap();
+            result.sun_angle = args[6].parse().unwrap();
+        } else {
+            result.camera.origin.x = 40.0;
+            result.camera.origin.y = 40.0;
+            result.camera.origin.z = 80.0;
+        }
         result
     }
 
