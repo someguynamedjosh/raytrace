@@ -1,6 +1,6 @@
 {
     "files.watcherExclude": {
-        "**/denoiser/training/": true,
+        "**/denoiser/training/**": true,
         "**/target/**": true
     }
 }
