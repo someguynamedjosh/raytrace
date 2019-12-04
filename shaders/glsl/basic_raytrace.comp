@@ -48,6 +48,21 @@ struct HitResult {
     uint normal;
 };
 
+HitResult result;
+float total_step;
+ivec3 step;
+ivec3 block_coord, chunk_coord, region_coord, atlas_offset;
+ivec3 region_exit_planes, chunk_exit_planes;
+vec3 global_origin, global_direction;
+vec3 next_piece_distance, next_block_distance, next_region_distance;
+vec3 block_advance_amount, chunk_advance_amount, region_advance_amount;
+uint chunk_index, region_content;
+
+#define GENERATE_FUNCTIONS(PREFIX, MACRO) \
+    void PREFIX##_x() { MACRO(x) } \
+    void PREFIX##_y() { MACRO(y) } \
+    void PREFIX##_z() { MACRO(z) }
+
 #define PERFORM_BLOCK_STEP(AXIS) \
     block_coord.AXIS += step.AXIS; \
     total_step = next_block_distance.AXIS; \
@@ -60,7 +75,7 @@ struct HitResult {
     next_block_distance.AXIS += block_advance_amount.AXIS;
 
 #define PERFORM_CHUNK_TRACE(AXIS) \
-    vec3 real_pos = origin + direction * total_step; \
+    vec3 real_pos = global_origin + global_direction * total_step; \
     vec3 fake_pos = real_pos; \
     fake_pos.AXIS += step.AXIS * 0.001; \
     block_coord = ivec3(floor(fake_pos)); \
@@ -107,6 +122,8 @@ struct HitResult {
         result.normal = int(NORMAL_##AXIS) + (step.AXIS + 1) / 2; \
     }
 
+GENERATE_FUNCTIONS(perform_chunk_trace, PERFORM_CHUNK_TRACE)
+
 #define PERFORM_CHUNK_STEP(AXIS) \
     chunk_coord.AXIS += step.AXIS; \
     total_step = next_chunk_distance.AXIS; \
@@ -124,13 +141,13 @@ struct HitResult {
         atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
         atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
         atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
-        PERFORM_CHUNK_TRACE(AXIS) \
+        perform_chunk_trace_##AXIS (); \
     } \
     if (result.value != 0) { break; } \
     next_chunk_distance.AXIS += chunk_advance_amount.AXIS;
 
 #define PERFORM_REGION_TRACE(AXIS) \
-    vec3 real_pos = origin + direction * total_step; \
+    vec3 real_pos = global_origin + global_direction * total_step; \
     vec3 fake_pos = real_pos; \
     fake_pos.AXIS += step.AXIS * 0.01; \
     block_coord = ivec3(floor(fake_pos)); \
@@ -165,16 +182,14 @@ struct HitResult {
         imageStore(chunk_map, chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
         imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
         result.value = UNLOADED_CHUNK_INDEX; \
-        break; \
     } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) { \
         result.value = UNLOADED_CHUNK_INDEX; \
-        break; \
     } else { \
         if (chunk_index != EMPTY_CHUNK_INDEX) { \
             atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
             atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
             atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
-            PERFORM_CHUNK_TRACE(AXIS); \
+            perform_chunk_trace_##AXIS (); \
         } \
         if (result.value == 0) { for (int i = 0; i < 128; i++) { \
             if (next_chunk_distance.x < next_chunk_distance.y) { \
@@ -193,41 +208,40 @@ struct HitResult {
         } } \
     }
 
+GENERATE_FUNCTIONS(perform_region_trace, PERFORM_REGION_TRACE)
+
 #define PERFORM_REGION_STEP(AXIS) \
     region_coord.AXIS += step.AXIS; \
     total_step = next_region_distance.AXIS; \
     if (region_coord.AXIS < 0 || region_coord.AXIS == ROOT_REGION_WIDTH) { break; } \
     region_content = imageLoad(region_map, region_coord).r; \
     if (region_content != EMPTY_CHUNK_INDEX) { \
-        PERFORM_REGION_TRACE(AXIS); \
+        perform_region_trace_##AXIS (); \
     } \
     if (result.value != 0) { break; } \
     next_region_distance.AXIS += region_advance_amount.AXIS;
 
 HitResult trace_ray(vec3 origin, vec3 direction) {
-    HitResult result;
-    float total_step = 0.0;
-    ivec3 block_coord, chunk_coord, region_coord, atlas_offset;
-    ivec3 region_exit_planes, chunk_exit_planes;
-    vec3 next_piece_distance, next_block_distance, next_region_distance;
-    uint chunk_index, region_content;
+    total_step = 0.0;
+    global_origin = origin;
+    global_direction = direction;
 
-    region_coord = ivec3(floor(origin / REGION_BLOCK_WIDTH));
+    region_coord = ivec3(floor(global_origin / REGION_BLOCK_WIDTH));
 
-    ivec3 step = ivec3(
+    step = ivec3(
         direction.x < 0 ? -1 : 1,
         direction.y < 0 ? -1 : 1,
         direction.z < 0 ? -1 : 1
     );
     // How much we need to move along the vector to advance the current block 
     // coordinate by *exactly* 1.0 in the x, y, and z directions. 
-    vec3 block_advance_amount = abs(vec3(
+    block_advance_amount = abs(vec3(
         1.0 / (direction.x + 1e-8),
         1.0 / (direction.y + 1e-8),
         1.0 / (direction.z + 1e-8)
     ));
-    vec3 chunk_advance_amount = block_advance_amount * vec3(CHUNK_BLOCK_WIDTH);
-    vec3 region_advance_amount = block_advance_amount * vec3(REGION_BLOCK_WIDTH);
+    chunk_advance_amount = block_advance_amount * vec3(CHUNK_BLOCK_WIDTH);
+    region_advance_amount = block_advance_amount * vec3(REGION_BLOCK_WIDTH);
 
     if (step.x == 1) {
         next_region_distance.x = (region_coord.x + 1 - origin.x / REGION_BLOCK_WIDTH) * region_advance_amount.x;
@@ -248,7 +262,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     result.value = 0;
     region_content = imageLoad(region_map, region_coord).r;
     if (region_content != EMPTY_CHUNK_INDEX) {
-        do { PERFORM_REGION_TRACE(x); } while (false);
+        do { perform_region_trace_x(); } while (false);
     }
     if (result.value == 0) { for (int i = 0; i < 128; i++) {
         if (next_region_distance.x < next_region_distance.y) {
