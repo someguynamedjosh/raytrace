@@ -37,9 +37,9 @@ void main() {
     float center_distance = decode_distance(imageLoad(aux_2, pixel).rg);
     vec3 center_normal = imageLoad(aux_1, pixel).rgb;
 
-    float total_weight = 0.146634;
-    vec3 sum = imageLoad(lighting, pixel).rgb * total_weight;
-    if (imageLoad(aux_1, pixel).a < 0.5 && pixel.x < 256) {
+    if (pixel.x < 256) {
+        float total_weight = 0.146634;
+        vec3 sum = imageLoad(lighting, pixel).rgb * total_weight;
         SAMPLE( 0,  1, 0.092566);
         SAMPLE( 0, -1, 0.092566);
         SAMPLE( 1,  0, 0.092566);
@@ -82,7 +82,9 @@ void main() {
         SAMPLE(-1,  3, 0.001445);
         SAMPLE(-1, -3, 0.001445);
         SAMPLE( 1, -3, 0.001445);
+        imageStore(final_output, pixel, vec4(sum / total_weight, 1.0));
+    } else {
+        imageStore(final_output, pixel, imageLoad(lighting, pixel));
     }
 
-    imageStore(final_output, pixel, vec4(sum / total_weight, 1.0));
 }

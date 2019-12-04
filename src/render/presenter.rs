@@ -94,7 +94,7 @@ impl PresenterBuilder {
                 width: self.resolution.0,
                 height: self.resolution.1,
             },
-            Format::R8G8B8A8Unorm,
+            Format::R8G8B8A8Snorm,
             Some(self.queue.family()),
         )
         .unwrap();

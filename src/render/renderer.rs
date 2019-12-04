@@ -76,8 +76,10 @@ pub struct Renderer {
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
-    bilateral_denoise_pipeline: Arc<BilateralDenoisePipeline>,
-    bilateral_denoise_descriptors: Arc<GenericDescriptorSet>,
+    bilateral_denoise_ping_pipeline: Arc<BilateralDenoisePipeline>,
+    bilateral_denoise_ping_descriptors: Arc<GenericDescriptorSet>,
+    bilateral_denoise_pong_pipeline: Arc<BilateralDenoisePipeline>,
+    bilateral_denoise_pong_descriptors: Arc<GenericDescriptorSet>,
 
     screenshot_data: Arc<ScreenshotData>,
     screenshot_accumulator: Vec<u32>,
@@ -258,7 +260,7 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap(),
         );
 
-        let bilateral_denoise_pipeline = Arc::new(
+        let bilateral_denoise_ping_pipeline = Arc::new(
             ComputePipeline::new(
                 self.device.clone(),
                 &bilateral_denoise_shader.main_entry_point(),
@@ -266,8 +268,8 @@ impl<'a> RenderBuilder<'a> {
             )
             .unwrap()
         );
-        let bilateral_denoise_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
-            PersistentDescriptorSet::start(bilateral_denoise_pipeline.clone(), 0)
+        let bilateral_denoise_ping_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
+            PersistentDescriptorSet::start(bilateral_denoise_ping_pipeline.clone(), 0)
                 .add_image(lighting.clone())
                 .unwrap()
                 .add_image(screenshot_aux_1_image.clone())
@@ -275,6 +277,27 @@ impl<'a> RenderBuilder<'a> {
                 .add_image(screenshot_aux_2_image.clone())
                 .unwrap()
                 .add_image(self.target_image.clone())
+                .unwrap()
+                .build()
+                .unwrap(),
+        );
+        let bilateral_denoise_pong_pipeline = Arc::new(
+            ComputePipeline::new(
+                self.device.clone(),
+                &bilateral_denoise_shader.main_entry_point(),
+                &(),
+            )
+            .unwrap()
+        );
+        let bilateral_denoise_pong_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
+            PersistentDescriptorSet::start(bilateral_denoise_pong_pipeline.clone(), 0)
+                .add_image(self.target_image.clone())
+                .unwrap()
+                .add_image(screenshot_aux_1_image.clone())
+                .unwrap()
+                .add_image(screenshot_aux_2_image.clone())
+                .unwrap()
+                .add_image(lighting.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -306,8 +329,10 @@ impl<'a> RenderBuilder<'a> {
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
-            bilateral_denoise_pipeline,
-            bilateral_denoise_descriptors,
+            bilateral_denoise_ping_pipeline,
+            bilateral_denoise_ping_descriptors,
+            bilateral_denoise_pong_pipeline,
+            bilateral_denoise_pong_descriptors,
 
             screenshot_data,
             screenshot_accumulator: (0..(target_width * target_height * 4))
@@ -396,48 +421,22 @@ impl Renderer {
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pipeline.clone(),
-                self.bilateral_denoise_descriptors.clone(),
+                self.bilateral_denoise_ping_pipeline.clone(),
+                self.bilateral_denoise_ping_descriptors.clone(),
                 ()
-            )
-            .unwrap()
-            .copy_image(
-                self.target_image.clone(), 
-                [0, 0, 0],
-                0,
-                0,
-                self.lighting_image.clone(),
-                [0, 0, 0],
-                0,
-                0,
-                [self.target_width, self.target_height, 1],
-                0
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pipeline.clone(),
-                self.bilateral_denoise_descriptors.clone(),
+                self.bilateral_denoise_pong_pipeline.clone(),
+                self.bilateral_denoise_pong_descriptors.clone(),
                 ()
-            )
-            .unwrap()
-            .copy_image(
-                self.target_image.clone(), 
-                [0, 0, 0],
-                0,
-                0,
-                self.lighting_image.clone(),
-                [0, 0, 0],
-                0,
-                0,
-                [self.target_width, self.target_height, 1],
-                0
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pipeline.clone(),
-                self.bilateral_denoise_descriptors.clone(),
+                self.bilateral_denoise_ping_pipeline.clone(),
+                self.bilateral_denoise_ping_descriptors.clone(),
                 ()
             )
             .unwrap()
