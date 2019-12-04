@@ -481,7 +481,7 @@ void main() {
     float sun_amount = max(cos(push_data.sun_angle), 0.0);
     vec3 skylight = vec3(0.2, 0.4, 0.8) * sun_amount + vec3(0.1) * (1 - sun_amount);
     vec3 sunlight = vec3(0.4);
-    vec3 sunangle = vec3(sin(push_data.sun_angle) * 0.5, sin(push_data.sun_angle), cos(push_data.sun_angle));
+    vec3 sunangle = vec3(cos(push_data.sun_angle) * 0.5, sin(push_data.sun_angle), cos(push_data.sun_angle));
     vec3 color = skylight;
     HitResult primary = trace_ray(push_data.origin, ray_direction);
     bool second_bounse_hit_sky = false;
