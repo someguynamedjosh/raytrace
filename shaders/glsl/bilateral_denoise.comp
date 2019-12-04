@@ -24,9 +24,9 @@ float decode_distance(vec2 encoded) {
 { \
     ivec2 pos = sampleAt(ivec2(DX, DY)); \
     float dist = decode_distance(imageLoad(aux_2, pos).rg); \
-    float distance_difference = 0.0 * abs(center_distance - dist); \
+    float distance_difference = 1.0 * pow(abs(center_distance - dist), 0.5); \
     vec3 normal = imageLoad(aux_1, pos).rgb; \
-    float normal_difference = length(normal - center_normal); \
+    float normal_difference = 10 * length(normal - center_normal); \
     float weight = WEIGHT / (distance_difference + normal_difference + 1.0); \
     total_weight += weight; \
     sum += imageLoad(lighting, pos).rgb * weight; \
@@ -37,7 +37,7 @@ void main() {
     float center_distance = decode_distance(imageLoad(aux_2, pixel).rg);
     vec3 center_normal = imageLoad(aux_1, pixel).rgb;
 
-    if (pixel.x < 256) {
+    if (imageLoad(aux_1, pixel).a > 0.5) {
         float total_weight = 0.146634;
         vec3 sum = imageLoad(lighting, pixel).rgb * total_weight;
         SAMPLE( 0,  1, 0.092566);

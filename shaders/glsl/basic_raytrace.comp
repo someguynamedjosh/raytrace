@@ -535,7 +535,7 @@ void main() {
     imageStore(
         aux_1,
         ivec2(gl_GlobalInvocationID.xy),
-        vec4(encode_world_space_normal(primary.normal), second_bounse_hit_sky ? 1.0 : 0.0)
+        vec4(encode_world_space_normal(primary.normal), primary.value > 0 ? 1.0 : 0.0)
     );
 
     imageStore(

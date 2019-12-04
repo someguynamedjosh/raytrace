@@ -440,6 +440,20 @@ impl Renderer {
                 ()
             )
             .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pong_pipeline.clone(),
+                self.bilateral_denoise_pong_descriptors.clone(),
+                ()
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_ping_pipeline.clone(),
+                self.bilateral_denoise_ping_descriptors.clone(),
+                ()
+            )
+            .unwrap()
             .copy_image_to_buffer(self.target_image.clone(), self.screenshot_data.clone())
             .unwrap()
             .copy_image_to_buffer(
