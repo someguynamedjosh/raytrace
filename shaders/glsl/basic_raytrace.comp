@@ -6,6 +6,8 @@ layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data_atlas;
 layout(set = 0, binding = 1, r16ui) uniform uimage3D chunk_map;
 layout(set = 0, binding = 2, r16ui) uniform uimage3D region_map;
 layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
+layout(set = 0, binding = 4, rgba8_snorm) uniform writeonly image2D aux_1;
+layout(set = 0, binding = 5, rgba8_snorm) uniform writeonly image2D aux_2;
 
 layout(push_constant) uniform PushData {
     vec3 origin, forward, up, right;
@@ -418,6 +420,39 @@ vec3 debug_normal(uint normal) {
     return color;
 }
 
+vec3 world_space_normal(uint normal) {
+    vec3 world_space = vec3(1.0);
+    if (normal % 2 == 1) {
+        normal -= 1;
+        world_space *= -1.0;
+    }
+    if (normal == NORMAL_x) {
+        world_space *= vec3(1, 0, 0);
+    } else if (normal == NORMAL_y) {
+        world_space *= vec3(0, 1, 0);
+    } else if (normal == NORMAL_z) {
+        world_space *= vec3(0, 0, 1);
+    }
+    return world_space;
+}
+
+vec3 encode_world_space_normal(uint normal) {
+    return world_space_normal(normal) * 0.5 + vec3(0.5);
+}
+
+vec2 encode_screen_space_normal(uint normal, vec3 right, vec3 up) {
+    vec3 world_space = world_space_normal(normal);
+    vec2 screen_space = vec2(
+        dot(world_space, right),
+        dot(world_space, up)
+    );
+    return screen_space * 0.5 + vec2(0.5);
+}
+
+vec2 encode_two_byte_value(float value) {
+    return vec2(mod(value, 1.0), value / 256.0);
+}
+
 void main() {
     vec3 ray_start = push_data.origin;
 
@@ -435,15 +470,17 @@ void main() {
     vec3 sunangle = vec3(sin(push_data.sun_angle) * 0.5, sin(push_data.sun_angle), cos(push_data.sun_angle));
     vec3 color = skylight;
     HitResult primary = trace_ray(push_data.origin, ray_direction);
+    bool second_bounse_hit_sky = false;
     if (primary.value > 0) {
         color = vec3(0.0);
-        vec3 albedo1 = get_material_albedo(primary.value);
+        vec3 albedo1 = vec3(0.5); //get_material_albedo(primary.value);
         HitResult sun1 = trace_sun(primary, sunangle);
         if (sun1.value == 0) {
             color += albedo1 * sunlight;
         }
         HitResult dif1 = trace_diffuse(primary);
         if (dif1.value == 0) {
+            second_bounse_hit_sky = true;
             color += albedo1 * skylight;
         } else {
             vec3 color2 = vec3(0.0);
@@ -472,13 +509,25 @@ void main() {
             color2 += get_material_emission(dif1.value);
             color += albedo1 * color2;
         }
-        color += get_material_emission(primary.value);
+        //color += get_material_emission(primary.value);
     }
 
     imageStore(
         final_output,
         ivec2(gl_GlobalInvocationID.xy), 
         vec4(color, 1.0)
+    );
+
+    imageStore(
+        aux_1,
+        ivec2(gl_GlobalInvocationID.xy),
+        vec4(encode_world_space_normal(primary.normal), second_bounse_hit_sky ? 1.0 : 0.0)
+    );
+
+    imageStore(
+        aux_2,
+        ivec2(gl_GlobalInvocationID.xy),
+        vec4(encode_two_byte_value(primary.distance), encode_screen_space_normal(primary.normal, push_data.right, push_data.up))
     );
 }
 

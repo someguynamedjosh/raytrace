@@ -100,16 +100,7 @@ impl World {
                     h0 += 8;
                 }
                 for z in 0..h0 {
-                    self.draw_block(
-                        x,
-                        y,
-                        z,
-                        if z == h0 - 1 {
-                            1
-                        } else {
-                            3
-                        },
-                    );
+                    self.draw_block(x, y, z, if z == h0 - 1 { 1 } else { 3 });
                 }
                 if x > 15
                     && y > 15

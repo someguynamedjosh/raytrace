@@ -196,8 +196,8 @@ fn main() {
                     ..
                 } => recreate_swapchain = true,
                 _ => (),
-            }); 
-        } 
+            });
+        }
         if done {
             return;
         }
