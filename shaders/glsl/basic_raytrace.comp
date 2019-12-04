@@ -450,7 +450,7 @@ vec2 encode_screen_space_normal(uint normal, vec3 right, vec3 up) {
 }
 
 vec2 encode_two_byte_value(float value) {
-    return vec2(mod(value, 1.0), value / 256.0);
+    return vec2(mod(value, 1.0), value / 255.0);
 }
 
 void main() {
@@ -530,19 +530,3 @@ void main() {
         vec4(encode_two_byte_value(primary.distance), encode_screen_space_normal(primary.normal, push_data.right, push_data.up))
     );
 }
-
-/*
-void main() {
-    uint index = imageLoad(chunk_map, ivec3(
-        gl_GlobalInvocationID.x / 4 % ROOT_CHUNK_WIDTH,
-        gl_GlobalInvocationID.x / 4 / ROOT_CHUNK_WIDTH % ROOT_CHUNK_WIDTH,
-        gl_GlobalInvocationID.y / 4 % ROOT_CHUNK_WIDTH
-    )).r;
-    if (index > 64) index = 64;
-    imageStore(
-        final_output,
-        ivec2(gl_GlobalInvocationID.xy), 
-        vec4(vec3(index) / 64.0, 1.0)
-    );
-}
-*/

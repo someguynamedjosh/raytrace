@@ -78,7 +78,7 @@ def make_taps(size, multiplier):
                 continue
             gaussian_taps.append([x * multiplier, y * multiplier, weight])
 
-make_taps(4, 5)
+make_taps(16, 2)
 
 def color_bilinear(image, x, y):
     center_color = sample(image, x, y)

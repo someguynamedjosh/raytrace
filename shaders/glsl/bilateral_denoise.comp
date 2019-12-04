@@ -1,0 +1,87 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8_snorm) uniform image2D lighting;
+layout(set = 0, binding = 1, rgba8_snorm) uniform image2D aux_1;
+layout(set = 0, binding = 2, rgba8_snorm) uniform image2D aux_2;
+layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
+
+ivec2 sampleAt(ivec2 offset) {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) + offset;
+    if (pixel.x < 0) pixel.x = 0;
+    if (pixel.y < 0) pixel.y = 0;
+    if (pixel.x >= imageSize(lighting).x) pixel.x = imageSize(lighting).x - 1;
+    if (pixel.y >= imageSize(lighting).y) pixel.y = imageSize(lighting).y - 1;
+    return pixel;
+}
+
+float decode_distance(vec2 encoded) {
+    return encoded.g * 256.0 + encoded.r;
+}
+
+#define SAMPLE(DX, DY, WEIGHT) \
+{ \
+    ivec2 pos = sampleAt(ivec2(DX, DY)); \
+    float dist = decode_distance(imageLoad(aux_2, pos).rg); \
+    float distance_difference = 0.0 * abs(center_distance - dist); \
+    vec3 normal = imageLoad(aux_1, pos).rgb; \
+    float normal_difference = length(normal - center_normal); \
+    float weight = WEIGHT / (distance_difference + normal_difference + 1.0); \
+    total_weight += weight; \
+    sum += imageLoad(lighting, pos).rgb * weight; \
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    float center_distance = decode_distance(imageLoad(aux_2, pixel).rg);
+    vec3 center_normal = imageLoad(aux_1, pixel).rgb;
+
+    vec3 sum = imageLoad(lighting, pixel).rgb;
+    float total_weight = 0.146634;
+    SAMPLE( 0,  2, 0.092566);
+    SAMPLE( 0, -2, 0.092566);
+    SAMPLE( 2,  0, 0.092566);
+    SAMPLE(-2,  0, 0.092566);
+
+    SAMPLE( 2,  2, 0.058434);
+    SAMPLE(-2,  2, 0.058434);
+    SAMPLE(-2, -2, 0.058434);
+    SAMPLE( 2, -2, 0.058434);
+
+    SAMPLE( 4,  0, 0.023205);
+    SAMPLE(-4,  0, 0.023205);
+    SAMPLE( 0,  4, 0.023205);
+    SAMPLE( 0, -4, 0.023205);
+
+    SAMPLE( 4,  4, 0.003672);
+    SAMPLE(-4,  4, 0.003672);
+    SAMPLE(-4, -4, 0.003672);
+    SAMPLE( 4, -4, 0.003672);
+
+    SAMPLE( 4,  2, 0.014648);
+    SAMPLE(-4,  2, 0.014648);
+    SAMPLE(-4, -2, 0.014648);
+    SAMPLE( 4, -2, 0.014648);
+    SAMPLE( 2,  4, 0.014648);
+    SAMPLE(-2,  4, 0.014648);
+    SAMPLE(-2, -4, 0.014648);
+    SAMPLE( 2, -4, 0.014648);
+
+    SAMPLE( 6,  0, 0.002289);
+    SAMPLE(-6,  0, 0.002289);
+    SAMPLE( 0,  6, 0.002289);
+    SAMPLE( 0, -6, 0.002289);
+
+    SAMPLE( 6,  2, 0.001445);
+    SAMPLE(-6,  2, 0.001445);
+    SAMPLE(-6, -2, 0.001445);
+    SAMPLE( 6, -2, 0.001445);
+    SAMPLE( 2,  6, 0.001445);
+    SAMPLE(-2,  6, 0.001445);
+    SAMPLE(-2, -6, 0.001445);
+    SAMPLE( 2, -6, 0.001445);
+
+
+    imageStore(final_output, pixel, vec4(sum / total_weight, 1.0));
+}

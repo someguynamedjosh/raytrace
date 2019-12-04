@@ -19,11 +19,12 @@ use super::constants::*;
 use crate::game::Game;
 use crate::util;
 use crate::world::WorldChunk;
-use shaders::{self, BasicRaytraceShaderLayout, RaytracePushData};
+use shaders::{self, BasicRaytraceShaderLayout, BilateralDenoiseShaderLayout, RaytracePushData};
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
 type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
+type BilateralDenoisePipeline = ComputePipeline<PipelineLayout<BilateralDenoiseShaderLayout>>;
 type ScreenshotData = CpuAccessibleBuffer<[u8]>;
 
 type GenericImage = StorageImage<Format>;
@@ -75,6 +76,8 @@ pub struct Renderer {
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
+    bilateral_denoise_pipeline: Arc<BilateralDenoisePipeline>,
+    bilateral_denoise_descriptors: Arc<GenericDescriptorSet>,
 
     screenshot_data: Arc<ScreenshotData>,
     screenshot_accumulator: Vec<u32>,
@@ -82,6 +85,7 @@ pub struct Renderer {
     screenshot_aux_2_image: Arc<GenericImage>,
     screenshot_aux_1_data: Arc<ScreenshotData>,
     screenshot_aux_2_data: Arc<ScreenshotData>,
+    lighting_image: Arc<GenericImage>,
     screenshot_counter: u32,
 }
 
@@ -217,6 +221,8 @@ impl<'a> RenderBuilder<'a> {
             region_map,
         ) = self.make_world();
 
+        let lighting = self.make_single_screenshot_image(target_width, target_height);
+
         let screenshot_aux_1_image = self.make_single_screenshot_image(target_width, target_height);
         let screenshot_aux_2_image = self.make_single_screenshot_image(target_width, target_height);
 
@@ -224,6 +230,7 @@ impl<'a> RenderBuilder<'a> {
         let screenshot_aux_2_data = self.make_single_screenshot_buffer(target_width, target_height);
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
+        let bilateral_denoise_shader = shaders::load_bilateral_denoise_shader(self.device.clone());
 
         let basic_raytrace_pipeline = Arc::new(
             ComputePipeline::new(
@@ -241,11 +248,33 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(region_map.clone())
                 .unwrap()
-                .add_image(self.target_image.clone())
+                .add_image(lighting.clone())
                 .unwrap()
                 .add_image(screenshot_aux_1_image.clone())
                 .unwrap()
                 .add_image(screenshot_aux_2_image.clone())
+                .unwrap()
+                .build()
+                .unwrap(),
+        );
+
+        let bilateral_denoise_pipeline = Arc::new(
+            ComputePipeline::new(
+                self.device.clone(),
+                &bilateral_denoise_shader.main_entry_point(),
+                &(),
+            )
+            .unwrap()
+        );
+        let bilateral_denoise_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
+            PersistentDescriptorSet::start(bilateral_denoise_pipeline.clone(), 0)
+                .add_image(lighting.clone())
+                .unwrap()
+                .add_image(screenshot_aux_1_image.clone())
+                .unwrap()
+                .add_image(screenshot_aux_2_image.clone())
+                .unwrap()
+                .add_image(self.target_image.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -277,6 +306,8 @@ impl<'a> RenderBuilder<'a> {
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
+            bilateral_denoise_pipeline,
+            bilateral_denoise_descriptors,
 
             screenshot_data,
             screenshot_accumulator: (0..(target_width * target_height * 4))
@@ -286,6 +317,7 @@ impl<'a> RenderBuilder<'a> {
             screenshot_aux_2_image,
             screenshot_aux_1_data,
             screenshot_aux_2_data,
+            lighting_image: lighting,
             screenshot_counter: 0,
         }
     }
@@ -360,6 +392,53 @@ impl Renderer {
                     sun_angle: game.get_sun_angle(),
                     seed: seed,
                 },
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pipeline.clone(),
+                self.bilateral_denoise_descriptors.clone(),
+                ()
+            )
+            .unwrap()
+            .copy_image(
+                self.target_image.clone(), 
+                [0, 0, 0],
+                0,
+                0,
+                self.lighting_image.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                [self.target_width, self.target_height, 1],
+                1
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pipeline.clone(),
+                self.bilateral_denoise_descriptors.clone(),
+                ()
+            )
+            .unwrap()
+            .copy_image(
+                self.target_image.clone(), 
+                [0, 0, 0],
+                0,
+                0,
+                self.lighting_image.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                [self.target_width, self.target_height, 1],
+                1
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pipeline.clone(),
+                self.bilateral_denoise_descriptors.clone(),
+                ()
             )
             .unwrap()
             .copy_image_to_buffer(self.target_image.clone(), self.screenshot_data.clone())
