@@ -37,51 +37,52 @@ void main() {
     float center_distance = decode_distance(imageLoad(aux_2, pixel).rg);
     vec3 center_normal = imageLoad(aux_1, pixel).rgb;
 
-    vec3 sum = imageLoad(lighting, pixel).rgb;
     float total_weight = 0.146634;
-    SAMPLE( 0,  2, 0.092566);
-    SAMPLE( 0, -2, 0.092566);
-    SAMPLE( 2,  0, 0.092566);
-    SAMPLE(-2,  0, 0.092566);
+    vec3 sum = imageLoad(lighting, pixel).rgb * total_weight;
+    if (imageLoad(aux_1, pixel).a < 0.5 && pixel.x < 256) {
+        SAMPLE( 0,  1, 0.092566);
+        SAMPLE( 0, -1, 0.092566);
+        SAMPLE( 1,  0, 0.092566);
+        SAMPLE(-1,  0, 0.092566);
 
-    SAMPLE( 2,  2, 0.058434);
-    SAMPLE(-2,  2, 0.058434);
-    SAMPLE(-2, -2, 0.058434);
-    SAMPLE( 2, -2, 0.058434);
+        SAMPLE( 1,  1, 0.058434);
+        SAMPLE(-1,  1, 0.058434);
+        SAMPLE(-1, -1, 0.058434);
+        SAMPLE( 1, -1, 0.058434);
 
-    SAMPLE( 4,  0, 0.023205);
-    SAMPLE(-4,  0, 0.023205);
-    SAMPLE( 0,  4, 0.023205);
-    SAMPLE( 0, -4, 0.023205);
+        SAMPLE( 2,  0, 0.023205);
+        SAMPLE(-2,  0, 0.023205);
+        SAMPLE( 0,  2, 0.023205);
+        SAMPLE( 0, -2, 0.023205);
 
-    SAMPLE( 4,  4, 0.003672);
-    SAMPLE(-4,  4, 0.003672);
-    SAMPLE(-4, -4, 0.003672);
-    SAMPLE( 4, -4, 0.003672);
+        SAMPLE( 2,  2, 0.003672);
+        SAMPLE(-2,  2, 0.003672);
+        SAMPLE(-2, -2, 0.003672);
+        SAMPLE( 2, -2, 0.003672);
 
-    SAMPLE( 4,  2, 0.014648);
-    SAMPLE(-4,  2, 0.014648);
-    SAMPLE(-4, -2, 0.014648);
-    SAMPLE( 4, -2, 0.014648);
-    SAMPLE( 2,  4, 0.014648);
-    SAMPLE(-2,  4, 0.014648);
-    SAMPLE(-2, -4, 0.014648);
-    SAMPLE( 2, -4, 0.014648);
+        SAMPLE( 2,  1, 0.014648);
+        SAMPLE(-2,  1, 0.014648);
+        SAMPLE(-2, -1, 0.014648);
+        SAMPLE( 2, -1, 0.014648);
+        SAMPLE( 1,  2, 0.014648);
+        SAMPLE(-1,  2, 0.014648);
+        SAMPLE(-1, -2, 0.014648);
+        SAMPLE( 1, -2, 0.014648);
 
-    SAMPLE( 6,  0, 0.002289);
-    SAMPLE(-6,  0, 0.002289);
-    SAMPLE( 0,  6, 0.002289);
-    SAMPLE( 0, -6, 0.002289);
+        SAMPLE( 3,  0, 0.002289);
+        SAMPLE(-3,  0, 0.002289);
+        SAMPLE( 0,  3, 0.002289);
+        SAMPLE( 0, -3, 0.002289);
 
-    SAMPLE( 6,  2, 0.001445);
-    SAMPLE(-6,  2, 0.001445);
-    SAMPLE(-6, -2, 0.001445);
-    SAMPLE( 6, -2, 0.001445);
-    SAMPLE( 2,  6, 0.001445);
-    SAMPLE(-2,  6, 0.001445);
-    SAMPLE(-2, -6, 0.001445);
-    SAMPLE( 2, -6, 0.001445);
-
+        SAMPLE( 3,  1, 0.001445);
+        SAMPLE(-3,  1, 0.001445);
+        SAMPLE(-3, -1, 0.001445);
+        SAMPLE( 3, -1, 0.001445);
+        SAMPLE( 1,  3, 0.001445);
+        SAMPLE(-1,  3, 0.001445);
+        SAMPLE(-1, -3, 0.001445);
+        SAMPLE( 1, -3, 0.001445);
+    }
 
     imageStore(final_output, pixel, vec4(sum / total_weight, 1.0));
 }

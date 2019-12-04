@@ -411,7 +411,7 @@ impl Renderer {
                 0,
                 0,
                 [self.target_width, self.target_height, 1],
-                1
+                0
             )
             .unwrap()
             .dispatch(
@@ -431,7 +431,7 @@ impl Renderer {
                 0,
                 0,
                 [self.target_width, self.target_height, 1],
-                1
+                0
             )
             .unwrap()
             .dispatch(
