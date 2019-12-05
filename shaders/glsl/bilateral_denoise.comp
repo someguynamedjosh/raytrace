@@ -2,44 +2,40 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba8_snorm) uniform image2D lighting;
-layout(set = 0, binding = 1, rgba8_snorm) uniform image2D aux_1;
-layout(set = 0, binding = 2, rgba8_snorm) uniform image2D aux_2;
+layout(set = 0, binding = 0, rgba8_snorm) uniform image2D lighting_buffer;
+layout(set = 0, binding = 1, r16ui) uniform uimage2D depth_buffer;
+layout(set = 0, binding = 2, r8ui) uniform uimage2D normal_buffer;
 layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
 
 ivec2 sampleAt(ivec2 offset) {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) + offset;
     if (pixel.x < 0) pixel.x = 0;
     if (pixel.y < 0) pixel.y = 0;
-    if (pixel.x >= imageSize(lighting).x) pixel.x = imageSize(lighting).x - 1;
-    if (pixel.y >= imageSize(lighting).y) pixel.y = imageSize(lighting).y - 1;
+    if (pixel.x >= imageSize(lighting_buffer).x) pixel.x = imageSize(lighting_buffer).x - 1;
+    if (pixel.y >= imageSize(lighting_buffer).y) pixel.y = imageSize(lighting_buffer).y - 1;
     return pixel;
-}
-
-float decode_distance(vec2 encoded) {
-    return encoded.g * 256.0 + encoded.r;
 }
 
 #define SAMPLE(DX, DY, WEIGHT) \
 { \
     ivec2 pos = sampleAt(ivec2(DX, DY)); \
-    float dist = decode_distance(imageLoad(aux_2, pos).rg); \
-    float distance_difference = 1.0 * pow(abs(center_distance - dist), 0.5); \
-    vec3 normal = imageLoad(aux_1, pos).rgb; \
-    float normal_difference = 10 * length(normal - center_normal); \
+    float dist = imageLoad(depth_buffer, pos).r / 256.0; \
+    float distance_difference = 4.0 * abs(center_distance - dist); \
+    uint normal = imageLoad(normal_buffer, pos).r; \
+    float normal_difference = normal == center_normal ? 0 : 10; \
     float weight = WEIGHT / (distance_difference + normal_difference + 1.0); \
     total_weight += weight; \
-    sum += imageLoad(lighting, pos).rgb * weight; \
+    sum += imageLoad(lighting_buffer, pos).rgb * weight; \
 }
 
 void main() {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    float center_distance = decode_distance(imageLoad(aux_2, pixel).rg);
-    vec3 center_normal = imageLoad(aux_1, pixel).rgb;
+    float center_distance = imageLoad(depth_buffer, pixel).r / 256.0;
+    uint center_normal = imageLoad(normal_buffer, pixel).r;
 
-    if (imageLoad(aux_1, pixel).a > 0.5) {
+    if (center_normal < 16) {
         float total_weight = 0.146634;
-        vec3 sum = imageLoad(lighting, pixel).rgb * total_weight;
+        vec3 sum = imageLoad(lighting_buffer, pixel).rgb * total_weight;
         SAMPLE( 0,  1, 0.092566);
         SAMPLE( 0, -1, 0.092566);
         SAMPLE( 1,  0, 0.092566);
@@ -84,7 +80,7 @@ void main() {
         SAMPLE( 1, -3, 0.001445);
         imageStore(final_output, pixel, vec4(sum / total_weight, 1.0));
     } else {
-        imageStore(final_output, pixel, imageLoad(lighting, pixel));
+        imageStore(final_output, pixel, imageLoad(lighting_buffer, pixel));
     }
 
 }

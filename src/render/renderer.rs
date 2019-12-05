@@ -11,8 +11,6 @@ use vulkano::pipeline::ComputePipeline;
 
 use rand::{self, RngCore};
 
-use std::fs::File;
-use std::io::{prelude::*, BufWriter};
 use std::sync::Arc;
 
 use super::constants::*;
@@ -25,7 +23,6 @@ type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
 type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
 type BilateralDenoisePipeline = ComputePipeline<PipelineLayout<BilateralDenoiseShaderLayout>>;
-type ScreenshotData = CpuAccessibleBuffer<[u8]>;
 
 type GenericImage = StorageImage<Format>;
 type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
@@ -81,14 +78,12 @@ pub struct Renderer {
     bilateral_denoise_pong_pipeline: Arc<BilateralDenoisePipeline>,
     bilateral_denoise_pong_descriptors: Arc<GenericDescriptorSet>,
 
-    screenshot_data: Arc<ScreenshotData>,
-    screenshot_accumulator: Vec<u32>,
-    screenshot_aux_1_image: Arc<GenericImage>,
-    screenshot_aux_2_image: Arc<GenericImage>,
-    screenshot_aux_1_data: Arc<ScreenshotData>,
-    screenshot_aux_2_data: Arc<ScreenshotData>,
-    lighting_image: Arc<GenericImage>,
-    screenshot_counter: u32,
+//    lighting_buffer: Arc<GenericImage>,
+//    lighting_pong_buffer: Arc<GenericImage>,
+//    albedo_buffer: Arc<GenericImage>,
+//    emission_buffer: Arc<GenericImage>,
+//    depth_buffer: Arc<GenericImage>,
+//    normal_buffer: Arc<GenericImage>,
 }
 
 struct RenderBuilder<'a> {
@@ -189,21 +184,12 @@ impl<'a> RenderBuilder<'a> {
         )
     }
 
-    fn make_single_screenshot_image(&self, width: u32, height: u32) -> Arc<GenericImage> {
+    fn make_render_buffer(&self, size: (u32, u32), format: Format) -> Arc<GenericImage> {
         StorageImage::new(
             self.device.clone(),
-            Dimensions::Dim2d { width, height },
-            Format::R8G8B8A8Snorm,
+            Dimensions::Dim2d { width: size.0, height: size.1 },
+            format,
             Some(self.queue.family()),
-        )
-        .unwrap()
-    }
-
-    fn make_single_screenshot_buffer(&self, width: u32, height: u32) -> Arc<ScreenshotData> {
-        CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::all(),
-            (0..(width * height * 4)).map(|_| 0u8),
         )
         .unwrap()
     }
@@ -223,13 +209,13 @@ impl<'a> RenderBuilder<'a> {
             region_map,
         ) = self.make_world();
 
-        let lighting = self.make_single_screenshot_image(target_width, target_height);
-
-        let screenshot_aux_1_image = self.make_single_screenshot_image(target_width, target_height);
-        let screenshot_aux_2_image = self.make_single_screenshot_image(target_width, target_height);
-
-        let screenshot_aux_1_data = self.make_single_screenshot_buffer(target_width, target_height);
-        let screenshot_aux_2_data = self.make_single_screenshot_buffer(target_width, target_height);
+        let rbuf_size = (target_width, target_height);
+        let lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
+        // let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8Snorm);
+        // let albedo_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8Snorm);
+        // let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8Snorm);
+        let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
+        let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
         let bilateral_denoise_shader = shaders::load_bilateral_denoise_shader(self.device.clone());
@@ -250,11 +236,11 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(region_map.clone())
                 .unwrap()
-                .add_image(lighting.clone())
+                .add_image(lighting_buffer.clone())
                 .unwrap()
-                .add_image(screenshot_aux_1_image.clone())
+                .add_image(depth_buffer.clone())
                 .unwrap()
-                .add_image(screenshot_aux_2_image.clone())
+                .add_image(normal_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -270,11 +256,11 @@ impl<'a> RenderBuilder<'a> {
         );
         let bilateral_denoise_ping_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
             PersistentDescriptorSet::start(bilateral_denoise_ping_pipeline.clone(), 0)
-                .add_image(lighting.clone())
+                .add_image(lighting_buffer.clone())
                 .unwrap()
-                .add_image(screenshot_aux_1_image.clone())
+                .add_image(depth_buffer.clone())
                 .unwrap()
-                .add_image(screenshot_aux_2_image.clone())
+                .add_image(normal_buffer.clone())
                 .unwrap()
                 .add_image(self.target_image.clone())
                 .unwrap()
@@ -293,24 +279,17 @@ impl<'a> RenderBuilder<'a> {
             PersistentDescriptorSet::start(bilateral_denoise_pong_pipeline.clone(), 0)
                 .add_image(self.target_image.clone())
                 .unwrap()
-                .add_image(screenshot_aux_1_image.clone())
+                .add_image(depth_buffer.clone())
                 .unwrap()
-                .add_image(screenshot_aux_2_image.clone())
+                .add_image(normal_buffer.clone())
                 .unwrap()
-                .add_image(lighting.clone())
+                .add_image(lighting_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
         );
 
         println!("Pipeline created.");
-
-        let screenshot_data = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::all(),
-            (0..(target_width * target_height * 4)).map(|_| 0u8),
-        )
-        .unwrap();
 
         Renderer {
             target_image: self.target_image,
@@ -333,17 +312,6 @@ impl<'a> RenderBuilder<'a> {
             bilateral_denoise_ping_descriptors,
             bilateral_denoise_pong_pipeline,
             bilateral_denoise_pong_descriptors,
-
-            screenshot_data,
-            screenshot_accumulator: (0..(target_width * target_height * 4))
-                .map(|_| 0u32)
-                .collect(),
-            screenshot_aux_1_image,
-            screenshot_aux_2_image,
-            screenshot_aux_1_data,
-            screenshot_aux_2_data,
-            lighting_image: lighting,
-            screenshot_counter: 0,
         }
     }
 }
@@ -454,18 +422,6 @@ impl Renderer {
                 ()
             )
             .unwrap()
-            .copy_image_to_buffer(self.target_image.clone(), self.screenshot_data.clone())
-            .unwrap()
-            .copy_image_to_buffer(
-                self.screenshot_aux_1_image.clone(),
-                self.screenshot_aux_1_data.clone(),
-            )
-            .unwrap()
-            .copy_image_to_buffer(
-                self.screenshot_aux_2_image.clone(),
-                self.screenshot_aux_2_data.clone(),
-            )
-            .unwrap()
             .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
             .unwrap()
             .copy_image_to_buffer(self.region_map.clone(), self.region_map_data.clone())
@@ -529,33 +485,10 @@ impl Renderer {
     }
 
     pub fn capture(&mut self) {
-        let screenshot_data = self.screenshot_data.read().unwrap();
-        for (target, value) in self
-            .screenshot_accumulator
-            .iter_mut()
-            .zip(screenshot_data.iter())
-        {
-            *target += *value as u32;
-        }
-
-        if self.screenshot_counter < 100 {
-            let filename = format!("denoiser/training/{:0>2}.dat", self.screenshot_counter);
-            let mut buffer = File::create(filename).unwrap();
-            buffer.write_all(&screenshot_data).unwrap();
-            buffer.write_all(&self.screenshot_aux_1_data.read().unwrap()).unwrap();
-            buffer.write_all(&self.screenshot_aux_2_data.read().unwrap()).unwrap();
-        }
-
-        self.screenshot_counter += 1;
+        unimplemented!();
     }
 
     pub fn finish_capture(&mut self) {
-        let mut buffer = BufWriter::new(File::create("denoiser/training/sum.dat").unwrap());
-        for value in &self.screenshot_accumulator {
-            buffer
-                .write(&[(*value / self.screenshot_counter) as u8])
-                .unwrap();
-        }
-        buffer.flush().unwrap();
+        unimplemented!();
     }
 }

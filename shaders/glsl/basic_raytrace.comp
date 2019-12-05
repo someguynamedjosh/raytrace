@@ -5,9 +5,9 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data_atlas;
 layout(set = 0, binding = 1, r16ui) uniform uimage3D chunk_map;
 layout(set = 0, binding = 2, r16ui) uniform uimage3D region_map;
-layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
-layout(set = 0, binding = 4, rgba8_snorm) uniform writeonly image2D aux_1;
-layout(set = 0, binding = 5, rgba8_snorm) uniform writeonly image2D aux_2;
+layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D lighting_buffer;
+layout(set = 0, binding = 4, r16ui) uniform writeonly uimage2D depth_buffer;
+layout(set = 0, binding = 5, r8ui) uniform writeonly uimage2D normal_buffer;
 
 layout(push_constant) uniform PushData {
     vec3 origin, forward, up, right;
@@ -470,7 +470,7 @@ vec2 encode_two_byte_value(float value) {
 void main() {
     vec3 ray_start = push_data.origin;
 
-    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(final_output)) * 2.0 - vec2(1);
+    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(lighting_buffer)) * 2.0 - vec2(1);
     // Must be normalized. 
     vec3 ray_direction = normalize(
         push_data.forward
@@ -527,20 +527,20 @@ void main() {
     }
 
     imageStore(
-        final_output,
+        lighting_buffer,
         ivec2(gl_GlobalInvocationID.xy), 
         vec4(color, 1.0)
     );
 
     imageStore(
-        aux_1,
+        depth_buffer,
         ivec2(gl_GlobalInvocationID.xy),
-        vec4(encode_world_space_normal(primary.normal), primary.value > 0 ? 1.0 : 0.0)
+        uvec4(pow(primary.distance, 1.0) * 256)
     );
 
     imageStore(
-        aux_2,
+        normal_buffer,
         ivec2(gl_GlobalInvocationID.xy),
-        vec4(encode_two_byte_value(primary.distance), encode_screen_space_normal(primary.normal, push_data.right, push_data.up))
+        uvec4(primary.value == 0 ? 16 : primary.normal)
     );
 }
