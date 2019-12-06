@@ -6,6 +6,7 @@ use std::sync::Arc;
 fn _watchdog() {
     let _source = include_bytes!("../glsl/basic_raytrace.comp");
     let _source = include_bytes!("../glsl/bilateral_denoise.comp");
+    let _source = include_bytes!("../glsl/finalize.comp");
     let _source = include_bytes!("../glsl/screen.vert");
     let _source = include_bytes!("../glsl/screen.frag");
 }
@@ -28,6 +29,15 @@ mod bilateral_denoise {
 }
 pub use bilateral_denoise::Layout as BilateralDenoiseShaderLayout;
 pub use bilateral_denoise::Shader as BilateralDenoiseShader;
+
+mod finalize {
+    vulkano_shaders::shader! {
+        ty: "compute",
+        path: "glsl/finalize.comp"
+    }
+}
+pub use finalize::Layout as FinalizeShaderLayout;
+pub use finalize::Shader as FinalizeShader;
 
 mod screen_vs {
     vulkano_shaders::shader! {
@@ -53,6 +63,10 @@ pub fn load_basic_raytrace_shader(device: Arc<Device>) -> BasicRaytraceShader {
 
 pub fn load_bilateral_denoise_shader(device: Arc<Device>) -> BilateralDenoiseShader {
     bilateral_denoise::Shader::load(device).unwrap()
+}
+
+pub fn load_finalize_shader(device: Arc<Device>) -> FinalizeShader {
+    finalize::Shader::load(device).unwrap()
 }
 
 pub fn load_screen_vertex_shader(device: Arc<Device>) -> ScreenVertexShader {

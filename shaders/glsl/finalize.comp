@@ -1,0 +1,17 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8_snorm) uniform image2D lighting_buffer;
+layout(set = 0, binding = 1, rgba8_snorm) uniform image2D albedo_buffer;
+layout(set = 0, binding = 2, rgba8_snorm) uniform image2D emission_buffer;
+layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    vec3 light_color = imageLoad(lighting_buffer, pixel).rgb;
+    vec3 albedo_color = imageLoad(albedo_buffer, pixel).rgb;
+    vec3 emission_color = imageLoad(emission_buffer, pixel).rgb;
+    vec3 final_color = albedo_color * light_color + emission_color;
+    imageStore(final_output, pixel, vec4(final_color, 1.0));
+}

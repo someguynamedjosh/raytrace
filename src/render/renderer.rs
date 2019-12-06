@@ -17,12 +17,13 @@ use super::constants::*;
 use crate::game::Game;
 use crate::util;
 use crate::world::WorldChunk;
-use shaders::{self, BasicRaytraceShaderLayout, BilateralDenoiseShaderLayout, RaytracePushData};
+use shaders::{self, BasicRaytraceShaderLayout, BilateralDenoiseShaderLayout, FinalizeShaderLayout, RaytracePushData};
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
 type BasicRaytracePipeline = ComputePipeline<PipelineLayout<BasicRaytraceShaderLayout>>;
 type BilateralDenoisePipeline = ComputePipeline<PipelineLayout<BilateralDenoiseShaderLayout>>;
+type FinalizePipeline = ComputePipeline<PipelineLayout<FinalizeShaderLayout>>;
 
 type GenericImage = StorageImage<Format>;
 type GenericDescriptorSet = dyn DescriptorSet + Sync + Send;
@@ -77,6 +78,8 @@ pub struct Renderer {
     bilateral_denoise_ping_descriptors: Arc<GenericDescriptorSet>,
     bilateral_denoise_pong_pipeline: Arc<BilateralDenoisePipeline>,
     bilateral_denoise_pong_descriptors: Arc<GenericDescriptorSet>,
+    finalize_pipeline: Arc<FinalizePipeline>,
+    finalize_descriptors: Arc<GenericDescriptorSet>,
 
 //    lighting_buffer: Arc<GenericImage>,
 //    lighting_pong_buffer: Arc<GenericImage>,
@@ -211,14 +214,15 @@ impl<'a> RenderBuilder<'a> {
 
         let rbuf_size = (target_width, target_height);
         let lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
-        // let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8Snorm);
-        // let albedo_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8Snorm);
-        // let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8Snorm);
+        let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
+        let albedo_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
+        let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
         let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
 
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
         let bilateral_denoise_shader = shaders::load_bilateral_denoise_shader(self.device.clone());
+        let finalize_shader = shaders::load_finalize_shader(self.device.clone());
 
         let basic_raytrace_pipeline = Arc::new(
             ComputePipeline::new(
@@ -242,6 +246,10 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(normal_buffer.clone())
                 .unwrap()
+                .add_image(albedo_buffer.clone())
+                .unwrap()
+                .add_image(emission_buffer.clone())
+                .unwrap()
                 .build()
                 .unwrap(),
         );
@@ -262,7 +270,7 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(normal_buffer.clone())
                 .unwrap()
-                .add_image(self.target_image.clone())
+                .add_image(lighting_pong_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -277,7 +285,7 @@ impl<'a> RenderBuilder<'a> {
         );
         let bilateral_denoise_pong_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
             PersistentDescriptorSet::start(bilateral_denoise_pong_pipeline.clone(), 0)
-                .add_image(self.target_image.clone())
+                .add_image(lighting_pong_buffer.clone())
                 .unwrap()
                 .add_image(depth_buffer.clone())
                 .unwrap()
@@ -287,6 +295,27 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .build()
                 .unwrap(),
+        );
+
+        let finalize_pipeline = Arc::new(
+            ComputePipeline::new(
+                self.device.clone(), 
+                &finalize_shader.main_entry_point(), 
+                &()
+            ).unwrap()
+        );
+        let finalize_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
+            PersistentDescriptorSet::start(finalize_pipeline.clone(), 0)
+                .add_image(lighting_buffer.clone())
+                .unwrap()
+                .add_image(albedo_buffer.clone())
+                .unwrap()
+                .add_image(emission_buffer.clone())
+                .unwrap()
+                .add_image(self.target_image.clone())
+                .unwrap()
+                .build()
+                .unwrap()
         );
 
         println!("Pipeline created.");
@@ -312,6 +341,8 @@ impl<'a> RenderBuilder<'a> {
             bilateral_denoise_ping_descriptors,
             bilateral_denoise_pong_pipeline,
             bilateral_denoise_pong_descriptors,
+            finalize_pipeline,
+            finalize_descriptors,
         }
     }
 }
@@ -417,8 +448,8 @@ impl Renderer {
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_ping_pipeline.clone(),
-                self.bilateral_denoise_ping_descriptors.clone(),
+                self.finalize_pipeline.clone(),
+                self.finalize_descriptors.clone(),
                 ()
             )
             .unwrap()
