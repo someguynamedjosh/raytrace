@@ -36,7 +36,8 @@ pub fn init() -> InitResult {
     // Setup the window.
     let events_loop = EventsLoop::new();
     let surface = WindowBuilder::new()
-        .with_dimensions((512, 512).into())
+    // TODO: Figure out why I need to put in weird numbers to get 512x.
+        .with_dimensions((341, 341).into())
         .build_vk_surface(&events_loop, instance.clone())
         .unwrap();
     let window = surface.window();
