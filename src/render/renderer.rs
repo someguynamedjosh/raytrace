@@ -1,13 +1,16 @@
 use cgmath::{Rad, Vector3};
 
+use image::{GenericImageView, ImageFormat};
+
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet};
 use vulkano::descriptor::pipeline_layout::PipelineLayout;
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
-use vulkano::image::{Dimensions, StorageImage};
+use vulkano::image::{Dimensions, StorageImage, ImmutableImage};
 use vulkano::pipeline::ComputePipeline;
+use vulkano::sampler::{Filter, Sampler, MipmapMode, SamplerAddressMode};
 
 use rand::{self, RngCore};
 
@@ -61,6 +64,7 @@ pub struct Renderer {
     target_width: u32,
     target_height: u32,
 
+    current_seed: u32,
     chunk_upload_index: u16,
 
     upload_buffers: Vec<Arc<WorldData>>,
@@ -197,6 +201,42 @@ impl<'a> RenderBuilder<'a> {
         .unwrap()
     }
 
+    fn load_blue_noise(&self) -> (Arc<ImmutableImage<Format>>, Arc<Sampler>) {
+        let file = include_bytes!("blue_noise_512.png");
+        let data = image::load_from_memory_with_format(file, ImageFormat::PNG).unwrap();
+        let mut pixels = Vec::with_capacity(512 * 512 * 4);
+        for pixel in data.pixels() {
+            let color = (pixel.2).0;
+            pixels.push(color[0]);
+            pixels.push(color[1]);
+            pixels.push(color[2]);
+            pixels.push(color[3]);
+        }
+
+        // TODO: Properly wait for the completion of the texture upload.
+        let image = ImmutableImage::from_iter(
+            pixels.into_iter(),
+            Dimensions::Dim2d {
+                width: 512,
+                height: 512,
+            }, 
+            Format::R8G8B8A8Snorm, 
+            self.queue.clone(),
+        ).unwrap().0;
+        let sampler = Sampler::new(
+            self.device.clone(), 
+            Filter::Nearest, 
+            Filter::Nearest, 
+            MipmapMode::Nearest, 
+            SamplerAddressMode::Repeat, 
+            SamplerAddressMode::Repeat, 
+            SamplerAddressMode::ClampToEdge, 
+            0.0, 1.0, 0.0, 0.0
+        ).unwrap();
+
+        (image, sampler)
+    }
+
     fn build(self) -> Renderer {
         let (target_width, target_height) = match self.target_image.dimensions() {
             Dimensions::Dim2d { width, height } => (width, height),
@@ -220,6 +260,8 @@ impl<'a> RenderBuilder<'a> {
         let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
 
+        let (blue_noise, blue_noise_sampler) = self.load_blue_noise();
+
         let basic_raytrace_shader = shaders::load_basic_raytrace_shader(self.device.clone());
         let bilateral_denoise_shader = shaders::load_bilateral_denoise_shader(self.device.clone());
         let finalize_shader = shaders::load_finalize_shader(self.device.clone());
@@ -240,7 +282,7 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(region_map.clone())
                 .unwrap()
-                .add_image(lighting_buffer.clone())
+                .add_image(self.target_image.clone()) //lighting_buffer.clone())
                 .unwrap()
                 .add_image(depth_buffer.clone())
                 .unwrap()
@@ -249,6 +291,8 @@ impl<'a> RenderBuilder<'a> {
                 .add_image(albedo_buffer.clone())
                 .unwrap()
                 .add_image(emission_buffer.clone())
+                .unwrap()
+                .add_sampled_image(blue_noise, blue_noise_sampler)
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -325,6 +369,7 @@ impl<'a> RenderBuilder<'a> {
             target_width,
             target_height,
 
+            current_seed: 0,
             chunk_upload_index: 0,
 
             upload_buffers,
@@ -395,7 +440,8 @@ impl Renderer {
                 .unwrap();
         }
         self.upload_destinations.clear();
-        let seed = rand::thread_rng().next_u32();
+
+        self.current_seed = (self.current_seed + 1) % (512 * 512);
         add_to
             .copy_buffer_to_image(self.chunk_map_data.clone(), self.chunk_map.clone())
             .unwrap()
@@ -414,45 +460,45 @@ impl Renderer {
                     right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
                     up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
                     sun_angle: game.get_sun_angle(),
-                    seed: seed,
+                    seed: self.current_seed,
                 },
             )
             .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_ping_pipeline.clone(),
-                self.bilateral_denoise_ping_descriptors.clone(),
-                ()
-            )
-            .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pong_pipeline.clone(),
-                self.bilateral_denoise_pong_descriptors.clone(),
-                ()
-            )
-            .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_ping_pipeline.clone(),
-                self.bilateral_denoise_ping_descriptors.clone(),
-                ()
-            )
-            .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pong_pipeline.clone(),
-                self.bilateral_denoise_pong_descriptors.clone(),
-                ()
-            )
-            .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.finalize_pipeline.clone(),
-                self.finalize_descriptors.clone(),
-                ()
-            )
-            .unwrap()
+            //.dispatch(
+                //[self.target_width / 8, self.target_height / 8, 1],
+                //self.bilateral_denoise_ping_pipeline.clone(),
+                //self.bilateral_denoise_ping_descriptors.clone(),
+                //()
+            //)
+            //.unwrap()
+            //.dispatch(
+                //[self.target_width / 8, self.target_height / 8, 1],
+                //self.bilateral_denoise_pong_pipeline.clone(),
+                //self.bilateral_denoise_pong_descriptors.clone(),
+                //()
+            //)
+            //.unwrap()
+            //.dispatch(
+                //[self.target_width / 8, self.target_height / 8, 1],
+                //self.bilateral_denoise_ping_pipeline.clone(),
+                //self.bilateral_denoise_ping_descriptors.clone(),
+                //()
+            //)
+            //.unwrap()
+            //.dispatch(
+                //[self.target_width / 8, self.target_height / 8, 1],
+                //self.bilateral_denoise_pong_pipeline.clone(),
+                //self.bilateral_denoise_pong_descriptors.clone(),
+                //()
+            //)
+            //.unwrap()
+            //.dispatch(
+                //[self.target_width / 8, self.target_height / 8, 1],
+                //self.finalize_pipeline.clone(),
+                //self.finalize_descriptors.clone(),
+                //()
+            //)
+            //.unwrap()
             .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
             .unwrap()
             .copy_image_to_buffer(self.region_map.clone(), self.region_map_data.clone())
@@ -503,6 +549,7 @@ impl Renderer {
                             }
                             current_buffer += 1;
                             if current_buffer == NUM_UPLOAD_BUFFERS {
+                                println!("Uploaded {} chunks.", current_buffer);
                                 return;
                             }
                         } else {
@@ -513,6 +560,7 @@ impl Renderer {
             }
             region_map[region_index] = 1;
         }
+        println!("Uploaded {} chunks.", current_buffer);
     }
 
     pub fn capture(&mut self) {

@@ -10,6 +10,7 @@ layout(set = 0, binding = 4, r16ui) uniform writeonly uimage2D depth_buffer;
 layout(set = 0, binding = 5, r8ui) uniform writeonly uimage2D normal_buffer;
 layout(set = 0, binding = 6, rgba8_snorm) uniform writeonly image2D albedo_buffer;
 layout(set = 0, binding = 7, rgba8_snorm) uniform writeonly image2D emission_buffer;
+layout(set = 0, binding = 8) uniform sampler2D blue_noise;
 
 layout(push_constant) uniform PushData {
     vec3 origin, forward, up, right;
@@ -37,6 +38,8 @@ const uint EMPTY_CHUNK_INDEX = 0xFFFF;
 const uint UNLOADED_CHUNK_INDEX = 0xFFFE;
 const uint REQUEST_LOAD_CHUNK_INDEX = 0xFFFD;
 
+const uint NOISE_SIZE = 512;
+
 const uint NORMAL_x = 0;
 const uint NORMAL_y = 2;
 const uint NORMAL_z = 4;
@@ -58,6 +61,8 @@ ivec3 region_exit_planes, chunk_exit_planes;
 vec3 global_origin, global_direction;
 vec3 next_piece_distance, next_block_distance, next_region_distance;
 vec3 block_advance_amount, chunk_advance_amount, region_advance_amount;
+vec2 noise_offset;
+vec4 noise_value;
 uint chunk_index, region_content;
 
 #define GENERATE_FUNCTIONS(PREFIX, MACRO) \
@@ -137,6 +142,7 @@ GENERATE_FUNCTIONS(perform_chunk_trace, PERFORM_CHUNK_TRACE)
         result.value = UNLOADED_CHUNK_INDEX; \
         break; \
     } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) { \
+        imageStore(region_map, region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
         result.value = UNLOADED_CHUNK_INDEX; \
         break; \
     } else if (chunk_index != EMPTY_CHUNK_INDEX) { \
@@ -283,7 +289,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     } }
 
     if (result.value == UNLOADED_CHUNK_INDEX) {
-        result.value = 0;
+        //result.value = 0;
     }
 
     result.distance = total_step;
@@ -306,52 +312,13 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     return result;
 }
 
-// A single iteration of Bob Jenkins' One-At-A-Time hashing algorithm.
-uint hash( uint x ) {
-    x += push_data.seed;
-    x += ( x << 10u );
-    x ^= ( x >>  6u );
-    x += ( x <<  3u );
-    x ^= ( x >> 11u );
-    x += ( x << 15u );
-    return x;
-}
-
-// Compound versions of the hashing algorithm I whipped together.
-uint hash( uvec2 v ) { return hash( v.x ^ hash(v.y)                         ); }
-uint hash( uvec3 v ) { return hash( v.x ^ hash(v.y) ^ hash(v.z)             ); }
-uint hash( uvec4 v ) { return hash( v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w) ); }
-
-// Construct a float with half-open range [0:1] using low 23 bits.
-// All zeroes yields 0.0, all ones yields the next smallest representable value below 1.0.
-float floatConstruct( uint m ) {
-    const uint ieeeMantissa = 0x007FFFFFu; // binary32 mantissa bitmask
-    const uint ieeeOne      = 0x3F800000u; // 1.0 in IEEE binary32
-
-    m &= ieeeMantissa;                     // Keep only mantissa bits (fractional part)
-    m |= ieeeOne;                          // Add fractional part to 1.0
-
-    float  f = uintBitsToFloat( m );       // Range [1:2]
-    return f - 1.0;                        // Range [0:1]
-}
-
-// Pseudo-random value in half-open range [0:1].
-float random( float x ) { return floatConstruct(hash(floatBitsToUint(x))); }
-float random( vec2  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
-float random( vec3  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
-float random( vec4  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
-
 HitResult trace_sun(HitResult from, vec3 direction) {
-    float r1 = random(from.position);
-    float r2 = random(from.position + vec3(1.3, 1.4, 1.5));
-    return trace_ray(from.position, normalize(direction + vec3(r1, r2, 0) * 0.05));
+    return trace_ray(from.position, normalize(direction + vec3(noise_value.rg, 0) * 0.05));
 }
 
 HitResult trace_diffuse(HitResult from) {
-    float r1 = random(from.position);
-    float r2 = random(from.position + vec3(1.3, 1.4, 1.5));
-    float theta1 = PI * 2.0 * r1;
-    float theta2 = acos(1.0 - 2.0 * r2);
+    float theta1 = PI * 2.0 * noise_value.r;
+    float theta2 = acos(1.0 - 2.0 * noise_value.g);
     // Random point on sphere.
     vec3 direction = vec3(
         sin(theta1) * sin(theta2),
@@ -465,15 +432,18 @@ vec2 encode_screen_space_normal(uint normal, vec3 right, vec3 up) {
     return screen_space * 0.5 + vec2(0.5);
 }
 
-vec2 encode_two_byte_value(float value) {
-    return vec2(mod(value, 1.0), value / 255.0);
-}
-
 void main() {
-    vec3 ray_start = push_data.origin;
+    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(lighting_buffer));
+    screen_pos = screen_pos * 2 - vec2(1);
+    vec2 lookup_pos = vec2(
+        (push_data.seed % NOISE_SIZE) / (NOISE_SIZE + 0.0),
+        (push_data.seed / NOISE_SIZE) / (NOISE_SIZE + 0.0)
+    );
+    noise_offset.x = texture(blue_noise, lookup_pos).r;
+    noise_offset.y = texture(blue_noise, lookup_pos).g;
+    noise_offset += gl_GlobalInvocationID.xy / vec2(NOISE_SIZE);
 
-    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(lighting_buffer)) * 2.0 - vec2(1);
-    // Must be normalized. 
+    vec3 ray_start = push_data.origin;
     vec3 ray_direction = normalize(
         push_data.forward
         + screen_pos.x * push_data.right
@@ -486,44 +456,47 @@ void main() {
     vec3 sunangle = vec3(cos(push_data.sun_angle) * 0.5, sin(push_data.sun_angle), cos(push_data.sun_angle));
     vec3 light = skylight;
     HitResult primary = trace_ray(push_data.origin, ray_direction);
-    bool second_bounse_hit_sky = false;
     if (primary.value > 0) {
         light = vec3(0.0);
         vec3 albedo1 = vec3(0.5);
+        noise_value = texture(blue_noise, noise_offset);
         HitResult sun1 = trace_sun(primary, sunangle);
         if (sun1.value == 0) {
-            light += albedo1 * sunlight;
+            // light += albedo1 * sunlight;
         }
         HitResult dif1 = trace_diffuse(primary);
+        if (dif1.value == UNLOADED_CHUNK_INDEX) {
+            light += vec3(1, 0, 1);
+        }
         if (dif1.value == 0) {
-            second_bounse_hit_sky = true;
             light += albedo1 * skylight;
         } else {
-            vec3 light2 = vec3(0.0);
-            vec3 albedo2 = get_material_albedo(dif1.value);
-            HitResult sun2 = trace_sun(dif1, sunangle);
-            if (sun2.value == 0) {
-                light2 += albedo2 * sunlight;
-            }
-            HitResult dif2 = trace_diffuse(dif1);
-            if (dif2.value == 0) {
-                light2 += albedo2 * skylight;
-            } else {
-                // vec3 color3 = vec3(0.0);
-                // vec3 albedo3 = get_material_albedo(dif2.value);
-                // HitResult sun3 = trace_sun(dif2, sunangle);
-                // if (sun3.value == 0) {
-                    // color3 += albedo3 * sunlight;
-                // }
-                // HitResult dif3 = trace_diffuse(dif1);
-                // if (dif3.value == 0) {
-                    // color3 += albedo3 * skylight;
-                // }
-                // color3 += get_material_emission(dif2.value);
-                // color2 += albedo2 * color3;
-            }
-            light2 += get_material_emission(dif1.value);
-            light += albedo1 * light2;
+            // vec3 light2 = vec3(0.0);
+            // vec3 albedo2 = get_material_albedo(dif1.value);
+            // // noise_value = texture(blue_noise, noise_offset + vec2(1.0 / NOISE_SIZE));
+            // HitResult sun2 = trace_sun(dif1, sunangle);
+            // if (sun2.value == 0 && false) {
+                // light2 += albedo2 * sunlight;
+            // }
+            // HitResult dif2 = trace_diffuse(dif1);
+            // if (dif2.value == 0 && false) {
+                // light2 += albedo2 * skylight;
+            // } else {
+                // // vec3 color3 = vec3(0.0);
+                // // vec3 albedo3 = get_material_albedo(dif2.value);
+                // // HitResult sun3 = trace_sun(dif2, sunangle);
+                // // if (sun3.value == 0) {
+                    // // color3 += albedo3 * sunlight;
+                // // }
+                // // HitResult dif3 = trace_diffuse(dif1);
+                // // if (dif3.value == 0) {
+                    // // color3 += albedo3 * skylight;
+                // // }
+                // // color3 += get_material_emission(dif2.value);
+                // // color2 += albedo2 * color3;
+            // }
+            // light2 += get_material_emission(dif1.value);
+            // light += albedo1 * light2;
         }
         //color += get_material_emission(primary.value);
     }
