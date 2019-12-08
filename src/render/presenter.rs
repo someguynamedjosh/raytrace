@@ -101,8 +101,8 @@ impl PresenterBuilder {
 
         let sampler = Sampler::new(
             self.device.clone(),
-            Filter::Linear,
-            Filter::Linear,
+            Filter::Nearest,
+            Filter::Nearest,
             MipmapMode::Nearest,
             SamplerAddressMode::ClampToEdge,
             SamplerAddressMode::ClampToEdge,

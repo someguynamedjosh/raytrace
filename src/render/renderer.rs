@@ -220,7 +220,7 @@ impl<'a> RenderBuilder<'a> {
                 width: 512,
                 height: 512,
             }, 
-            Format::R8G8B8A8Snorm, 
+            Format::R8G8B8A8Srgb, 
             self.queue.clone(),
         ).unwrap().0;
         let sampler = Sampler::new(
@@ -282,7 +282,7 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(region_map.clone())
                 .unwrap()
-                .add_image(self.target_image.clone()) //lighting_buffer.clone())
+                .add_image(lighting_buffer.clone())
                 .unwrap()
                 .add_image(depth_buffer.clone())
                 .unwrap()
@@ -464,41 +464,41 @@ impl Renderer {
                 },
             )
             .unwrap()
-            //.dispatch(
-                //[self.target_width / 8, self.target_height / 8, 1],
-                //self.bilateral_denoise_ping_pipeline.clone(),
-                //self.bilateral_denoise_ping_descriptors.clone(),
-                //()
-            //)
-            //.unwrap()
-            //.dispatch(
-                //[self.target_width / 8, self.target_height / 8, 1],
-                //self.bilateral_denoise_pong_pipeline.clone(),
-                //self.bilateral_denoise_pong_descriptors.clone(),
-                //()
-            //)
-            //.unwrap()
-            //.dispatch(
-                //[self.target_width / 8, self.target_height / 8, 1],
-                //self.bilateral_denoise_ping_pipeline.clone(),
-                //self.bilateral_denoise_ping_descriptors.clone(),
-                //()
-            //)
-            //.unwrap()
-            //.dispatch(
-                //[self.target_width / 8, self.target_height / 8, 1],
-                //self.bilateral_denoise_pong_pipeline.clone(),
-                //self.bilateral_denoise_pong_descriptors.clone(),
-                //()
-            //)
-            //.unwrap()
-            //.dispatch(
-                //[self.target_width / 8, self.target_height / 8, 1],
-                //self.finalize_pipeline.clone(),
-                //self.finalize_descriptors.clone(),
-                //()
-            //)
-            //.unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_ping_pipeline.clone(),
+                self.bilateral_denoise_ping_descriptors.clone(),
+                ()
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pong_pipeline.clone(),
+                self.bilateral_denoise_pong_descriptors.clone(),
+                ()
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_ping_pipeline.clone(),
+                self.bilateral_denoise_ping_descriptors.clone(),
+                ()
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pong_pipeline.clone(),
+                self.bilateral_denoise_pong_descriptors.clone(),
+                ()
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.finalize_pipeline.clone(),
+                self.finalize_descriptors.clone(),
+                ()
+            )
+            .unwrap()
             .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
             .unwrap()
             .copy_image_to_buffer(self.region_map.clone(), self.region_map_data.clone())
