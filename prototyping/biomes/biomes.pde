@@ -3,6 +3,8 @@ import java.awt.Polygon;
 
 PImage biomeMap;
 
+int ZOOM = 2;
+
 void setup() {
   size(1000, 1000);
   noSmooth();
@@ -12,11 +14,11 @@ void setup() {
 }
 
 void draw() {
-  float[][] points = new float[25][2];
+  float[][] points = new float[100][2];
 
-  for (int i = 0; i < 25; i++) {
-    points[i][0] = i % 5 * 200 + random(300);
-    points[i][1] = i / 5 * 200 + random(300);
+  for (int i = 0; i < 100; i++) {
+    points[i][0] = i % 10 * 300 + random(300);
+    points[i][1] = i / 10 * 300 + random(300);
   }
   // Shuffle up the points.
   for (int i = 0; i < 1000; i++) {
@@ -47,11 +49,11 @@ void draw() {
     for (int y = 0; y < 1000; y++) {
       int index = 0;
       noiseDetail(4, 0.3);
-      float dx = (noise(x / 300.0, y / 300.0, 0.5) - 0.5) * 500.0;
-      float dy = (noise(x / 300.0, y / 300.0, 5.5) - 0.5) * 500.0;
+      float dx = (noise(x / 100.0, y / 100.0, 0.5) - 0.5) * 200.0 + random(-20, 20);
+      float dy = (noise(x / 100.0, y / 100.0, 5.5) - 0.5) * 200.0 + random(-20, 20);
       for (Polygon region : checkableRegions) {
-        if (region.contains(x + dx, y + dy)) {
-          stroke(index % 5 * 50, index / 5 * 50, 255);
+        if (region.contains((x + dx) * ZOOM, (y + dy) * ZOOM)) {
+          stroke(index % 8 % 2 * 256, index % 8 / 2 % 2 * 256, index % 8 / 4 * 256);
           point(x, y);
           break;
         }
