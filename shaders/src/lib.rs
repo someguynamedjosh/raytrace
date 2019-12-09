@@ -27,6 +27,7 @@ mod bilateral_denoise {
         path: "glsl/bilateral_denoise.comp"
     }
 }
+pub use bilateral_denoise::ty::PushData as BilateralDenoisePushData;
 pub use bilateral_denoise::Layout as BilateralDenoiseShaderLayout;
 pub use bilateral_denoise::Shader as BilateralDenoiseShader;
 

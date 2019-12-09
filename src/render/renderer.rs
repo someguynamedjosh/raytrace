@@ -12,15 +12,13 @@ use vulkano::image::{Dimensions, StorageImage, ImmutableImage};
 use vulkano::pipeline::ComputePipeline;
 use vulkano::sampler::{Filter, Sampler, MipmapMode, SamplerAddressMode};
 
-use rand::{self, RngCore};
-
 use std::sync::Arc;
 
 use super::constants::*;
 use crate::game::Game;
 use crate::util;
 use crate::world::WorldChunk;
-use shaders::{self, BasicRaytraceShaderLayout, BilateralDenoiseShaderLayout, FinalizeShaderLayout, RaytracePushData};
+use shaders::{self, BasicRaytraceShaderLayout, BilateralDenoiseShaderLayout, FinalizeShaderLayout, RaytracePushData, BilateralDenoisePushData};
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
@@ -468,35 +466,35 @@ impl Renderer {
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_ping_pipeline.clone(),
                 self.bilateral_denoise_ping_descriptors.clone(),
-                ()
+                BilateralDenoisePushData { size: 1 }
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_pong_pipeline.clone(),
                 self.bilateral_denoise_pong_descriptors.clone(),
-                ()
+                BilateralDenoisePushData { size: 2 }
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_ping_pipeline.clone(),
                 self.bilateral_denoise_ping_descriptors.clone(),
-                ()
+                BilateralDenoisePushData { size: 3 }
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_pong_pipeline.clone(),
                 self.bilateral_denoise_pong_descriptors.clone(),
-                ()
+                BilateralDenoisePushData { size: 2 }
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.finalize_pipeline.clone(),
                 self.finalize_descriptors.clone(),
-                ()
+                BilateralDenoisePushData { size: 1 }
             )
             .unwrap()
             .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
