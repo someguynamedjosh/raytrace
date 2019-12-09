@@ -1,4 +1,4 @@
-use cgmath::{InnerSpace, Rad, Vector3};
+use cgmath::InnerSpace;
 use winit::VirtualKeyCode;
 
 use crate::render::Camera;

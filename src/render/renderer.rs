@@ -8,9 +8,9 @@ use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet
 use vulkano::descriptor::pipeline_layout::PipelineLayout;
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
-use vulkano::image::{Dimensions, StorageImage, ImmutableImage};
+use vulkano::image::{Dimensions, ImmutableImage, StorageImage};
 use vulkano::pipeline::ComputePipeline;
-use vulkano::sampler::{Filter, Sampler, MipmapMode, SamplerAddressMode};
+use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 
 use std::sync::Arc;
 
@@ -18,7 +18,10 @@ use super::constants::*;
 use crate::game::Game;
 use crate::util;
 use crate::world::WorldChunk;
-use shaders::{self, BasicRaytraceShaderLayout, BilateralDenoiseShaderLayout, FinalizeShaderLayout, RaytracePushData, BilateralDenoisePushData};
+use shaders::{
+    self, BasicRaytraceShaderLayout, BilateralDenoisePushData, BilateralDenoiseShaderLayout,
+    FinalizeShaderLayout, RaytracePushData,
+};
 
 type WorldData = CpuAccessibleBuffer<[u16]>;
 type WorldImage = StorageImage<Format>;
@@ -82,13 +85,12 @@ pub struct Renderer {
     bilateral_denoise_pong_descriptors: Arc<GenericDescriptorSet>,
     finalize_pipeline: Arc<FinalizePipeline>,
     finalize_descriptors: Arc<GenericDescriptorSet>,
-
-//    lighting_buffer: Arc<GenericImage>,
-//    lighting_pong_buffer: Arc<GenericImage>,
-//    albedo_buffer: Arc<GenericImage>,
-//    emission_buffer: Arc<GenericImage>,
-//    depth_buffer: Arc<GenericImage>,
-//    normal_buffer: Arc<GenericImage>,
+    //    lighting_buffer: Arc<GenericImage>,
+    //    lighting_pong_buffer: Arc<GenericImage>,
+    //    albedo_buffer: Arc<GenericImage>,
+    //    emission_buffer: Arc<GenericImage>,
+    //    depth_buffer: Arc<GenericImage>,
+    //    normal_buffer: Arc<GenericImage>,
 }
 
 struct RenderBuilder<'a> {
@@ -192,7 +194,10 @@ impl<'a> RenderBuilder<'a> {
     fn make_render_buffer(&self, size: (u32, u32), format: Format) -> Arc<GenericImage> {
         StorageImage::new(
             self.device.clone(),
-            Dimensions::Dim2d { width: size.0, height: size.1 },
+            Dimensions::Dim2d {
+                width: size.0,
+                height: size.1,
+            },
             format,
             Some(self.queue.family()),
         )
@@ -217,20 +222,26 @@ impl<'a> RenderBuilder<'a> {
             Dimensions::Dim2d {
                 width: 512,
                 height: 512,
-            }, 
-            Format::R8G8B8A8Srgb, 
+            },
+            Format::R8G8B8A8Srgb,
             self.queue.clone(),
-        ).unwrap().0;
+        )
+        .unwrap()
+        .0;
         let sampler = Sampler::new(
-            self.device.clone(), 
-            Filter::Nearest, 
-            Filter::Nearest, 
-            MipmapMode::Nearest, 
-            SamplerAddressMode::Repeat, 
-            SamplerAddressMode::Repeat, 
-            SamplerAddressMode::ClampToEdge, 
-            0.0, 1.0, 0.0, 0.0
-        ).unwrap();
+            self.device.clone(),
+            Filter::Nearest,
+            Filter::Nearest,
+            MipmapMode::Nearest,
+            SamplerAddressMode::Repeat,
+            SamplerAddressMode::Repeat,
+            SamplerAddressMode::ClampToEdge,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+        )
+        .unwrap();
 
         (image, sampler)
     }
@@ -302,7 +313,7 @@ impl<'a> RenderBuilder<'a> {
                 &bilateral_denoise_shader.main_entry_point(),
                 &(),
             )
-            .unwrap()
+            .unwrap(),
         );
         let bilateral_denoise_ping_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
             PersistentDescriptorSet::start(bilateral_denoise_ping_pipeline.clone(), 0)
@@ -323,7 +334,7 @@ impl<'a> RenderBuilder<'a> {
                 &bilateral_denoise_shader.main_entry_point(),
                 &(),
             )
-            .unwrap()
+            .unwrap(),
         );
         let bilateral_denoise_pong_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
             PersistentDescriptorSet::start(bilateral_denoise_pong_pipeline.clone(), 0)
@@ -341,10 +352,11 @@ impl<'a> RenderBuilder<'a> {
 
         let finalize_pipeline = Arc::new(
             ComputePipeline::new(
-                self.device.clone(), 
-                &finalize_shader.main_entry_point(), 
-                &()
-            ).unwrap()
+                self.device.clone(),
+                &finalize_shader.main_entry_point(),
+                &(),
+            )
+            .unwrap(),
         );
         let finalize_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
             PersistentDescriptorSet::start(finalize_pipeline.clone(), 0)
@@ -357,7 +369,7 @@ impl<'a> RenderBuilder<'a> {
                 .add_image(self.target_image.clone())
                 .unwrap()
                 .build()
-                .unwrap()
+                .unwrap(),
         );
 
         println!("Pipeline created.");
@@ -466,35 +478,35 @@ impl Renderer {
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_ping_pipeline.clone(),
                 self.bilateral_denoise_ping_descriptors.clone(),
-                BilateralDenoisePushData { size: 1 }
+                BilateralDenoisePushData { size: 1 },
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_pong_pipeline.clone(),
                 self.bilateral_denoise_pong_descriptors.clone(),
-                BilateralDenoisePushData { size: 2 }
+                BilateralDenoisePushData { size: 2 },
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_ping_pipeline.clone(),
                 self.bilateral_denoise_ping_descriptors.clone(),
-                BilateralDenoisePushData { size: 3 }
+                BilateralDenoisePushData { size: 3 },
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.bilateral_denoise_pong_pipeline.clone(),
                 self.bilateral_denoise_pong_descriptors.clone(),
-                BilateralDenoisePushData { size: 2 }
+                BilateralDenoisePushData { size: 2 },
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.finalize_pipeline.clone(),
                 self.finalize_descriptors.clone(),
-                BilateralDenoisePushData { size: 1 }
+                BilateralDenoisePushData { size: 1 },
             )
             .unwrap()
             .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
