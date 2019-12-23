@@ -16,6 +16,8 @@ layout(push_constant) uniform PushData {
     vec3 origin, forward, up, right;
     float sun_angle;
     uint seed;
+    mat3 previous_screen_space_transform;
+    vec3 previous_camera_origin;
 } push_data;
 
 const uint CHUNK_BLOCK_WIDTH = 8;

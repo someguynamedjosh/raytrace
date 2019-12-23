@@ -1,4 +1,4 @@
-use cgmath::{Rad, Vector3};
+use cgmath::{Rad, Vector3, Matrix3, SquareMatrix, Zero};
 
 use image::{GenericImageView, ImageFormat};
 
@@ -67,6 +67,10 @@ pub struct Renderer {
 
     current_seed: u32,
     chunk_upload_index: u16,
+    // A matrix that transforms world space to the previous frame's screen space
+    previous_screen_space_transform: Matrix3<f32>,
+    // Required for translating world space coordinates before applying screen space transform.
+    previous_camera_origin: Vector3<f32>,
 
     upload_buffers: Vec<Arc<WorldData>>,
     upload_destinations: Vec<u16>,
@@ -381,6 +385,8 @@ impl<'a> RenderBuilder<'a> {
 
             current_seed: 0,
             chunk_upload_index: 0,
+            previous_screen_space_transform: Matrix3::zero(),
+            previous_camera_origin: [0.0, 0.0, 0.0].into(),
 
             upload_buffers,
             upload_destinations: Vec::new(),
@@ -427,6 +433,8 @@ impl Renderer {
         let camera_pos = camera.origin;
         let util::TripleEulerVector { forward, up, right } =
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
+        let up = up * 0.3;
+        let right = right * 0.3;
         for (source, destination) in self.upload_destinations.iter().enumerate() {
             let (x, y, z) = (
                 *destination as u32 % ATLAS_CHUNK_WIDTH,
@@ -452,7 +460,7 @@ impl Renderer {
         self.upload_destinations.clear();
 
         self.current_seed = (self.current_seed + 1) % (512 * 512);
-        add_to
+        let completed_buffer = add_to
             .copy_buffer_to_image(self.chunk_map_data.clone(), self.chunk_map.clone())
             .unwrap()
             .copy_buffer_to_image(self.region_map_data.clone(), self.region_map.clone())
@@ -465,12 +473,16 @@ impl Renderer {
                     _dummy0: [0; 4],
                     _dummy1: [0; 4],
                     _dummy2: [0; 4],
-                    origin: [camera_pos.x, camera_pos.y, camera_pos.z],
-                    forward: [forward.x, forward.y, forward.z],
-                    right: [right.x * 0.3, right.y * 0.3, right.z * 0.3],
-                    up: [up.x * 0.3, up.y * 0.3, up.z * 0.3],
+                    _dummy3: [0; 12],
+                    _dummy4: [0; 12],
+                    origin: camera_pos.clone().into(),
+                    forward: forward.clone().into(),
+                    right: right.clone().into(),
+                    up: up.clone().into(),
                     sun_angle: game.get_sun_angle(),
                     seed: self.current_seed,
+                    previous_camera_origin: self.previous_camera_origin.clone().into(),
+                    previous_screen_space_transform: self.previous_screen_space_transform.clone().into()
                 },
             )
             .unwrap()
@@ -512,7 +524,23 @@ impl Renderer {
             .copy_image_to_buffer(self.chunk_map.clone(), self.chunk_map_data.clone())
             .unwrap()
             .copy_image_to_buffer(self.region_map.clone(), self.region_map_data.clone())
-            .unwrap()
+            .unwrap();
+        
+        self.previous_screen_space_transform = {
+            // The arguments are ordered weirdly, column increases from top to bottom.
+            // Multiplying {screenx, screeny, depth} by this gets pixel position in world space.
+            let screen_to_world_space = Matrix3::new(
+                right.x, right.y, right.z,
+                up.x, up.y, up.z,
+                forward.x, forward.y, forward.z
+            );
+            // Inverting it gives us world space to screen space.
+            screen_to_world_space.invert().expect(
+                "Screen space vectors should cover entire coordinate space."
+            )
+        };
+        self.previous_camera_origin = camera.origin.clone();
+        completed_buffer
     }
 
     pub fn read_feedback(&mut self, game: &Game) {
