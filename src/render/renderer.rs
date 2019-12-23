@@ -83,9 +83,8 @@ pub struct Renderer {
 
     basic_raytrace_pipeline: Arc<BasicRaytracePipeline>,
     basic_raytrace_descriptors: Arc<GenericDescriptorSet>,
-    bilateral_denoise_ping_pipeline: Arc<BilateralDenoisePipeline>,
+    bilateral_denoise_pipeline: Arc<BilateralDenoisePipeline>,
     bilateral_denoise_ping_descriptors: Arc<GenericDescriptorSet>,
-    bilateral_denoise_pong_pipeline: Arc<BilateralDenoisePipeline>,
     bilateral_denoise_pong_descriptors: Arc<GenericDescriptorSet>,
     finalize_pipeline: Arc<FinalizePipeline>,
     finalize_descriptors: Arc<GenericDescriptorSet>,
@@ -311,7 +310,7 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap(),
         );
 
-        let bilateral_denoise_ping_pipeline = Arc::new(
+        let bilateral_denoise_pipeline = Arc::new(
             ComputePipeline::new(
                 self.device.clone(),
                 &bilateral_denoise_shader.main_entry_point(),
@@ -320,7 +319,7 @@ impl<'a> RenderBuilder<'a> {
             .unwrap(),
         );
         let bilateral_denoise_ping_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
-            PersistentDescriptorSet::start(bilateral_denoise_ping_pipeline.clone(), 0)
+            PersistentDescriptorSet::start(bilateral_denoise_pipeline.clone(), 0)
                 .add_image(lighting_buffer.clone())
                 .unwrap()
                 .add_image(depth_buffer.clone())
@@ -332,16 +331,8 @@ impl<'a> RenderBuilder<'a> {
                 .build()
                 .unwrap(),
         );
-        let bilateral_denoise_pong_pipeline = Arc::new(
-            ComputePipeline::new(
-                self.device.clone(),
-                &bilateral_denoise_shader.main_entry_point(),
-                &(),
-            )
-            .unwrap(),
-        );
         let bilateral_denoise_pong_descriptors: Arc<dyn DescriptorSet + Sync + Send> = Arc::new(
-            PersistentDescriptorSet::start(bilateral_denoise_pong_pipeline.clone(), 0)
+            PersistentDescriptorSet::start(bilateral_denoise_pipeline.clone(), 0)
                 .add_image(lighting_pong_buffer.clone())
                 .unwrap()
                 .add_image(depth_buffer.clone())
@@ -398,9 +389,8 @@ impl<'a> RenderBuilder<'a> {
 
             basic_raytrace_pipeline,
             basic_raytrace_descriptors,
-            bilateral_denoise_ping_pipeline,
+            bilateral_denoise_pipeline,
             bilateral_denoise_ping_descriptors,
-            bilateral_denoise_pong_pipeline,
             bilateral_denoise_pong_descriptors,
             finalize_pipeline,
             finalize_descriptors,
@@ -474,7 +464,6 @@ impl Renderer {
                     _dummy1: [0; 4],
                     _dummy2: [0; 4],
                     _dummy3: [0; 12],
-                    _dummy4: [0; 12],
                     origin: camera_pos.clone().into(),
                     forward: forward.clone().into(),
                     right: right.clone().into(),
@@ -488,28 +477,28 @@ impl Renderer {
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_ping_pipeline.clone(),
+                self.bilateral_denoise_pipeline.clone(),
                 self.bilateral_denoise_ping_descriptors.clone(),
                 BilateralDenoisePushData { size: 1 },
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pong_pipeline.clone(),
+                self.bilateral_denoise_pipeline.clone(),
                 self.bilateral_denoise_pong_descriptors.clone(),
                 BilateralDenoisePushData { size: 2 },
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_ping_pipeline.clone(),
+                self.bilateral_denoise_pipeline.clone(),
                 self.bilateral_denoise_ping_descriptors.clone(),
                 BilateralDenoisePushData { size: 3 },
             )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pong_pipeline.clone(),
+                self.bilateral_denoise_pipeline.clone(),
                 self.bilateral_denoise_pong_descriptors.clone(),
                 BilateralDenoisePushData { size: 2 },
             )
