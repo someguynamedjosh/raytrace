@@ -88,12 +88,14 @@ pub struct Renderer {
     bilateral_denoise_pong_descriptors: Arc<GenericDescriptorSet>,
     finalize_pipeline: Arc<FinalizePipeline>,
     finalize_descriptors: Arc<GenericDescriptorSet>,
-    //    lighting_buffer: Arc<GenericImage>,
     //    lighting_pong_buffer: Arc<GenericImage>,
     //    albedo_buffer: Arc<GenericImage>,
     //    emission_buffer: Arc<GenericImage>,
-    //    depth_buffer: Arc<GenericImage>,
     //    normal_buffer: Arc<GenericImage>,
+    lighting_buffer: Arc<GenericImage>,
+    depth_buffer: Arc<GenericImage>,
+    old_lighting_buffer: Arc<GenericImage>,
+    old_depth_buffer: Arc<GenericImage>,
 }
 
 struct RenderBuilder<'a> {
@@ -266,12 +268,13 @@ impl<'a> RenderBuilder<'a> {
 
         let rbuf_size = (target_width, target_height);
         let lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
+        let old_lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
         let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
         let albedo_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
         let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
         let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
+        let old_depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
-        let aux_buffer = self.make_render_buffer(rbuf_size, Format::R16G16B16A16Snorm);
 
         let (blue_noise, blue_noise_sampler) = self.load_blue_noise();
 
@@ -307,7 +310,9 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_sampled_image(blue_noise, blue_noise_sampler)
                 .unwrap()
-                .add_image(aux_buffer.clone())
+                .add_image(old_lighting_buffer.clone())
+                .unwrap()
+                .add_image(old_depth_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -397,6 +402,11 @@ impl<'a> RenderBuilder<'a> {
             bilateral_denoise_pong_descriptors,
             finalize_pipeline,
             finalize_descriptors,
+
+            depth_buffer,
+            lighting_buffer,
+            old_depth_buffer,
+            old_lighting_buffer,
         }
     }
 }
@@ -483,34 +493,38 @@ impl Renderer {
                 },
             )
             .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pipeline.clone(),
-                self.bilateral_denoise_ping_descriptors.clone(),
-                BilateralDenoisePushData { size: 1 },
-            )
+            .copy_image(self.depth_buffer.clone(), [0, 0, 0], 0, 0, self.old_depth_buffer.clone(), [0, 0, 0], 0, 0, [512, 512, 1], 1)
             .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pipeline.clone(),
-                self.bilateral_denoise_pong_descriptors.clone(),
-                BilateralDenoisePushData { size: 2 },
-            )
+            .copy_image(self.lighting_buffer.clone(), [0, 0, 0], 0, 0, self.old_lighting_buffer.clone(), [0, 0, 0], 0, 0, [512, 512, 1], 1)
             .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pipeline.clone(),
-                self.bilateral_denoise_ping_descriptors.clone(),
-                BilateralDenoisePushData { size: 3 },
-            )
-            .unwrap()
-            .dispatch(
-                [self.target_width / 8, self.target_height / 8, 1],
-                self.bilateral_denoise_pipeline.clone(),
-                self.bilateral_denoise_pong_descriptors.clone(),
-                BilateralDenoisePushData { size: 2 },
-            )
-            .unwrap()
+            // .dispatch(
+            //     [self.target_width / 8, self.target_height / 8, 1],
+            //     self.bilateral_denoise_pipeline.clone(),
+            //     self.bilateral_denoise_ping_descriptors.clone(),
+            //     BilateralDenoisePushData { size: 1 },
+            // )
+            // .unwrap()
+            // .dispatch(
+            //     [self.target_width / 8, self.target_height / 8, 1],
+            //     self.bilateral_denoise_pipeline.clone(),
+            //     self.bilateral_denoise_pong_descriptors.clone(),
+            //     BilateralDenoisePushData { size: 2 },
+            // )
+            // .unwrap()
+            // .dispatch(
+            //     [self.target_width / 8, self.target_height / 8, 1],
+            //     self.bilateral_denoise_pipeline.clone(),
+            //     self.bilateral_denoise_ping_descriptors.clone(),
+            //     BilateralDenoisePushData { size: 3 },
+            // )
+            // .unwrap()
+            // .dispatch(
+            //     [self.target_width / 8, self.target_height / 8, 1],
+            //     self.bilateral_denoise_pipeline.clone(),
+            //     self.bilateral_denoise_pong_descriptors.clone(),
+            //     BilateralDenoisePushData { size: 2 },
+            // )
+            // .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.finalize_pipeline.clone(),
