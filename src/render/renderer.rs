@@ -271,6 +271,7 @@ impl<'a> RenderBuilder<'a> {
         let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
         let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
+        let aux_buffer = self.make_render_buffer(rbuf_size, Format::R16G16B16A16Snorm);
 
         let (blue_noise, blue_noise_sampler) = self.load_blue_noise();
 
@@ -305,6 +306,8 @@ impl<'a> RenderBuilder<'a> {
                 .add_image(emission_buffer.clone())
                 .unwrap()
                 .add_sampled_image(blue_noise, blue_noise_sampler)
+                .unwrap()
+                .add_image(aux_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -463,15 +466,20 @@ impl Renderer {
                     _dummy0: [0; 4],
                     _dummy1: [0; 4],
                     _dummy2: [0; 4],
-                    _dummy3: [0; 12],
+                    _dummy3: [0; 4],
+                    _dummy4: [0; 4],
+                    _dummy5: [0; 4],
+                    _dummy6: [0; 4],
                     origin: camera_pos.clone().into(),
                     forward: forward.clone().into(),
                     right: right.clone().into(),
                     up: up.clone().into(),
+                    old_origin: self.previous_camera_origin.clone().into(),
+                    old_transform_c0: self.previous_screen_space_transform.x.clone().into(),
+                    old_transform_c1: self.previous_screen_space_transform.y.clone().into(),
+                    old_transform_c2: self.previous_screen_space_transform.z.clone().into(),
                     sun_angle: game.get_sun_angle(),
                     seed: self.current_seed,
-                    previous_camera_origin: self.previous_camera_origin.clone().into(),
-                    previous_screen_space_transform: self.previous_screen_space_transform.clone().into()
                 },
             )
             .unwrap()
@@ -514,14 +522,14 @@ impl Renderer {
             .unwrap()
             .copy_image_to_buffer(self.region_map.clone(), self.region_map_data.clone())
             .unwrap();
-        
+
         self.previous_screen_space_transform = {
             // The arguments are ordered weirdly, column increases from top to bottom.
             // Multiplying {screenx, screeny, depth} by this gets pixel position in world space.
-            let screen_to_world_space = Matrix3::new(
-                right.x, right.y, right.z,
-                up.x, up.y, up.z,
-                forward.x, forward.y, forward.z
+            let screen_to_world_space = Matrix3::from_cols(
+                right.clone(),
+                up.clone(),
+                forward.clone(),
             );
             // Inverting it gives us world space to screen space.
             screen_to_world_space.invert().expect(
@@ -529,6 +537,7 @@ impl Renderer {
             )
         };
         self.previous_camera_origin = camera.origin.clone();
+        
         completed_buffer
     }
 
