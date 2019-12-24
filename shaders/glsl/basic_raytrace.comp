@@ -13,6 +13,7 @@ layout(set = 0, binding = 7, rgba8_snorm) uniform writeonly image2D emission_buf
 layout(set = 0, binding = 8) uniform sampler2D blue_noise;
 layout(set = 0, binding = 9, rgba8_snorm) uniform readonly image2D old_lighting_buffer;
 layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
+layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
 
 layout(push_constant) uniform PushData {
     vec3 origin, forward, up, right;
@@ -550,7 +551,8 @@ void main() {
     ) {
         uint old_depth = imageLoad(old_depth_buffer, old_screen_pixel_pos).r;
         uint depth_difference = (old_depth > expected_depth ? old_depth - expected_depth : expected_depth - old_depth);
-        if (depth_difference < 10) {
+        uint old_normal = imageLoad(old_normal_buffer, old_screen_pixel_pos).r;
+        if (depth_difference < 32 && old_normal == primary.normal) {
             vec4 old_pixel = imageLoad(old_lighting_buffer, old_screen_pixel_pos);
             float new_weight = old_pixel.a;
             if (new_weight < 0.1) {
@@ -569,7 +571,7 @@ void main() {
     imageStore(
         depth_buffer,
         ivec2(gl_GlobalInvocationID.xy),
-        uvec4(pow(primary.distance, 1.0) * 64)
+        uvec4(length(push_data.origin - primary.position) * 64)
     );
     imageStore(
         normal_buffer,

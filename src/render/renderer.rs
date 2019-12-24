@@ -94,8 +94,10 @@ pub struct Renderer {
     //    normal_buffer: Arc<GenericImage>,
     lighting_buffer: Arc<GenericImage>,
     depth_buffer: Arc<GenericImage>,
+    normal_buffer: Arc<GenericImage>,
     old_lighting_buffer: Arc<GenericImage>,
     old_depth_buffer: Arc<GenericImage>,
+    old_normal_buffer: Arc<GenericImage>,
 }
 
 struct RenderBuilder<'a> {
@@ -275,6 +277,7 @@ impl<'a> RenderBuilder<'a> {
         let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let old_depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
+        let old_normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
 
         let (blue_noise, blue_noise_sampler) = self.load_blue_noise();
 
@@ -313,6 +316,8 @@ impl<'a> RenderBuilder<'a> {
                 .add_image(old_lighting_buffer.clone())
                 .unwrap()
                 .add_image(old_depth_buffer.clone())
+                .unwrap()
+                .add_image(old_normal_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -405,8 +410,10 @@ impl<'a> RenderBuilder<'a> {
 
             depth_buffer,
             lighting_buffer,
+            normal_buffer,
             old_depth_buffer,
             old_lighting_buffer,
+            old_normal_buffer,
         }
     }
 }
@@ -497,34 +504,36 @@ impl Renderer {
             .unwrap()
             .copy_image(self.lighting_buffer.clone(), [0, 0, 0], 0, 0, self.old_lighting_buffer.clone(), [0, 0, 0], 0, 0, [512, 512, 1], 1)
             .unwrap()
-            // .dispatch(
-            //     [self.target_width / 8, self.target_height / 8, 1],
-            //     self.bilateral_denoise_pipeline.clone(),
-            //     self.bilateral_denoise_ping_descriptors.clone(),
-            //     BilateralDenoisePushData { size: 1 },
-            // )
-            // .unwrap()
-            // .dispatch(
-            //     [self.target_width / 8, self.target_height / 8, 1],
-            //     self.bilateral_denoise_pipeline.clone(),
-            //     self.bilateral_denoise_pong_descriptors.clone(),
-            //     BilateralDenoisePushData { size: 2 },
-            // )
-            // .unwrap()
-            // .dispatch(
-            //     [self.target_width / 8, self.target_height / 8, 1],
-            //     self.bilateral_denoise_pipeline.clone(),
-            //     self.bilateral_denoise_ping_descriptors.clone(),
-            //     BilateralDenoisePushData { size: 3 },
-            // )
-            // .unwrap()
-            // .dispatch(
-            //     [self.target_width / 8, self.target_height / 8, 1],
-            //     self.bilateral_denoise_pipeline.clone(),
-            //     self.bilateral_denoise_pong_descriptors.clone(),
-            //     BilateralDenoisePushData { size: 2 },
-            // )
-            // .unwrap()
+            .copy_image(self.normal_buffer.clone(), [0, 0, 0], 0, 0, self.old_normal_buffer.clone(), [0, 0, 0], 0, 0, [512, 512, 1], 1)
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pipeline.clone(),
+                self.bilateral_denoise_ping_descriptors.clone(),
+                BilateralDenoisePushData { size: 1 },
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pipeline.clone(),
+                self.bilateral_denoise_pong_descriptors.clone(),
+                BilateralDenoisePushData { size: 2 },
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pipeline.clone(),
+                self.bilateral_denoise_ping_descriptors.clone(),
+                BilateralDenoisePushData { size: 3 },
+            )
+            .unwrap()
+            .dispatch(
+                [self.target_width / 8, self.target_height / 8, 1],
+                self.bilateral_denoise_pipeline.clone(),
+                self.bilateral_denoise_pong_descriptors.clone(),
+                BilateralDenoisePushData { size: 2 },
+            )
+            .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
                 self.finalize_pipeline.clone(),
