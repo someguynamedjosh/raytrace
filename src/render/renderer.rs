@@ -269,11 +269,11 @@ impl<'a> RenderBuilder<'a> {
         ) = self.make_world();
 
         let rbuf_size = (target_width, target_height);
-        let lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
-        let old_lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
-        let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
-        let albedo_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
-        let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Snorm);
+        let lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
+        let old_lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
+        let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
+        let albedo_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
+        let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
         let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let old_depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
