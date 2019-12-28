@@ -1,7 +1,9 @@
 use crate::render::constants::*;
 
 use noise::{HybridMulti, NoiseFn};
-use rand::{self, RngCore};
+use rand::{self, prelude::*};
+
+mod noises;
 
 pub struct Chunk {
     pub block_data: [u16; CHUNK_BLOCK_VOLUME as usize],
@@ -75,23 +77,33 @@ impl World {
     }
 
     fn generate(&mut self) {
-        let mut perlin = HybridMulti::new();
-        perlin.octaves = 1;
-        perlin.frequency = 0.7;
-        perlin.lacunarity = 4.0;
-        perlin.persistence = 0.5;
-        let mut micro = HybridMulti::new();
-        micro.octaves = 2;
-        micro.frequency = 3.0;
-        micro.lacunarity = 2.0;
-        micro.persistence = 0.5;
+        let mountain_noise = noises::MountainNoise::new();
         let mut random = rand::thread_rng();
         let height = |x, y| {
-            let coord = [x as f64 / 250.0, y as f64 / 250.0];
-            let mut height = perlin.get(coord).powf(2.0) * 30.0 + 30.0;
-            height *= micro.get(coord) * 0.1 + 0.7;
-            height += 30.0;
-            height as usize
+            (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as usize
+        };
+        let material = |random: &mut ThreadRng, height| {
+            if height < 12 {
+                1
+            } else if height < 30 {
+                let threshold = height - 12;
+                if random.next_u32() % (30 - 12) < threshold as u32 {
+                    4
+                } else {
+                    1
+                }
+            } else if height < 35 {
+                4
+            } else if height < 60 {
+                let threshold = height - 35;
+                if random.next_u32() % (60 - 35) < threshold as u32 {
+                    5
+                } else {
+                    4
+                }
+            } else {
+                5
+            }
         };
         for x in 2..ROOT_BLOCK_WIDTH as usize {
             for y in 2..ROOT_BLOCK_WIDTH as usize {
@@ -100,7 +112,7 @@ impl World {
                     h0 += 8;
                 }
                 for z in 0..h0 {
-                    self.draw_block(x, y, z, if z == h0 - 1 { 1 } else { 3 });
+                    self.draw_block(x, y, z, material(&mut random, z));
                 }
                 if x > 15
                     && y > 15
