@@ -3,7 +3,7 @@ use crate::render::constants::*;
 use noise::{HybridMulti, NoiseFn};
 use rand::{self, prelude::*};
 
-mod noises;
+mod functions;
 
 pub struct Chunk {
     pub block_data: [u16; CHUNK_BLOCK_VOLUME as usize],
@@ -77,7 +77,7 @@ impl World {
     }
 
     fn generate(&mut self) {
-        let mountain_noise = noises::MountainNoise::new();
+        let mountain_noise = functions::MountainNoise::new();
         let mut random = rand::thread_rng();
         let height = |x, y| {
             (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as usize
