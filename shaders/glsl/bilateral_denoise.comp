@@ -2,10 +2,10 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba8_snorm) uniform image2D lighting_buffer;
+layout(set = 0, binding = 0, rgba16_snorm) uniform image2D lighting_buffer;
 layout(set = 0, binding = 1, r16ui) uniform uimage2D depth_buffer;
 layout(set = 0, binding = 2, r8ui) uniform uimage2D normal_buffer;
-layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
+layout(set = 0, binding = 3, rgba16_snorm) uniform writeonly image2D final_output;
 
 layout(push_constant) uniform PushData {
     int size;

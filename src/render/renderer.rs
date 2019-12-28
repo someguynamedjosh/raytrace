@@ -269,9 +269,9 @@ impl<'a> RenderBuilder<'a> {
         ) = self.make_world();
 
         let rbuf_size = (target_width, target_height);
-        let lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
-        let old_lighting_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
-        let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
+        let lighting_buffer = self.make_render_buffer(rbuf_size, Format::R16G16B16A16Unorm);
+        let old_lighting_buffer = self.make_render_buffer(rbuf_size, Format::R16G16B16A16Unorm);
+        let lighting_pong_buffer = self.make_render_buffer(rbuf_size, Format::R16G16B16A16Unorm);
         let albedo_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
         let emission_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
         let depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
@@ -311,7 +311,7 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(emission_buffer.clone())
                 .unwrap()
-                .add_sampled_image(blue_noise, blue_noise_sampler)
+                .add_sampled_image(blue_noise.clone(), blue_noise_sampler.clone())
                 .unwrap()
                 .add_image(old_lighting_buffer.clone())
                 .unwrap()
@@ -375,6 +375,8 @@ impl<'a> RenderBuilder<'a> {
                 .add_image(emission_buffer.clone())
                 .unwrap()
                 .add_image(self.target_image.clone())
+                .unwrap()
+                .add_sampled_image(blue_noise.clone(), blue_noise_sampler.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
