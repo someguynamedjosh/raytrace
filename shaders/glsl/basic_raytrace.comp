@@ -14,6 +14,7 @@ layout(set = 0, binding = 8) uniform sampler2D blue_noise;
 layout(set = 0, binding = 9, rgba16_snorm) uniform readonly image2D old_lighting_buffer;
 layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
 layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
+layout(set = 0, binding = 12, rgba8_snorm) uniform writeonly image2D fog_color_buffer;
 
 layout(push_constant) uniform PushData {
     vec3 origin, forward, up, right;
@@ -587,5 +588,10 @@ void main() {
         emission_buffer,
         ivec2(gl_GlobalInvocationID.xy),
         primary.value == 0 ? vec4(0.0) : vec4(get_material_emission(primary.value) / 4.0, 1.0)
+    );
+    imageStore(
+      fog_color_buffer,
+      ivec2(gl_GlobalInvocationID.xy), 
+      vec4(skylight, 1.0)
     );
 }

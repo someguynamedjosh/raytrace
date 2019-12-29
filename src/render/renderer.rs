@@ -278,6 +278,7 @@ impl<'a> RenderBuilder<'a> {
         let old_depth_buffer = self.make_render_buffer(rbuf_size, Format::R16Uint);
         let normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
         let old_normal_buffer = self.make_render_buffer(rbuf_size, Format::R8Uint);
+        let fog_color_buffer = self.make_render_buffer(rbuf_size, Format::R8G8B8A8Unorm);
 
         let (blue_noise, blue_noise_sampler) = self.load_blue_noise();
 
@@ -318,6 +319,8 @@ impl<'a> RenderBuilder<'a> {
                 .add_image(old_depth_buffer.clone())
                 .unwrap()
                 .add_image(old_normal_buffer.clone())
+                .unwrap()
+                .add_image(fog_color_buffer.clone())
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -374,9 +377,13 @@ impl<'a> RenderBuilder<'a> {
                 .unwrap()
                 .add_image(emission_buffer.clone())
                 .unwrap()
-                .add_image(self.target_image.clone())
+                .add_image(depth_buffer.clone())
+                .unwrap()
+                .add_image(fog_color_buffer.clone())
                 .unwrap()
                 .add_sampled_image(blue_noise.clone(), blue_noise_sampler.clone())
+                .unwrap()
+                .add_image(self.target_image.clone())
                 .unwrap()
                 .build()
                 .unwrap(),

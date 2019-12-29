@@ -5,8 +5,10 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, rgba16_snorm) uniform image2D lighting_buffer;
 layout(set = 0, binding = 1, rgba8_snorm) uniform image2D albedo_buffer;
 layout(set = 0, binding = 2, rgba8_snorm) uniform image2D emission_buffer;
-layout(set = 0, binding = 3, rgba8_snorm) uniform writeonly image2D final_output;
-layout(set = 0, binding = 4) uniform sampler2D blue_noise;
+layout(set = 0, binding = 3, r16ui) uniform uimage2D depth_buffer;
+layout(set = 0, binding = 4, rgba8_snorm) uniform image2D fog_color_buffer;
+layout(set = 0, binding = 5) uniform sampler2D blue_noise;
+layout(set = 0, binding = 6, rgba8_snorm) uniform writeonly image2D final_output;
 
 const uint NOISE_SIZE = 512;
 
@@ -29,6 +31,11 @@ void main() {
     vec3 albedo_color = imageLoad(albedo_buffer, pixel).rgb;
     vec3 emission_color = imageLoad(emission_buffer, pixel).rgb * 4.0;
     vec3 final_color = albedo_color * light_color + emission_color;
+
+    vec3 fog_color = imageLoad(fog_color_buffer, pixel).rgb;
+    float fog_amount = imageLoad(depth_buffer, pixel).r / 256.0 / 128.0;
+    if (fog_amount > 1.0) fog_amount = 1.0;
+    final_color = final_color * (1 - fog_amount) + fog_color * fog_amount;
 
     final_color.r = filmic_curve(final_color.r);
     final_color.g = filmic_curve(final_color.g);
