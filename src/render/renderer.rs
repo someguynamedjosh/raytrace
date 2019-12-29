@@ -1,4 +1,4 @@
-use cgmath::{Rad, Vector3, Matrix3, SquareMatrix, Zero};
+use cgmath::{Matrix3, Rad, SquareMatrix, Vector3, Zero};
 
 use image::{GenericImageView, ImageFormat};
 
@@ -17,7 +17,6 @@ use std::sync::Arc;
 use super::constants::*;
 use crate::game::Game;
 use crate::util;
-use crate::world::WorldChunk;
 use shaders::{
     self, BasicRaytraceShaderLayout, BilateralDenoisePushData, BilateralDenoiseShaderLayout,
     FinalizeShaderLayout, RaytracePushData,
@@ -165,13 +164,7 @@ impl<'a> RenderBuilder<'a> {
         let region_map_data = CpuAccessibleBuffer::from_iter(
             self.device.clone(),
             BufferUsage::all(),
-            (0..ROOT_REGION_VOLUME as usize).map(|i| {
-                if world.regions[i] {
-                    1
-                } else {
-                    EMPTY_CHUNK_INDEX
-                }
-            }),
+            (0..ROOT_REGION_VOLUME as usize).map(|_| 1),
         )
         .unwrap();
 
@@ -509,11 +502,44 @@ impl Renderer {
                 },
             )
             .unwrap()
-            .copy_image(self.depth_buffer.clone(), [0, 0, 0], 0, 0, self.old_depth_buffer.clone(), [0, 0, 0], 0, 0, [512, 512, 1], 1)
+            .copy_image(
+                self.depth_buffer.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                self.old_depth_buffer.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                [512, 512, 1],
+                1,
+            )
             .unwrap()
-            .copy_image(self.lighting_buffer.clone(), [0, 0, 0], 0, 0, self.old_lighting_buffer.clone(), [0, 0, 0], 0, 0, [512, 512, 1], 1)
+            .copy_image(
+                self.lighting_buffer.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                self.old_lighting_buffer.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                [512, 512, 1],
+                1,
+            )
             .unwrap()
-            .copy_image(self.normal_buffer.clone(), [0, 0, 0], 0, 0, self.old_normal_buffer.clone(), [0, 0, 0], 0, 0, [512, 512, 1], 1)
+            .copy_image(
+                self.normal_buffer.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                self.old_normal_buffer.clone(),
+                [0, 0, 0],
+                0,
+                0,
+                [512, 512, 1],
+                1,
+            )
             .unwrap()
             .dispatch(
                 [self.target_width / 8, self.target_height / 8, 1],
@@ -558,75 +584,82 @@ impl Renderer {
         self.previous_screen_space_transform = {
             // The arguments are ordered weirdly, column increases from top to bottom.
             // Multiplying {screenx, screeny, depth} by this gets pixel position in world space.
-            let screen_to_world_space = Matrix3::from_cols(
-                right.clone(),
-                up.clone(),
-                forward.clone(),
-            );
+            let screen_to_world_space =
+                Matrix3::from_cols(right.clone(), up.clone(), forward.clone());
             // Inverting it gives us world space to screen space.
-            screen_to_world_space.invert().expect(
-                "Screen space vectors should cover entire coordinate space."
-            )
+            screen_to_world_space
+                .invert()
+                .expect("Screen space vectors should cover entire coordinate space.")
         };
         self.previous_camera_origin = camera.origin.clone();
-        
         completed_buffer
     }
 
-    pub fn read_feedback(&mut self, game: &Game) {
+    pub fn read_feedback(&mut self, game: &mut Game) {
         let mut chunk_map = self.chunk_map_data.write().unwrap();
         let mut region_map = self.region_map_data.write().unwrap();
         let mut current_buffer = 0;
-        for region_index in 0..ROOT_REGION_VOLUME as usize {
-            let region_content = region_map[region_index];
+        for region_index in 0..ROOT_REGION_VOLUME {
+            let region_content = region_map[region_index as usize];
             if region_content != REQUEST_LOAD_CHUNK_INDEX {
                 continue;
             }
-            let region_occupied = game.borrow_world().regions[region_index];
-            if !region_occupied {
-                region_map[region_index] = EMPTY_CHUNK_INDEX;
+            let region_coord = (
+                region_index % ROOT_REGION_WIDTH,
+                region_index / ROOT_REGION_WIDTH % ROOT_REGION_WIDTH,
+                region_index / ROOT_REGION_WIDTH / ROOT_REGION_WIDTH,
+            );
+            let possible_region = game.borrow_world_mut().borrow_region(region_coord);
+            let region_data = if let Some(data) = possible_region {
+                data
+            } else {
+                region_map[region_index as usize] = EMPTY_CHUNK_INDEX;
                 continue;
-            }
-            let rx = region_index % ROOT_REGION_WIDTH as usize;
-            let ry = region_index / ROOT_REGION_WIDTH as usize % ROOT_REGION_WIDTH as usize;
-            let rz = region_index / ROOT_REGION_WIDTH as usize / ROOT_REGION_WIDTH as usize;
-            let rx = rx * REGION_CHUNK_WIDTH as usize;
-            let ry = ry * REGION_CHUNK_WIDTH as usize;
-            let rz = rz * REGION_CHUNK_WIDTH as usize;
-            let offset = (rz * ROOT_CHUNK_WIDTH as usize + ry) * ROOT_CHUNK_WIDTH as usize + rx;
-            for x in 0..REGION_CHUNK_WIDTH as usize {
-                for y in 0..REGION_CHUNK_WIDTH as usize {
-                    for z in 0..REGION_CHUNK_WIDTH as usize {
-                        let chunk_index = (z * ROOT_CHUNK_WIDTH as usize + y)
-                            * ROOT_CHUNK_WIDTH as usize
-                            + x
-                            + offset;
-                        if chunk_map[chunk_index] != REQUEST_LOAD_CHUNK_INDEX {
-                            continue;
-                        }
-                        if let WorldChunk::Occupied(chunk) =
-                            &game.borrow_world().chunks[chunk_index]
-                        {
-                            chunk_map[chunk_index] = self.chunk_upload_index;
-                            self.upload_destinations.push(self.chunk_upload_index);
-                            self.chunk_upload_index += 1;
-                            let mut upload_buffer =
-                                self.upload_buffers[current_buffer].write().unwrap();
-                            for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
-                                upload_buffer[block_index] = chunk.block_data[block_index];
-                            }
-                            current_buffer += 1;
-                            if current_buffer == NUM_UPLOAD_BUFFERS {
-                                println!("Uploaded {} chunks.", current_buffer);
-                                return;
-                            }
-                        } else {
-                            chunk_map[chunk_index] = EMPTY_CHUNK_INDEX;
-                        }
-                    }
+            };
+            region_map[region_index as usize] = 1;
+            let chunk_coord = (
+                region_coord.0 * REGION_CHUNK_WIDTH,
+                region_coord.1 * REGION_CHUNK_WIDTH,
+                region_coord.2 * REGION_CHUNK_WIDTH,
+            );
+            // The index of the first chunk in the region.
+            let region_offset = (chunk_coord.2 * ROOT_CHUNK_WIDTH + chunk_coord.1)
+                * ROOT_CHUNK_WIDTH
+                + chunk_coord.0;
+            let coord_iter = 0..REGION_CHUNK_WIDTH;
+            let coord_iter = coord_iter.flat_map(|x| (0..REGION_CHUNK_WIDTH).map(move |y| (x, y)));
+            let coord_iter =
+                coord_iter.flat_map(|xy| (0..REGION_CHUNK_WIDTH).map(move |z| (xy.0, xy.1, z)));
+            for local_coord in coord_iter {
+                let local_index = (local_coord.2 * REGION_CHUNK_WIDTH + local_coord.1)
+                    * REGION_CHUNK_WIDTH 
+                    + local_coord.0;
+                let global_index = (local_coord.2 * ROOT_CHUNK_WIDTH + local_coord.1)
+                    * ROOT_CHUNK_WIDTH
+                    + local_coord.0
+                    + region_offset;
+                if chunk_map[global_index as usize] != REQUEST_LOAD_CHUNK_INDEX {
+                    continue;
+                }
+                let chunk_data = if let Some(data) = &region_data.chunks[local_index as usize] {
+                    data
+                } else {
+                    chunk_map[global_index as usize] = EMPTY_CHUNK_INDEX;
+                    continue;
+                };
+                chunk_map[global_index as usize] = self.chunk_upload_index;
+                self.upload_destinations.push(self.chunk_upload_index);
+                self.chunk_upload_index += 1;
+                let mut upload_buffer = self.upload_buffers[current_buffer].write().unwrap();
+                for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
+                    upload_buffer[block_index] = chunk_data.block_data[block_index];
+                }
+                current_buffer += 1;
+                if current_buffer == NUM_UPLOAD_BUFFERS {
+                    println!("Uploaded {} chunks.", current_buffer);
+                    return;
                 }
             }
-            region_map[region_index] = 1;
         }
         println!("Uploaded {} chunks.", current_buffer);
     }

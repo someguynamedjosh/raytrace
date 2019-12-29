@@ -3,7 +3,7 @@ use winit::VirtualKeyCode;
 
 use crate::render::Camera;
 use crate::util;
-use crate::world::World;
+use crate::world::{self, World};
 
 use std::env;
 
@@ -38,7 +38,7 @@ impl Game {
         let args: Vec<_> = env::args().collect();
         let mut result = Game {
             camera: Camera::new(),
-            world: World::new(),
+            world: world::make_world(),
             controls: Self::make_controls(),
             sun_angle: 0.0,
         };
@@ -102,6 +102,10 @@ impl Game {
 
     pub fn borrow_world(&self) -> &World {
         &self.world
+    }
+
+    pub fn borrow_world_mut(&mut self) -> &mut World {
+        &mut self.world
     }
 
     pub fn borrow_camera(&self) -> &Camera {

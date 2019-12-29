@@ -231,7 +231,7 @@ fn main() {
             }
         }
 
-        renderer.read_feedback(&game);
+        renderer.read_feedback(&mut game);
 
         total_frame_time += (dt * 1000.0) as i64;
         total_frames += 1;

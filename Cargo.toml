@@ -16,4 +16,5 @@ winit = "0.19"
 time = "0.1.42"
 noise = "0.6.0"
 rand = "0.7.2"
+array-macro = "1.0.4"
 shaders = { path = "shaders" }
