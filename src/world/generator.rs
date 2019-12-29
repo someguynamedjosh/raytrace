@@ -1,6 +1,7 @@
-use crate::render::constants::*;
-use crate::world::Region;
 use super::functions;
+use crate::render::constants::*;
+use crate::util;
+use crate::world::Region;
 
 use rand::{self, prelude::*};
 
@@ -13,9 +14,8 @@ pub fn generate(region: &mut Region, position: (u32, u32, u32)) -> bool {
     );
     let mountain_noise = functions::MountainNoise::new();
     let mut random = rand::thread_rng();
-    let height = |x, y| {
-        (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as u32
-    };
+    let height =
+        |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as u32;
     let material = |random: &mut ThreadRng, height| {
         if height < 12 {
             1
@@ -41,17 +41,14 @@ pub fn generate(region: &mut Region, position: (u32, u32, u32)) -> bool {
     };
 
     let mut not_empty = false;
-
-    for x in 0..REGION_BLOCK_WIDTH {
-        for y in 0..REGION_BLOCK_WIDTH {
-            let height = height(x + offset.0, y + offset.1);
-            if height > offset.2 {
-                let height = height - offset.2;
-                for z in 0..height.min(REGION_BLOCK_WIDTH) {
-                    region.set_block((x, y, z), material(&mut random, z + offset.2));
-                }
-                not_empty = true;
+    for (x, y) in util::coord_iter_2d(REGION_BLOCK_WIDTH) {
+        let height = height(x + offset.0, y + offset.1);
+        if height > offset.2 {
+            let height = height - offset.2;
+            for z in 0..height.min(REGION_BLOCK_WIDTH) {
+                region.set_block((x, y, z), material(&mut random, z + offset.2));
             }
+            not_empty = true;
         }
     }
 

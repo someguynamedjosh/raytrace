@@ -604,11 +604,7 @@ impl Renderer {
             if region_content != REQUEST_LOAD_CHUNK_INDEX {
                 continue;
             }
-            let region_coord = (
-                region_index % ROOT_REGION_WIDTH,
-                region_index / ROOT_REGION_WIDTH % ROOT_REGION_WIDTH,
-                region_index / ROOT_REGION_WIDTH / ROOT_REGION_WIDTH,
-            );
+            let region_coord = util::index_to_coord_3d(region_index, ROOT_REGION_WIDTH);
             let possible_region = game.borrow_world_mut().borrow_region(region_coord);
             let region_data = if let Some(data) = possible_region {
                 data
@@ -617,27 +613,12 @@ impl Renderer {
                 continue;
             };
             region_map[region_index as usize] = 1;
-            let chunk_coord = (
-                region_coord.0 * REGION_CHUNK_WIDTH,
-                region_coord.1 * REGION_CHUNK_WIDTH,
-                region_coord.2 * REGION_CHUNK_WIDTH,
-            );
+            let chunk_coord = util::scale_coord_3d(&region_coord, REGION_CHUNK_WIDTH);
             // The index of the first chunk in the region.
-            let region_offset = (chunk_coord.2 * ROOT_CHUNK_WIDTH + chunk_coord.1)
-                * ROOT_CHUNK_WIDTH
-                + chunk_coord.0;
-            let coord_iter = 0..REGION_CHUNK_WIDTH;
-            let coord_iter = coord_iter.flat_map(|x| (0..REGION_CHUNK_WIDTH).map(move |y| (x, y)));
-            let coord_iter =
-                coord_iter.flat_map(|xy| (0..REGION_CHUNK_WIDTH).map(move |z| (xy.0, xy.1, z)));
-            for local_coord in coord_iter {
-                let local_index = (local_coord.2 * REGION_CHUNK_WIDTH + local_coord.1)
-                    * REGION_CHUNK_WIDTH 
-                    + local_coord.0;
-                let global_index = (local_coord.2 * ROOT_CHUNK_WIDTH + local_coord.1)
-                    * ROOT_CHUNK_WIDTH
-                    + local_coord.0
-                    + region_offset;
+            let region_offset = util::coord_to_index_3d(&chunk_coord, ROOT_CHUNK_WIDTH);
+            for local_coord in util::coord_iter_3d(REGION_CHUNK_WIDTH) {
+                let local_index = util::coord_to_index_3d(&local_coord, REGION_CHUNK_WIDTH);
+                let global_index = util::coord_to_index_3d(&local_coord, ROOT_CHUNK_WIDTH) + region_offset;
                 if chunk_map[global_index as usize] != REQUEST_LOAD_CHUNK_INDEX {
                     continue;
                 }
