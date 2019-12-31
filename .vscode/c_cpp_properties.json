@@ -1,0 +1,10 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": ["/home/josh/Workspace/vulkan-sdk-1.1.130.0/x86_64/include/vulkan/**"],
+            "compilerPath": "/usr/bin/gcc"
+        }
+    ],
+    "version": 4
+}

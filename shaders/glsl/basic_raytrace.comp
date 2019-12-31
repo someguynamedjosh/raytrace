@@ -143,7 +143,7 @@ GENERATE_FUNCTIONS(perform_chunk_trace, PERFORM_CHUNK_TRACE)
     chunk_coord.AXIS += step.AXIS; \
     total_step = next_chunk_distance.AXIS; \
     if (chunk_coord.AXIS == region_exit_planes.AXIS) { break; } \
-    offset_chunk_coord = (chunk_coord + region_offset * ivec3(REGION_CHUNK_WIDTH)) % ivec3(ROOT_CHUNK_WIDTH); \
+    offset_chunk_coord = (chunk_coord + push_data.region_offset * ivec3(REGION_CHUNK_WIDTH)) % ivec3(ROOT_CHUNK_WIDTH); \
     chunk_index = imageLoad(chunk_map, offset_chunk_coord).r; \
     if (chunk_index == UNLOADED_CHUNK_INDEX) { \
         imageStore(region_map, offset_region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
@@ -194,7 +194,7 @@ GENERATE_FUNCTIONS(perform_chunk_trace, PERFORM_CHUNK_TRACE)
     } \
     next_chunk_distance += vec3(total_step); \
     \
-    offset_chunk_coord = (chunk_coord + region_offset * ivec3(REGION_CHUNK_WIDTH)) % ivec3(ROOT_CHUNK_WIDTH); \
+    offset_chunk_coord = (chunk_coord + push_data.region_offset * ivec3(REGION_CHUNK_WIDTH)) % ivec3(ROOT_CHUNK_WIDTH); \
     chunk_index = imageLoad(chunk_map, offset_chunk_coord).r; \
     if (chunk_index == UNLOADED_CHUNK_INDEX) { \
         imageStore(chunk_map, offset_chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
@@ -232,7 +232,7 @@ GENERATE_FUNCTIONS(perform_region_trace, PERFORM_REGION_TRACE)
     region_coord.AXIS += step.AXIS; \
     total_step = next_region_distance.AXIS; \
     if (region_coord.AXIS < 0 || region_coord.AXIS == ROOT_REGION_WIDTH) { break; } \
-    offset_region_coord = (region_coord + region_offset) % ivec3(ROOT_REGION_WIDTH); \
+    offset_region_coord = (region_coord + push_data.region_offset) % ivec3(ROOT_REGION_WIDTH); \
     region_content = imageLoad(region_map, offset_region_coord).r; \
     if (region_content != EMPTY_CHUNK_INDEX) { \
         perform_region_trace_##AXIS (); \
@@ -279,7 +279,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     }
 
     result.value = 0;
-    offset_region_coord = (region_coord + region_offset) % ivec3(ROOT_REGION_WIDTH); \
+    offset_region_coord = (region_coord + push_data.region_offset) % ivec3(ROOT_REGION_WIDTH); \
     region_content = imageLoad(region_map, offset_region_coord).r;
     if (region_content != EMPTY_CHUNK_INDEX) {
         do { perform_region_trace_x(); } while (false);
