@@ -15,14 +15,14 @@ layout(set = 0, binding = 9, rgba16_snorm) uniform readonly image2D old_lighting
 layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
 layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
 layout(set = 0, binding = 12, rgba8_snorm) uniform writeonly image2D fog_color_buffer;
-
-layout(push_constant) uniform PushData {
+layout(set = 0, binding = 13) uniform PushData {
     vec3 origin, forward, up, right;
     // For some reason doing mat3 still loads 16 elements but the rust bindings give it 9, making
     // the whole thing go out of order. So transmit each individual column instead.
     vec3 old_origin, old_transform_c0, old_transform_c1, old_transform_c2;
     float sun_angle;
     uint seed;
+    ivec3 region_offset;
 } push_data;
 
 const uint CHUNK_BLOCK_WIDTH = 8;
@@ -71,7 +71,7 @@ vec3 block_advance_amount, chunk_advance_amount, region_advance_amount;
 vec2 noise_offset;
 vec4 noise_value;
 uint chunk_index, region_content;
-ivec3 region_offset = ivec3(0, 0, 0), offset_region_coord, offset_chunk_coord;
+ivec3 offset_region_coord, offset_chunk_coord;
 
 #define GENERATE_FUNCTIONS(PREFIX, MACRO) \
     void PREFIX##_x() { MACRO(x) } \
