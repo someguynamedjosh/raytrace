@@ -605,7 +605,11 @@ impl Renderer {
                 continue;
             }
             let region_coord = util::index_to_coord_3d(region_index, ROOT_REGION_WIDTH);
-            let possible_region = game.borrow_world_mut().borrow_region(region_coord);
+            let possible_region = game.borrow_world_mut().borrow_region((
+                region_coord.0 + 10,
+                region_coord.1 + 10,
+                region_coord.2,
+            ));
             let region_data = if let Some(data) = possible_region {
                 data
             } else {
