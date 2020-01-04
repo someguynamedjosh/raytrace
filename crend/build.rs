@@ -5,11 +5,15 @@ fn main() {
         Ok(path) => {
             let sdk_path = std::path::Path::new(&path);
             builder.include(sdk_path.join("include/vulkan"));
-        },
-        Err(_) => println!("Warning: $VULKAN_SDK is blank.")
+            println!(
+                "cargo:rustc-link-search={}",
+                sdk_path.join("lib").to_str().unwrap()
+            );
+        }
+        Err(_) => println!("Warning: $VULKAN_SDK is blank."),
     }
 
-    builder
-        .file("main.c")
-        .compile("crend");
+    println!("cargo:rustc-link-lib=vulkan");
+
+    builder.file("main.c").compile("crend");
 }

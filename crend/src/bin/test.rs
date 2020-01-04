@@ -15,7 +15,7 @@ fn main() {
         .get_required_instance_extensions()
         .unwrap_or_default();
     
-    crend::init(&required_extensions);
+    let renderer = crend::Renderer::new(&required_extensions);
 
     while !window.should_close() {
         glfw_instance.poll_events();
