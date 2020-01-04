@@ -6,7 +6,7 @@ use std::os::raw::c_void;
 use std::ptr;
 
 use super::constants::*;
-use super::utility;
+use super::util;
 
 unsafe extern "system" fn vulkan_debug_utils_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -51,7 +51,7 @@ pub fn check_validation_layer_support(
         let mut is_layer_found = false;
 
         for layer_property in layer_properties.iter() {
-            let test_layer_name = utility::convert_raw_cstring(&layer_property.layer_name);
+            let test_layer_name = util::convert_raw_cstring(&layer_property.layer_name);
             if (*required_layer_name) == test_layer_name {
                 is_layer_found = true;
                 break;

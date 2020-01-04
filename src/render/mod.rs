@@ -7,8 +7,9 @@ use winit::window::{Window, WindowBuilder};
 
 pub(self) mod constants;
 pub(self) mod debug;
+pub(self) mod init;
 pub(self) mod platform_specific;
-pub(self) mod utility;
+pub(self) mod util;
 
 use constants::*;
 
@@ -23,13 +24,13 @@ pub struct VulkanApp {
     device: ash::Device,
     _graphics_queue: vk::Queue,
     _present_queue: vk::Queue,
-    window: Box<Window>,
+    _window: Box<Window>,
 }
 
 impl VulkanApp {
     pub fn new(event_loop: &EventLoop<()>) -> VulkanApp {
         let entry = ash::Entry::new().unwrap();
-        let instance = utility::create_instance(&entry, WINDOW_TITLE);
+        let instance = init::create_instance(&entry, WINDOW_TITLE);
         let (debug_utils_loader, debug_merssager) = debug::setup_debug_utils(&entry, &instance);
         let window = WindowBuilder::new()
             .with_title(WINDOW_TITLE)
@@ -37,10 +38,10 @@ impl VulkanApp {
             .build(event_loop)
             .expect("Failed to create window.");
         let window = Box::new(window);
-        let surface_info = utility::create_surface(&entry, &instance, &window);
+        let surface_info = init::create_surface(&entry, &instance, &window);
         let extensions = vec![];
-        let physical_device = utility::pick_physical_device(&instance, &surface_info, &extensions);
-        let (device, family_indices) = utility::create_logical_device(
+        let physical_device = init::pick_physical_device(&instance, &surface_info, &extensions);
+        let (device, family_indices) = init::create_logical_device(
             &instance,
             physical_device,
             &extensions,
@@ -63,11 +64,11 @@ impl VulkanApp {
             device,
             _graphics_queue: graphics_queue,
             _present_queue: present_queue,
-            window,
+            _window: window,
         }
     }
 
-    fn draw_frame(&mut self) {
+    pub fn draw_frame(&mut self) {
         // Drawing will be here
     }
 }
@@ -115,13 +116,3 @@ impl VulkanApp {
         })
     }
 }
-
-// fn main() {
-//     let event_loop = EventLoop::new();
-//     let window =
-//         utility::init_window(&event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
-
-//     let vulkan_app = VulkanApp::new(&window);
-//     vulkan_app.main_loop(event_loop);
-// }
-// -------------------------------------------------------------------------------------------

@@ -3,20 +3,42 @@ use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
 use ash::vk;
 
-use std::ffi::{CStr, CString};
+use std::ffi::{CString};
 use std::os::raw::c_char;
 use std::os::raw::c_void;
-use std::path::Path;
 use std::ptr;
 
-use super::{constants::*, debug, platform_specific};
+use super::{constants::*, debug, platform_specific, util};
 
-pub fn convert_raw_cstring(raw_cstring: &[c_char]) -> String {
-    let cstring = unsafe { CStr::from_ptr(raw_cstring.as_ptr()) };
-    cstring
-        .to_str()
-        .expect("Failed to convert C string.")
-        .to_owned()
+pub struct SurfaceInfo {
+    pub surface_loader: ash::extensions::khr::Surface,
+    pub surface: vk::SurfaceKHR,
+}
+
+#[derive(Default)]
+pub struct QueueFamilyIndices {
+    pub compute: Option<u32>,
+    pub present: Option<u32>,
+}
+
+impl QueueFamilyIndices {
+    fn is_complete(&self) -> bool {
+        self.compute.is_some() && self.present.is_some()
+    }
+}
+
+pub struct SwapChainSupportInfo {
+    pub capabilities: vk::SurfaceCapabilitiesKHR,
+    pub formats: Vec<vk::SurfaceFormatKHR>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
+}
+
+pub struct SwapChainInfo {
+    pub swapchain_loader: ash::extensions::khr::Swapchain,
+    pub swapchain: vk::SwapchainKHR,
+    pub swapchain_images: Vec<vk::Image>,
+    pub swapchain_format: vk::Format,
+    pub swapchain_extent: vk::Extent2D,
 }
 
 pub fn create_instance(entry: &ash::Entry, window_title: &str) -> ash::Instance {
@@ -82,11 +104,6 @@ pub fn create_instance(entry: &ash::Entry, window_title: &str) -> ash::Instance 
     instance
 }
 
-pub struct SurfaceInfo {
-    pub surface_loader: ash::extensions::khr::Surface,
-    pub surface: vk::SurfaceKHR,
-}
-
 pub fn create_surface(
     entry: &ash::Entry,
     instance: &ash::Instance,
@@ -145,8 +162,6 @@ pub fn is_physical_device_suitable(
     surface_info: &SurfaceInfo,
     required_device_extensions: &[&str],
 ) -> bool {
-    let device_features = unsafe { instance.get_physical_device_features(physical_device) };
-
     let indices = find_queue_family(instance, physical_device, surface_info);
 
     let is_queue_family_supported = indices.is_complete();
@@ -158,24 +173,10 @@ pub fn is_physical_device_suitable(
     } else {
         false
     };
-    let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
 
-    return is_queue_family_supported
+    is_queue_family_supported
         && is_device_extension_supported
         && is_swapchain_supported
-        && is_support_sampler_anisotropy;
-}
-
-#[derive(Default)]
-pub struct QueueFamilyIndices {
-    pub compute: Option<u32>,
-    pub present: Option<u32>,
-}
-
-impl QueueFamilyIndices {
-    fn is_complete(&self) -> bool {
-        self.compute.is_some() && self.present.is_some()
-    }
 }
 
 pub fn create_logical_device(
@@ -310,7 +311,7 @@ pub fn check_device_extension_support(
     let mut available_extension_names = vec![];
 
     for extension in available_extensions.iter() {
-        let extension_name = convert_raw_cstring(&extension.extension_name);
+        let extension_name = util::convert_raw_cstring(&extension.extension_name);
 
         available_extension_names.push(extension_name);
     }
@@ -326,12 +327,6 @@ pub fn check_device_extension_support(
     }
 
     return required_extensions.is_empty();
-}
-
-pub struct SwapChainSupportInfo {
-    pub capabilities: vk::SurfaceCapabilitiesKHR,
-    pub formats: Vec<vk::SurfaceFormatKHR>,
-    pub present_modes: Vec<vk::PresentModeKHR>,
 }
 
 pub fn query_swapchain_support(
@@ -358,14 +353,6 @@ pub fn query_swapchain_support(
             present_modes,
         }
     }
-}
-
-pub struct SwapChainInfo {
-    pub swapchain_loader: ash::extensions::khr::Swapchain,
-    pub swapchain: vk::SwapchainKHR,
-    pub swapchain_images: Vec<vk::Image>,
-    pub swapchain_format: vk::Format,
-    pub swapchain_extent: vk::Extent2D,
 }
 
 pub fn create_swapchain(
