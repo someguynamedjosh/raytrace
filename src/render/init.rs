@@ -124,7 +124,6 @@ pub fn create_surface(
 pub fn pick_physical_device(
     instance: &ash::Instance,
     surface_info: &SurfaceInfo,
-    required_device_extensions: &[&str],
 ) -> vk::PhysicalDevice {
     let physical_devices = unsafe {
         instance
@@ -137,7 +136,6 @@ pub fn pick_physical_device(
             instance,
             **physical_device,
             surface_info,
-            required_device_extensions,
         );
 
         // TODO: Print device name.
@@ -160,13 +158,12 @@ pub fn is_physical_device_suitable(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
     surface_info: &SurfaceInfo,
-    required_device_extensions: &[&str],
 ) -> bool {
     let indices = find_queue_family(instance, physical_device, surface_info);
 
     let is_queue_family_supported = indices.is_complete();
     let is_device_extension_supported =
-        check_device_extension_support(instance, physical_device, required_device_extensions);
+        check_device_extension_support(instance, physical_device);
     let is_swapchain_supported = if is_device_extension_supported {
         let swapchain_support = query_swapchain_support(physical_device, surface_info);
         !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
@@ -182,7 +179,6 @@ pub fn is_physical_device_suitable(
 pub fn create_logical_device(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
-    device_extensions: &[&str],
     surface_info: &SurfaceInfo,
 ) -> (ash::Device, QueueFamilyIndices) {
     let indices = find_queue_family(instance, physical_device, surface_info);
@@ -217,7 +213,7 @@ pub fn create_logical_device(
         .map(|layer_name| layer_name.as_ptr())
         .collect();
     
-    let device_extension_cstrings: Vec<CString> = device_extensions
+    let device_extension_cstrings: Vec<CString> = DEVICE_EXTENSIONS 
         .iter()
         .map(|extension_name| CString::new(*extension_name).unwrap())
         .collect();
@@ -252,6 +248,10 @@ pub fn create_logical_device(
             .create_device(physical_device, &device_create_info, None)
             .expect("Failed to create logical Device!")
     };
+
+    if ENABLE_DEBUG {
+        println!("Validation layers enabled!");
+    }
 
     (device, indices)
 }
@@ -300,7 +300,6 @@ pub fn find_queue_family(
 pub fn check_device_extension_support(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
-    device_extensions: &[&str],
 ) -> bool {
     let available_extensions = unsafe {
         instance
@@ -318,7 +317,7 @@ pub fn check_device_extension_support(
 
     use std::collections::HashSet;
     let mut required_extensions = HashSet::new();
-    for extension in device_extensions.iter() {
+    for extension in DEVICE_EXTENSIONS.iter() {
         required_extensions.insert(extension.to_string());
     }
 
@@ -399,7 +398,7 @@ pub fn create_swapchain(
         image_color_space: surface_format.color_space,
         image_format: surface_format.format,
         image_extent: extent,
-        image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+        image_usage: vk::ImageUsageFlags::TRANSFER_DST,
         image_sharing_mode,
         p_queue_family_indices: queue_family_indices.as_ptr(),
         queue_family_index_count,
@@ -469,10 +468,6 @@ pub fn choose_swapchain_extent(
         use num::clamp;
 
         let window_size = window.inner_size();
-        println!(
-            "\t\tInner Window Size: ({}, {})",
-            window_size.width, window_size.height
-        );
 
         vk::Extent2D {
             width: clamp(
