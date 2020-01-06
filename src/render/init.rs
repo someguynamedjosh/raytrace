@@ -3,7 +3,7 @@ use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
 use ash::vk;
 
-use std::ffi::{CString};
+use std::ffi::CString;
 use std::os::raw::c_char;
 use std::os::raw::c_void;
 use std::ptr;
@@ -132,11 +132,7 @@ pub fn pick_physical_device(
     };
 
     let result = physical_devices.iter().find(|physical_device| {
-        let is_suitable = is_physical_device_suitable(
-            instance,
-            **physical_device,
-            surface_info,
-        );
+        let is_suitable = is_physical_device_suitable(instance, **physical_device, surface_info);
 
         // TODO: Print device name.
         // if is_suitable {
@@ -162,8 +158,7 @@ pub fn is_physical_device_suitable(
     let indices = find_queue_family(instance, physical_device, surface_info);
 
     let is_queue_family_supported = indices.is_complete();
-    let is_device_extension_supported =
-        check_device_extension_support(instance, physical_device);
+    let is_device_extension_supported = check_device_extension_support(instance, physical_device);
     let is_swapchain_supported = if is_device_extension_supported {
         let swapchain_support = query_swapchain_support(physical_device, surface_info);
         !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
@@ -171,9 +166,7 @@ pub fn is_physical_device_suitable(
         false
     };
 
-    is_queue_family_supported
-        && is_device_extension_supported
-        && is_swapchain_supported
+    is_queue_family_supported && is_device_extension_supported && is_swapchain_supported
 }
 
 pub fn create_logical_device(
@@ -212,8 +205,8 @@ pub fn create_logical_device(
         .iter()
         .map(|layer_name| layer_name.as_ptr())
         .collect();
-    
-    let device_extension_cstrings: Vec<CString> = DEVICE_EXTENSIONS 
+
+    let device_extension_cstrings: Vec<CString> = DEVICE_EXTENSIONS
         .iter()
         .map(|extension_name| CString::new(*extension_name).unwrap())
         .collect();
@@ -380,10 +373,7 @@ pub fn create_swapchain(
             (
                 vk::SharingMode::CONCURRENT,
                 2,
-                vec![
-                    queue_family.compute.unwrap(),
-                    queue_family.present.unwrap(),
-                ],
+                vec![queue_family.compute.unwrap(), queue_family.present.unwrap()],
             )
         } else {
             (vk::SharingMode::EXCLUSIVE, 0, vec![])

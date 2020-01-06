@@ -33,9 +33,7 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     vk::FALSE
 }
 
-pub fn check_validation_layer_support(
-    entry: &ash::Entry,
-) -> bool {
+pub fn check_validation_layer_support(entry: &ash::Entry) -> bool {
     // if support validation layer, then return true
 
     let layer_properties = entry

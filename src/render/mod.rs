@@ -42,16 +42,18 @@ impl VulkanApp {
         let window = Box::new(window);
         let surface_info = init::create_surface(&entry, &instance, &window);
         let physical_device = init::pick_physical_device(&instance, &surface_info);
-        let (device, family_indices) = init::create_logical_device(
+        let (device, family_indices) =
+            init::create_logical_device(&instance, physical_device, &surface_info);
+        let swapchain_info = init::create_swapchain(
             &instance,
+            &device,
             physical_device,
+            &window,
             &surface_info,
+            &family_indices,
         );
-        let swapchain_info = init::create_swapchain(&instance, &device, physical_device, &window, &surface_info, &family_indices);
-        let graphics_queue =
-            unsafe { device.get_device_queue(family_indices.compute.unwrap(), 0) };
-        let present_queue =
-            unsafe { device.get_device_queue(family_indices.present.unwrap(), 0) };
+        let graphics_queue = unsafe { device.get_device_queue(family_indices.compute.unwrap(), 0) };
+        let present_queue = unsafe { device.get_device_queue(family_indices.present.unwrap(), 0) };
 
         // cleanup(); the 'drop' function will take care of it.
         VulkanApp {
@@ -78,7 +80,9 @@ impl VulkanApp {
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
-            self.swapchain_info.swapchain_loader.destroy_swapchain(self.swapchain_info.swapchain, None);
+            self.swapchain_info
+                .swapchain_loader
+                .destroy_swapchain(self.swapchain_info.swapchain, None);
 
             self.device.destroy_device(None);
 
