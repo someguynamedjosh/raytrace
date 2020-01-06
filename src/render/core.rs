@@ -5,33 +5,32 @@ use ash::vk;
 use winit::event_loop::{EventLoop};
 use winit::window::{Window, WindowBuilder};
 
-use std::ffi::CString;
-use std::os::raw::c_char;
-use std::os::raw::c_void;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
 use std::ptr;
 
-use super::{constants::*, debug, platform_specific, util};
+use super::{constants::*, platform_specific, util};
 
 pub struct Core {
-    _entry: ash::Entry,
-    instance: ash::Instance,
-    surface_loader: ash::extensions::khr::Surface,
-    surface: vk::SurfaceKHR,
-    debug_utils_loader: ash::extensions::ext::DebugUtils,
-    debug_merssager: vk::DebugUtilsMessengerEXT,
-    _physical_device: vk::PhysicalDevice,
-    device: ash::Device,
-    swapchain_info: SwapChainInfo,
-    _compute_queue: vk::Queue,
-    _present_queue: vk::Queue,
-    _window: Box<Window>,
+    pub entry: ash::Entry,
+    pub instance: ash::Instance,
+    pub surface_loader: ash::extensions::khr::Surface,
+    pub surface: vk::SurfaceKHR,
+    pub debug_utils_loader: ash::extensions::ext::DebugUtils,
+    pub debug_merssager: vk::DebugUtilsMessengerEXT,
+    pub physical_device: vk::PhysicalDevice,
+    pub device: ash::Device,
+    pub swapchain_info: SwapChainInfo,
+    pub compute_queue: vk::Queue,
+    pub present_queue: vk::Queue,
+    pub window: Box<Window>,
 }
 
 impl Core {
     pub fn new(event_loop: &EventLoop<()>) -> Core {
         let entry = ash::Entry::new().unwrap();
         let instance = create_instance(&entry, WINDOW_TITLE);
-        let (debug_utils_loader, debug_merssager) = debug::setup_debug_utils(&entry, &instance);
+        let (debug_utils_loader, debug_merssager) = setup_debug_utils(&entry, &instance);
         let window = WindowBuilder::new()
             .with_title(WINDOW_TITLE)
             .with_inner_size((WINDOW_WIDTH, WINDOW_HEIGHT).into())
@@ -53,20 +52,19 @@ impl Core {
         let compute_queue = unsafe { device.get_device_queue(family_indices.compute.unwrap(), 0) };
         let present_queue = unsafe { device.get_device_queue(family_indices.present.unwrap(), 0) };
 
-        // cleanup(); the 'drop' function will take care of it.
         Core {
-            _entry: entry,
+            entry,
             instance,
             surface: surface_info.surface,
             surface_loader: surface_info.surface_loader,
             debug_utils_loader,
             debug_merssager,
-            _physical_device: physical_device,
+            physical_device,
             device,
             swapchain_info,
-            _compute_queue: compute_queue,
-            _present_queue: present_queue,
-            _window: window,
+            compute_queue,
+            present_queue,
+            window,
         }
     }
 
@@ -86,6 +84,101 @@ impl Core {
             }
             self.instance.destroy_instance(None);
         }
+    }
+}
+
+unsafe extern "system" fn vulkan_debug_utils_callback(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _p_user_data: *mut c_void,
+) -> vk::Bool32 {
+    let severity = match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[Verbose]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[Warning]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[Error]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[Info]",
+        _ => "[Unknown]",
+    };
+    let types = match message_type {
+        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[General]",
+        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[Performance]",
+        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[Validation]",
+        _ => "[Unknown]",
+    };
+    let message = CStr::from_ptr((*p_callback_data).p_message);
+    println!("[Debug]{}{}{:?}", severity, types, message);
+
+    vk::FALSE
+}
+
+pub fn check_validation_layer_support(entry: &ash::Entry) -> bool {
+    // if support validation layer, then return true
+
+    let layer_properties = entry
+        .enumerate_instance_layer_properties()
+        .expect("Failed to enumerate Instance Layers Properties");
+
+    if layer_properties.len() <= 0 {
+        eprintln!("No available layers.");
+        return false;
+    }
+
+    for required_layer_name in VALIDATION_LAYERS.iter() {
+        let mut is_layer_found = false;
+
+        for layer_property in layer_properties.iter() {
+            let test_layer_name = util::convert_raw_cstring(&layer_property.layer_name);
+            if (*required_layer_name) == test_layer_name {
+                is_layer_found = true;
+                break;
+            }
+        }
+
+        if is_layer_found == false {
+            return false;
+        }
+    }
+
+    true
+}
+
+pub fn setup_debug_utils(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+) -> (ash::extensions::ext::DebugUtils, vk::DebugUtilsMessengerEXT) {
+    let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
+
+    if ENABLE_DEBUG {
+        let messenger_ci = build_debug_utils_create_info();
+
+        let utils_messenger = unsafe {
+            debug_utils_loader
+                .create_debug_utils_messenger(&messenger_ci, None)
+                .expect("Debug Utils Callback")
+        };
+
+        (debug_utils_loader, utils_messenger)
+    } else {
+        (debug_utils_loader, ash::vk::DebugUtilsMessengerEXT::null())
+    }
+}
+
+pub fn build_debug_utils_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
+    vk::DebugUtilsMessengerCreateInfoEXT {
+        s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        p_next: ptr::null(),
+        flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
+        // TODO: Maybe command line flags to turn these on / off?
+        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+        pfn_user_callback: Some(vulkan_debug_utils_callback),
+        p_user_data: ptr::null_mut(),
     }
 }
 
@@ -121,7 +214,7 @@ pub struct SwapChainInfo {
 }
 
 pub fn create_instance(entry: &ash::Entry, window_title: &str) -> ash::Instance {
-    if ENABLE_DEBUG && !debug::check_validation_layer_support(entry) {
+    if ENABLE_DEBUG && !check_validation_layer_support(entry) {
         panic!("Validation layers requested, but not available!");
     }
 
@@ -138,7 +231,7 @@ pub fn create_instance(entry: &ash::Entry, window_title: &str) -> ash::Instance 
     };
 
     // This create info used to debug issues in vk::createInstance and vk::destroyInstance.
-    let debug_utils_create_info = debug::build_debug_utils_create_info();
+    let debug_utils_create_info = build_debug_utils_create_info();
 
     let extension_names = platform_specific::required_extension_names();
 
