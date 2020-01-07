@@ -2,7 +2,7 @@ use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
 use ash::vk;
-use winit::event_loop::{EventLoop};
+use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
 use std::ffi::{CStr, CString};
@@ -11,9 +11,11 @@ use std::ptr;
 
 use super::{constants::*, platform_specific, util};
 
+// TODO: Organize these members.
 pub struct Core {
     pub entry: ash::Entry,
     pub instance: ash::Instance,
+    pub queue_family_indices: QueueFamilyIndices,
     pub surface_loader: ash::extensions::khr::Surface,
     pub surface: vk::SurfaceKHR,
     pub debug_utils_loader: ash::extensions::ext::DebugUtils,
@@ -39,7 +41,7 @@ impl Core {
         let window = Box::new(window);
         let surface_info = create_surface(&entry, &instance, &window);
         let physical_device = pick_physical_device(&instance, &surface_info);
-        let (device, family_indices) =
+        let (device, queue_family_indices) =
             create_logical_device(&instance, physical_device, &surface_info);
         let swapchain_info = create_swapchain(
             &instance,
@@ -47,14 +49,17 @@ impl Core {
             physical_device,
             &window,
             &surface_info,
-            &family_indices,
+            &queue_family_indices,
         );
-        let compute_queue = unsafe { device.get_device_queue(family_indices.compute.unwrap(), 0) };
-        let present_queue = unsafe { device.get_device_queue(family_indices.present.unwrap(), 0) };
+        let compute_queue =
+            unsafe { device.get_device_queue(queue_family_indices.compute.unwrap(), 0) };
+        let present_queue =
+            unsafe { device.get_device_queue(queue_family_indices.present.unwrap(), 0) };
 
         Core {
             entry,
             instance,
+            queue_family_indices,
             surface: surface_info.surface,
             surface_loader: surface_info.surface_loader,
             debug_utils_loader,
@@ -281,7 +286,6 @@ pub fn create_surface(
     instance: &ash::Instance,
     window: &winit::window::Window,
 ) -> SurfaceInfo {
-    
     let surface = unsafe {
         platform_specific::create_surface(entry, instance, window)
             .expect("Failed to create surface.")
