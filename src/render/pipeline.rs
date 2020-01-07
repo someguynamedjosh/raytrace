@@ -1,10 +1,13 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
 
+use std::ffi::CString;
+
 use super::constants::*;
 use super::core::Core;
 
 pub struct Pipeline {
+    test_pipeline: vk::Pipeline,
     _command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     frame_available_semaphores: Vec<vk::Semaphore>,
@@ -16,13 +19,15 @@ pub struct Pipeline {
 
 impl Pipeline {
     pub fn new(core: &Core) -> Pipeline {
+        let test_pipeline = create_test_pipeline(core);
         let command_pool = create_command_pool(core);
-        let command_buffers = create_command_buffers(core, command_pool);
+        let command_buffers = create_command_buffers(core, command_pool, test_pipeline);
         let (frame_available_semaphores, frame_complete_semaphores) = create_semaphores(core);
         let frame_complete_fences = create_fences(core);
         let swapchain_size = core.swapchain_info.swapchain_images.len();
         let swapchain_image_available_fences = (0..swapchain_size).map(|_| None).collect();
         Pipeline {
+            test_pipeline,
             _command_pool: command_pool,
             command_buffers,
             frame_available_semaphores,
@@ -123,18 +128,27 @@ fn create_command_pool(core: &Core) -> vk::CommandPool {
     }
 }
 
-fn create_command_buffers(core: &Core, command_pool: vk::CommandPool) -> Vec<vk::CommandBuffer> {
+fn create_command_buffers(core: &Core, command_pool: vk::CommandPool, pipeline: vk::Pipeline) -> Vec<vk::CommandBuffer> {
     let allocate_info = vk::CommandBufferAllocateInfo {
         command_buffer_count: core.swapchain_info.swapchain_images.len() as u32,
         command_pool,
         level: vk::CommandBufferLevel::PRIMARY,
         ..Default::default()
     };
-    unsafe {
+    let buffers = unsafe {
         core.device
             .allocate_command_buffers(&allocate_info)
             .expect("Failed to allocate command buffers.")
+    };
+
+    unsafe {
+        for (index, buffer) in buffers.iter().enumerate() {
+            core.device.cmd_bind_pipeline(*buffer, vk::PipelineBindPoint::COMPUTE, pipeline);
+            core.device.cmd_dispatch(*buffer, 30, 30, 1);
+        }
     }
+
+    buffers
 }
 
 fn create_semaphores(core: &Core) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>) {
@@ -177,4 +191,58 @@ fn create_fences(core: &Core) -> Vec<vk::Fence> {
     }
 
     fences
+}
+
+fn create_test_pipeline(core: &Core) -> vk::Pipeline {
+    let shader_source = include_bytes!("../../shaders/spirv/test.comp.spirv");
+    let shader_module_create_info = vk::ShaderModuleCreateInfo {
+        code_size: shader_source.len(),
+        p_code: shader_source.as_ptr() as *const u32,
+        ..Default::default()
+    };
+    let shader_module = unsafe {
+        core.device
+            .create_shader_module(&shader_module_create_info, None)
+            .expect("Failed to create shader module.")
+    };
+
+    let main = CString::new("main").unwrap();
+    let shader_stage = vk::PipelineShaderStageCreateInfo {
+        module: shader_module,
+        p_name: main.as_ptr(),
+        stage: vk::ShaderStageFlags::COMPUTE,
+        ..Default::default()
+    };
+
+    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
+        ..Default::default()
+    };
+    let pipeline_layout = unsafe {
+        core.device
+            .create_pipeline_layout(&pipeline_layout_create_info, None)
+            .expect("Failed to create pipeline layout.")
+    };
+
+    let compute_pipeline_create_info = vk::ComputePipelineCreateInfo {
+        stage: shader_stage,
+        layout: pipeline_layout,
+        ..Default::default()
+    };
+
+    let compute_pipeline = unsafe {
+        core.device
+            .create_compute_pipelines(
+                vk::PipelineCache::null(),
+                &[compute_pipeline_create_info],
+                None,
+            )
+            .expect("Failed to create compute pipeline.")[0]
+    };
+
+    unsafe {
+        core.device.destroy_pipeline_layout(pipeline_layout, None);
+        core.device.destroy_shader_module(shader_module, None);
+    }
+
+    compute_pipeline
 }
