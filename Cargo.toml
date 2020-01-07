@@ -16,7 +16,6 @@ noise = "0.6"
 num = "0.2"
 rand = "0.7"
 array-macro = "1.0"
-shaders = { path = "shaders" }
 
 # Additional dependencies for other platforms 
 # https://github.com/unknownue/vulkan-tutorial-rust/blob/master/Cargo.toml

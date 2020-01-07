@@ -3,3 +3,4 @@
 notes.md
 denoiser/training
 prototyping/**/out
+shaders/spirv
