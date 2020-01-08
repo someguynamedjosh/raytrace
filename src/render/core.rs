@@ -19,7 +19,7 @@ pub struct Core {
     pub surface_loader: ash::extensions::khr::Surface,
     pub surface: vk::SurfaceKHR,
     pub debug_utils_loader: ash::extensions::ext::DebugUtils,
-    pub debug_merssager: vk::DebugUtilsMessengerEXT,
+    pub debug_messenger: vk::DebugUtilsMessengerEXT,
     pub physical_device: vk::PhysicalDevice,
     pub device: ash::Device,
     pub swapchain_info: SwapChainInfo,
@@ -32,7 +32,7 @@ impl Core {
     pub fn new(event_loop: &EventLoop<()>) -> Core {
         let entry = ash::Entry::new().unwrap();
         let instance = create_instance(&entry, WINDOW_TITLE);
-        let (debug_utils_loader, debug_merssager) = setup_debug_utils(&entry, &instance);
+        let (debug_utils_loader, debug_messenger) = setup_debug_utils(&entry, &instance);
         let window = WindowBuilder::new()
             .with_title(WINDOW_TITLE)
             .with_inner_size((WINDOW_WIDTH, WINDOW_HEIGHT).into())
@@ -63,7 +63,7 @@ impl Core {
             surface: surface_info.surface,
             surface_loader: surface_info.surface_loader,
             debug_utils_loader,
-            debug_merssager,
+            debug_messenger,
             physical_device,
             device,
             swapchain_info,
@@ -85,7 +85,7 @@ impl Core {
 
             if ENABLE_DEBUG {
                 self.debug_utils_loader
-                    .destroy_debug_utils_messenger(self.debug_merssager, None);
+                    .destroy_debug_utils_messenger(self.debug_messenger, None);
             }
             self.instance.destroy_instance(None);
         }
@@ -216,6 +216,7 @@ pub struct SwapChainInfo {
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
+    pub swapchain_image_views: Vec<vk::ImageView>,
 }
 
 pub fn create_instance(entry: &ash::Entry, window_title: &str) -> ash::Instance {
@@ -566,7 +567,7 @@ pub fn create_swapchain(
         image_color_space: surface_format.color_space,
         image_format: surface_format.format,
         image_extent: extent,
-        image_usage: vk::ImageUsageFlags::TRANSFER_DST,
+        image_usage: vk::ImageUsageFlags::STORAGE,
         image_sharing_mode,
         p_queue_family_indices: queue_family_indices.as_ptr(),
         queue_family_index_count,
@@ -591,12 +592,32 @@ pub fn create_swapchain(
             .expect("Failed to get Swapchain Images.")
     };
 
+    let mut swapchain_image_views = vec![];
+    for image in &swapchain_images {
+        let create_info = vk::ImageViewCreateInfo {
+            image: *image,
+            view_type: vk::ImageViewType::TYPE_2D,
+            format: surface_format.format,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                level_count: 1,
+                layer_count: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        swapchain_image_views.push(unsafe {
+            device.create_image_view(&create_info, None).expect("Failed to create image view for swapchain image.")
+        });
+    }
+
     SwapChainInfo {
         swapchain_loader,
         swapchain,
         swapchain_format: surface_format.format,
         swapchain_extent: extent,
         swapchain_images,
+        swapchain_image_views,
     }
 }
 
