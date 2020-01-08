@@ -11,9 +11,19 @@ struct Stage {
     pipeline_layout: vk::PipelineLayout,
 }
 
+impl Stage {
+    fn destroy(&mut self, core: &Core) {
+        unsafe {
+            core.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            core.device.destroy_pipeline(self.vk_pipeline, None);
+        }
+    }
+}
+
 pub struct Pipeline {
     test_stage: Stage,
-    _command_pool: vk::CommandPool,
+    command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     descriptor_pool: vk::DescriptorPool,
     frame_available_semaphores: Vec<vk::Semaphore>,
@@ -42,7 +52,7 @@ impl Pipeline {
 
         let mut pipeline = Pipeline {
             test_stage,
-            _command_pool: command_pool,
+            command_pool,
             command_buffers,
             descriptor_pool,
             frame_available_semaphores,
@@ -163,10 +173,44 @@ impl Pipeline {
 
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
+
+    pub fn destroy(&mut self, core: &Core) {
+        unsafe {
+            core.device
+                .device_wait_idle()
+                .expect("Failed to wait for device to finish rendering.");
+        }
+        self.descriptor_set_layouts.destroy(core);
+        self.test_stage.destroy(core);
+        unsafe {
+            core.device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
+            for fence in self.frame_complete_fences.iter() {
+                core.device.destroy_fence(*fence, None);
+            }
+            // Don't destroy swapchain_available_fences because they just point to elements in
+            // frame_complete_fences.
+            let semaphores1 = self.frame_available_semaphores.iter();
+            let semaphores2 = self.frame_complete_semaphores.iter();
+            for semaphore in semaphores1.chain(semaphores2) {
+                core.device.destroy_semaphore(*semaphore, None);
+            }
+            core.device.destroy_command_pool(self.command_pool, None);
+        }
+    }
 }
 
 struct DescriptorSetLayouts {
     swapchain_output: vk::DescriptorSetLayout,
+}
+
+impl DescriptorSetLayouts {
+    fn destroy(&mut self, core: &Core) {
+        unsafe {
+            core.device
+                .destroy_descriptor_set_layout(self.swapchain_output, None);
+        }
+    }
 }
 
 struct DescriptorSets {

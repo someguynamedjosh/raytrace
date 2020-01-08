@@ -75,6 +75,10 @@ impl Core {
 
     pub fn destroy(&mut self) {
         unsafe {
+            for view in &self.swapchain_info.swapchain_image_views {
+                self.device.destroy_image_view(*view, None);
+            }
+
             self.swapchain_info
                 .swapchain_loader
                 .destroy_swapchain(self.swapchain_info.swapchain, None);
