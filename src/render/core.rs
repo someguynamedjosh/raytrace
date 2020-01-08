@@ -73,26 +73,24 @@ impl Core {
         }
     }
 
-    pub fn destroy(&mut self) {
-        unsafe {
-            for view in &self.swapchain_info.swapchain_image_views {
-                self.device.destroy_image_view(*view, None);
-            }
-
-            self.swapchain_info
-                .swapchain_loader
-                .destroy_swapchain(self.swapchain_info.swapchain, None);
-
-            self.device.destroy_device(None);
-
-            self.surface_loader.destroy_surface(self.surface, None);
-
-            if ENABLE_DEBUG {
-                self.debug_utils_loader
-                    .destroy_debug_utils_messenger(self.debug_messenger, None);
-            }
-            self.instance.destroy_instance(None);
+    pub unsafe fn destroy(&mut self) {
+        for view in &self.swapchain_info.swapchain_image_views {
+            self.device.destroy_image_view(*view, None);
         }
+
+        self.swapchain_info
+            .swapchain_loader
+            .destroy_swapchain(self.swapchain_info.swapchain, None);
+
+        self.device.destroy_device(None);
+
+        self.surface_loader.destroy_surface(self.surface, None);
+
+        if ENABLE_DEBUG {
+            self.debug_utils_loader
+                .destroy_debug_utils_messenger(self.debug_messenger, None);
+        }
+        self.instance.destroy_instance(None);
     }
 }
 

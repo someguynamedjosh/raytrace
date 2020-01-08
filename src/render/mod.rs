@@ -28,7 +28,9 @@ impl VulkanApp {
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
-        self.pipeline.destroy(&self.core);
-        self.core.destroy();
+        unsafe {
+            self.pipeline.destroy(&self.core);
+            self.core.destroy();
+        }
     }
 }

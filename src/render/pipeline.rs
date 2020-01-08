@@ -12,12 +12,10 @@ struct Stage {
 }
 
 impl Stage {
-    fn destroy(&mut self, core: &Core) {
-        unsafe {
-            core.device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
-            core.device.destroy_pipeline(self.vk_pipeline, None);
-        }
+    unsafe fn destroy(&mut self, core: &Core) {
+        core.device
+            .destroy_pipeline_layout(self.pipeline_layout, None);
+        core.device.destroy_pipeline(self.vk_pipeline, None);
     }
 }
 
@@ -174,28 +172,26 @@ impl Pipeline {
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    pub fn destroy(&mut self, core: &Core) {
-        unsafe {
-            core.device
-                .device_wait_idle()
-                .expect("Failed to wait for device to finish rendering.");
-        }
+    pub unsafe fn destroy(&mut self, core: &Core) {
+        core.device
+            .device_wait_idle()
+            .expect("Failed to wait for device to finish rendering.");
+
         self.descriptor_set_layouts.destroy(core);
         self.test_stage.destroy(core);
-        unsafe {
-            core.device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
-            for fence in self.frame_complete_fences.iter() {
-                core.device.destroy_fence(*fence, None);
-            }
-            // Don't destroy swapchain_available_fences because they just point to elements in
-            // frame_complete_fences.
-            let semaphores1 = self.frame_available_semaphores.iter();
-            let semaphores2 = self.frame_complete_semaphores.iter();
-            for semaphore in semaphores1.chain(semaphores2) {
-                core.device.destroy_semaphore(*semaphore, None);
-            }
-            core.device.destroy_command_pool(self.command_pool, None);
+        core.device
+            .destroy_descriptor_pool(self.descriptor_pool, None);
+        core.device.destroy_command_pool(self.command_pool, None);
+
+        for fence in self.frame_complete_fences.iter() {
+            core.device.destroy_fence(*fence, None);
+        }
+        // Don't destroy swapchain_available_fences because they just point to elements in
+        // frame_complete_fences.
+        let semaphores1 = self.frame_available_semaphores.iter();
+        let semaphores2 = self.frame_complete_semaphores.iter();
+        for semaphore in semaphores1.chain(semaphores2) {
+            core.device.destroy_semaphore(*semaphore, None);
         }
     }
 }
@@ -215,6 +211,22 @@ impl DescriptorSetLayouts {
 
 struct DescriptorSets {
     swapchain_outputs: Vec<vk::DescriptorSet>,
+}
+
+fn create_descriptor_sets(
+    core: &Core,
+    pool: vk::DescriptorPool,
+) -> (DescriptorSetLayouts, DescriptorSets) {
+    let swapchain_outputs = create_swapchain_output_descriptor_sets(core, pool);
+
+    (
+        DescriptorSetLayouts {
+            swapchain_output: swapchain_outputs.0,
+        },
+        DescriptorSets {
+            swapchain_outputs: swapchain_outputs.1,
+        },
+    )
 }
 
 fn create_semaphores(core: &Core) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>) {
@@ -278,83 +290,11 @@ fn create_command_buffers(core: &Core, command_pool: vk::CommandPool) -> Vec<vk:
         level: vk::CommandBufferLevel::PRIMARY,
         ..Default::default()
     };
-    let buffers = unsafe {
+    unsafe {
         core.device
             .allocate_command_buffers(&allocate_info)
             .expect("Failed to allocate command buffers.")
-    };
-
-    let mut transition_frame_to_general = vk::ImageMemoryBarrier {
-        old_layout: vk::ImageLayout::UNDEFINED,
-        new_layout: vk::ImageLayout::GENERAL,
-        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        image: vk::Image::null(),
-        subresource_range: vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        },
-        ..Default::default()
-    };
-    let mut transition_frame_to_present = vk::ImageMemoryBarrier {
-        old_layout: vk::ImageLayout::GENERAL,
-        new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-        ..transition_frame_to_general
-    };
-
-    unsafe {
-        for (index, buffer) in buffers.iter().enumerate() {
-            let swapchain_image = core.swapchain_info.swapchain_images[index];
-            transition_frame_to_general.image = swapchain_image;
-            transition_frame_to_present.image = swapchain_image;
-            let begin_info = vk::CommandBufferBeginInfo {
-                ..Default::default()
-            };
-            // core.device
-            //     .begin_command_buffer(*buffer, &begin_info)
-            //     .expect("Failed to start command buffer.");
-            // core.device.cmd_pipeline_barrier(
-            //     *buffer,
-            //     vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            //     vk::PipelineStageFlags::TOP_OF_PIPE,
-            //     Default::default(),
-            //     &[],
-            //     &[],
-            //     &[transition_frame_to_general],
-            // );
-            // core.device.cmd_bind_descriptor_sets(
-            //     *buffer,
-            //     vk::PipelineBindPoint::COMPUTE,
-            //     stage.pipeline_layout,
-            //     0,
-            //     &[descriptor_sets[index]],
-            //     &[],
-            // );
-            // core.device.cmd_bind_pipeline(
-            //     *buffer,
-            //     vk::PipelineBindPoint::COMPUTE,
-            //     stage.vk_pipeline,
-            // );
-            // core.device.cmd_dispatch(*buffer, 30, 30, 1);
-            // core.device.cmd_pipeline_barrier(
-            //     *buffer,
-            //     vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            //     vk::PipelineStageFlags::TOP_OF_PIPE,
-            //     Default::default(),
-            //     &[],
-            //     &[],
-            //     &[transition_frame_to_present],
-            // );
-            // core.device
-            //     .end_command_buffer(*buffer)
-            //     .expect("Failed to end command buffer.");
-        }
     }
-
-    buffers
 }
 
 fn create_descriptor_pool(core: &Core, num_swapchain_images: u32) -> vk::DescriptorPool {
@@ -391,22 +331,6 @@ fn create_descriptor_set_layout(
             .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
             .expect("Failed to create descriptor set layout.")
     }
-}
-
-fn create_descriptor_sets(
-    core: &Core,
-    pool: vk::DescriptorPool,
-) -> (DescriptorSetLayouts, DescriptorSets) {
-    let swapchain_outputs = create_swapchain_output_descriptor_sets(core, pool);
-
-    (
-        DescriptorSetLayouts {
-            swapchain_output: swapchain_outputs.0,
-        },
-        DescriptorSets {
-            swapchain_outputs: swapchain_outputs.1,
-        },
-    )
 }
 
 fn create_swapchain_output_descriptor_sets(
