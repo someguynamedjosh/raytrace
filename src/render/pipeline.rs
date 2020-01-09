@@ -460,7 +460,7 @@ impl SampledImage {
     }
 
     fn load_from_png(&mut self, core: &Core, bytes: &[u8]) {
-        let size = self.extent.width * self.extent.height * self.extent.depth;
+        let size = self.extent.width * self.extent.height * self.extent.depth * 4;
         let data = image::load_from_memory_with_format(bytes, image::ImageFormat::PNG)
             .expect("Failed to decode PNG data.");
         let mut buffer = Buffer::create(
@@ -504,6 +504,7 @@ impl SampledImage {
         );
         cmd_end(core, upload_commands);
         execute_and_destroy_buffer(core, upload_commands);
+        buffer.destroy(core);
     }
 
     fn destroy(&mut self, core: &Core) {
