@@ -42,8 +42,9 @@ impl Pipeline {
         let command_buffers = create_command_buffers(core, command_pool);
 
         let descriptor_pool = create_descriptor_pool(core, swapchain_size as u32);
-        let (descriptor_set_layouts, descriptor_sets) =
-            create_descriptor_sets(core, descriptor_pool);
+        let descriptor_set_layouts = DescriptorSetLayouts::create(core);
+        let descriptor_sets =
+            DescriptorSets::create(core, descriptor_pool, &descriptor_set_layouts);
         let render_data = RenderData::create(core);
 
         let test_stage = create_test_stage(core, &descriptor_set_layouts);
@@ -179,6 +180,14 @@ struct DescriptorSetLayouts {
 }
 
 impl DescriptorSetLayouts {
+    fn create(core: &Core) -> DescriptorSetLayouts {
+        DescriptorSetLayouts {
+            swapchain_output: create_descriptor_set_layout(core, &[BindingType::StorageImage]),
+        }
+    }
+}
+
+impl DescriptorSetLayouts {
     fn destroy(&mut self, core: &Core) {
         unsafe {
             core.device
@@ -189,6 +198,22 @@ impl DescriptorSetLayouts {
 
 struct DescriptorSets {
     swapchain_outputs: Vec<vk::DescriptorSet>,
+}
+
+impl DescriptorSets {
+    fn create(
+        core: &Core,
+        pool: vk::DescriptorPool,
+        layouts: &DescriptorSetLayouts,
+    ) -> DescriptorSets {
+        DescriptorSets {
+            swapchain_outputs: create_swapchain_output_descriptor_sets(
+                core,
+                pool,
+                layouts.swapchain_output,
+            ),
+        }
+    }
 }
 
 struct Buffer {
@@ -437,22 +462,6 @@ impl RenderData {
     }
 }
 
-fn create_descriptor_sets(
-    core: &Core,
-    pool: vk::DescriptorPool,
-) -> (DescriptorSetLayouts, DescriptorSets) {
-    let swapchain_outputs = create_swapchain_output_descriptor_sets(core, pool);
-
-    (
-        DescriptorSetLayouts {
-            swapchain_output: swapchain_outputs.0,
-        },
-        DescriptorSets {
-            swapchain_outputs: swapchain_outputs.1,
-        },
-    )
-}
-
 fn create_semaphores(core: &Core) -> (vk::Semaphore, vk::Semaphore) {
     let create_info = Default::default();
 
@@ -531,11 +540,15 @@ fn create_descriptor_pool(core: &Core, num_swapchain_images: u32) -> vk::Descrip
 
 fn create_descriptor_set_layout(
     core: &Core,
-    bindings: &[vk::DescriptorSetLayoutBinding],
-    num_bindings: u32,
+    binding_types: &[BindingType],
 ) -> vk::DescriptorSetLayout {
+    let bindings: Vec<_> = binding_types
+        .iter()
+        .enumerate()
+        .map(|(index, btype)| btype.create_descriptor_set_layout_binding(index as u32))
+        .collect();
     let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
-        binding_count: num_bindings,
+        binding_count: bindings.len() as u32,
         p_bindings: bindings.as_ptr(),
         ..Default::default()
     };
@@ -546,21 +559,36 @@ fn create_descriptor_set_layout(
     }
 }
 
+enum BindingType {
+    StorageImage,
+}
+
+impl BindingType {
+    fn simple_binding(
+        index: u32,
+        descriptor_type: vk::DescriptorType,
+    ) -> vk::DescriptorSetLayoutBinding {
+        vk::DescriptorSetLayoutBinding {
+            binding: index,
+            descriptor_type,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::COMPUTE,
+            ..Default::default()
+        }
+    }
+
+    fn create_descriptor_set_layout_binding(&self, index: u32) -> vk::DescriptorSetLayoutBinding {
+        match self {
+            Self::StorageImage => Self::simple_binding(index, vk::DescriptorType::STORAGE_IMAGE),
+        }
+    }
+}
+
 fn create_swapchain_output_descriptor_sets(
     core: &Core,
     pool: vk::DescriptorPool,
-) -> (vk::DescriptorSetLayout, Vec<vk::DescriptorSet>) {
-    let output_layout_binding = vk::DescriptorSetLayoutBinding {
-        binding: 0,
-        descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-        descriptor_count: 1,
-        stage_flags: vk::ShaderStageFlags::COMPUTE,
-        ..Default::default()
-    };
-
-    let bindings = [output_layout_binding];
-    let layout = create_descriptor_set_layout(core, &bindings, bindings.len() as u32);
-
+    layout: vk::DescriptorSetLayout,
+) -> Vec<vk::DescriptorSet> {
     let quantity = core.swapchain_info.swapchain_images.len();
     let mut layouts = vec![];
     for _ in 0..quantity {
@@ -604,7 +632,7 @@ fn create_swapchain_output_descriptor_sets(
         core.device.update_descriptor_sets(&writes, &[]);
     }
 
-    (layout, descriptor_sets)
+    descriptor_sets
 }
 
 fn create_shader_module(core: &Core, shader_source: *const u8, length: usize) -> vk::ShaderModule {
