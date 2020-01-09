@@ -8,6 +8,7 @@ use image::GenericImageView;
 
 use super::constants::*;
 use super::core::Core;
+use super::descriptors::{self, DescriptorData, DescriptorPrototype, PrototypeGenerator};
 
 struct Stage {
     vk_pipeline: vk::Pipeline,
@@ -23,42 +24,34 @@ impl Stage {
 }
 
 pub struct Pipeline {
-    test_stage: Stage,
     command_buffers: Vec<vk::CommandBuffer>,
-    descriptor_pool: vk::DescriptorPool,
     frame_available_semaphore: vk::Semaphore,
     frame_complete_semaphore: vk::Semaphore,
     frame_complete_fence: vk::Fence,
-    descriptor_set_layouts: DescriptorSetLayouts,
-    descriptor_sets: DescriptorSets,
     render_data: RenderData,
+    descriptor_collection: DescriptorCollection,
+    test_stage: Stage,
 }
 
 impl Pipeline {
     pub fn new(core: &Core) -> Pipeline {
         let (frame_available_semaphore, frame_complete_semaphore) = create_semaphores(core);
         let (frame_complete_fence,) = create_fences(core);
-        let swapchain_size = core.swapchain_info.swapchain_images.len();
         let command_buffers = create_command_buffers(core);
 
-        let descriptor_pool = create_descriptor_pool(core, swapchain_size as u32);
-        let descriptor_set_layouts = DescriptorSetLayouts::create(core);
         let render_data = RenderData::create(core);
-        let descriptor_sets =
-            DescriptorSets::create(core, descriptor_pool, &descriptor_set_layouts, &render_data);
+        let descriptor_collection = DescriptorCollection::create(core, &render_data);
 
-        let test_stage = create_test_stage(core, &descriptor_set_layouts);
+        let test_stage = create_test_stage(core, &descriptor_collection);
 
         let mut pipeline = Pipeline {
-            test_stage,
             command_buffers,
-            descriptor_pool,
             frame_available_semaphore,
             frame_complete_semaphore,
             frame_complete_fence,
-            descriptor_set_layouts,
-            descriptor_sets,
             render_data,
+            descriptor_collection,
+            test_stage,
         };
         pipeline.record_command_buffers(core);
         pipeline
@@ -77,9 +70,9 @@ impl Pipeline {
                 vk::ImageLayout::GENERAL,
             );
             let layout = self.test_stage.pipeline_layout;
-            let set = self.descriptor_sets.test_data;
+            let set = self.descriptor_collection.test_data.variants[0];
             cmd_bind_descriptor_set(core, buffer, set, layout, 0);
-            let set = self.descriptor_sets.swapchain_outputs[index];
+            let set = self.descriptor_collection.swapchain.variants[index];
             cmd_bind_descriptor_set(core, buffer, set, layout, 1);
             cmd_bind_pipeline(core, buffer, self.test_stage.vk_pipeline);
             unsafe {
@@ -161,11 +154,9 @@ impl Pipeline {
             .expect("Failed to wait for device to finish rendering.");
 
         self.test_stage.destroy(core);
-        self.render_data.destroy(core);
 
-        self.descriptor_set_layouts.destroy(core);
-        core.device
-            .destroy_descriptor_pool(self.descriptor_pool, None);
+        self.descriptor_collection.destroy(core);
+        self.render_data.destroy(core);
 
         core.device.destroy_fence(self.frame_complete_fence, None);
         core.device
@@ -175,46 +166,64 @@ impl Pipeline {
     }
 }
 
-struct DescriptorSetLayouts {
-    swapchain_output: vk::DescriptorSetLayout,
-    test_data: vk::DescriptorSetLayout,
+struct DescriptorCollection {
+    pool: vk::DescriptorPool,
+    swapchain: DescriptorData,
+    test_data: DescriptorData,
 }
 
-impl DescriptorSetLayouts {
-    fn create(core: &Core) -> DescriptorSetLayouts {
-        DescriptorSetLayouts {
-            swapchain_output: create_descriptor_set_layout(core, &[BindingType::StorageImage]),
-            test_data: create_descriptor_set_layout(core, &[BindingType::Sampler]),
+impl DescriptorCollection {
+    fn create(core: &Core, render_data: &RenderData) -> DescriptorCollection {
+        let generators = [
+            Box::new(generate_test_data_descriptor_prototypes) as PrototypeGenerator<RenderData>,
+            Box::new(generate_swapchain_descriptor_prototypes) as PrototypeGenerator<RenderData>,
+        ];
+        let (pool, datas) = descriptors::generate_descriptor_pool(&generators, core, render_data);
+        let mut datas_consumer = datas.into_iter();
+        DescriptorCollection {
+            pool,
+            test_data: datas_consumer.next().unwrap(),
+            swapchain: datas_consumer.next().unwrap(),
         }
     }
-}
 
-impl DescriptorSetLayouts {
     fn destroy(&mut self, core: &Core) {
         unsafe {
             core.device
-                .destroy_descriptor_set_layout(self.swapchain_output, None);
+                .destroy_descriptor_set_layout(self.swapchain.layout, None);
+            core.device
+                .destroy_descriptor_set_layout(self.test_data.layout, None);
+            core.device.destroy_descriptor_pool(self.pool, None);
         }
     }
 }
 
-struct DescriptorSets {
-    swapchain_outputs: Vec<vk::DescriptorSet>,
-    test_data: vk::DescriptorSet,
+fn generate_swapchain_descriptor_prototypes(
+    core: &Core,
+    _render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    let views = &core.swapchain_info.swapchain_image_views;
+    views
+        .iter()
+        .map(|image_view| {
+            vec![DescriptorPrototype::StorageImage(
+                *image_view,
+                vk::ImageLayout::GENERAL,
+            )]
+        })
+        .collect()
 }
 
-impl DescriptorSets {
-    fn create(
-        core: &Core,
-        pool: vk::DescriptorPool,
-        layouts: &DescriptorSetLayouts,
-        data: &RenderData,
-    ) -> DescriptorSets {
-        DescriptorSets {
-            swapchain_outputs: create_swapchain_output_descriptor_sets(core, pool, layouts, data),
-            test_data: create_test_data_descriptor_sets(core, pool, layouts, data),
-        }
-    }
+fn generate_test_data_descriptor_prototypes(
+    _core: &Core,
+    render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    let blue_noise = &render_data.blue_noise;
+    vec![vec![DescriptorPrototype::CombinedImageSampler(
+        blue_noise.image_view,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        blue_noise.sampler,
+    )]]
 }
 
 struct Buffer {
@@ -435,6 +444,7 @@ impl SampledImage {
                 .create_image_view(&image_view_create_info, None)
                 .expect("Failed to create image view for sampled image.")
         };
+        core.set_debug_name(image_view, "Texture view");
 
         let sampler_create_info = vk::SamplerCreateInfo {
             mag_filter: vk::Filter::NEAREST,
@@ -723,171 +733,6 @@ fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
     }
 }
 
-fn create_descriptor_pool(core: &Core, num_swapchain_images: u32) -> vk::DescriptorPool {
-    let num_storage_images = vk::DescriptorPoolSize {
-        ty: vk::DescriptorType::STORAGE_IMAGE,
-        descriptor_count: num_swapchain_images,
-        ..Default::default()
-    };
-    let num_samplers = vk::DescriptorPoolSize {
-        ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-        descriptor_count: 1,
-        ..Default::default()
-    };
-    let sizes = [num_storage_images, num_samplers];
-    let create_info = vk::DescriptorPoolCreateInfo {
-        pool_size_count: 2,
-        p_pool_sizes: sizes.as_ptr(),
-        max_sets: num_swapchain_images + 1,
-        ..Default::default()
-    };
-    unsafe {
-        core.device
-            .create_descriptor_pool(&create_info, None)
-            .expect("Failed to create descriptor pool.")
-    }
-}
-
-fn create_descriptor_set_layout(
-    core: &Core,
-    binding_types: &[BindingType],
-) -> vk::DescriptorSetLayout {
-    let bindings: Vec<_> = binding_types
-        .iter()
-        .enumerate()
-        .map(|(index, btype)| btype.create_descriptor_set_layout_binding(index as u32))
-        .collect();
-    let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
-        binding_count: bindings.len() as u32,
-        p_bindings: bindings.as_ptr(),
-        ..Default::default()
-    };
-    unsafe {
-        core.device
-            .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
-            .expect("Failed to create descriptor set layout.")
-    }
-}
-
-enum BindingType {
-    StorageImage,
-    Sampler,
-}
-
-impl BindingType {
-    fn simple_binding(
-        index: u32,
-        descriptor_type: vk::DescriptorType,
-    ) -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding {
-            binding: index,
-            descriptor_type,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::COMPUTE,
-            ..Default::default()
-        }
-    }
-
-    fn create_descriptor_set_layout_binding(&self, index: u32) -> vk::DescriptorSetLayoutBinding {
-        match self {
-            Self::StorageImage => Self::simple_binding(index, vk::DescriptorType::STORAGE_IMAGE),
-            Self::Sampler => Self::simple_binding(index, vk::DescriptorType::COMBINED_IMAGE_SAMPLER),
-        }
-    }
-}
-
-fn create_swapchain_output_descriptor_sets(
-    core: &Core,
-    pool: vk::DescriptorPool,
-    layouts: &DescriptorSetLayouts,
-    _data: &RenderData,
-) -> Vec<vk::DescriptorSet> {
-    let layout = layouts.swapchain_output;
-    let quantity = core.swapchain_info.swapchain_images.len();
-    let mut layouts = vec![];
-    for _ in 0..quantity {
-        layouts.push(layout);
-    }
-    let layouts = layouts;
-    let allocate_info = vk::DescriptorSetAllocateInfo {
-        descriptor_pool: pool,
-        descriptor_set_count: quantity as u32,
-        p_set_layouts: layouts.as_ptr(),
-        ..Default::default()
-    };
-    let descriptor_sets = unsafe {
-        core.device
-            .allocate_descriptor_sets(&allocate_info)
-            .expect("Failed to create descriptor sets.")
-    };
-
-    let mut image_infos = vec![];
-    for index in 0..quantity {
-        image_infos.push(vk::DescriptorImageInfo {
-            image_view: core.swapchain_info.swapchain_image_views[index as usize],
-            // TODO: figure this out.
-            image_layout: vk::ImageLayout::GENERAL,
-            ..Default::default()
-        });
-    }
-    let mut writes = vec![];
-    for (index, set) in descriptor_sets.iter().enumerate() {
-        writes.push(vk::WriteDescriptorSet {
-            dst_set: *set,
-            dst_binding: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-            p_image_info: &image_infos[index],
-            ..Default::default()
-        });
-    }
-
-    unsafe {
-        core.device.update_descriptor_sets(&writes, &[]);
-    }
-
-    descriptor_sets
-}
-
-fn create_test_data_descriptor_sets(
-    core: &Core,
-    pool: vk::DescriptorPool,
-    layouts: &DescriptorSetLayouts,
-    data: &RenderData,
-) -> vk::DescriptorSet {
-    let layout = layouts.test_data;
-    let allocate_info = vk::DescriptorSetAllocateInfo {
-        descriptor_pool: pool,
-        descriptor_set_count: 1,
-        p_set_layouts: &layout,
-        ..Default::default()
-    };
-    let descriptor_set = unsafe {
-        core.device
-            .allocate_descriptor_sets(&allocate_info)
-            .expect("Failed to create test data descriptor set.")[0]
-    };
-
-    let image_info = vk::DescriptorImageInfo {
-        sampler: data.blue_noise.sampler,
-        image_view: data.blue_noise.image_view,
-        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-    };
-    let write = vk::WriteDescriptorSet {
-        dst_set: descriptor_set,
-        dst_binding: 0,
-        descriptor_count: 1,
-        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-        p_image_info: &image_info,
-        ..Default::default()
-    };
-    unsafe {
-        core.device.update_descriptor_sets(&[write], &[]);
-    }
-
-    descriptor_set
-}
-
 fn create_shader_module(core: &Core, shader_source: *const u8, length: usize) -> vk::ShaderModule {
     let shader_module_create_info = vk::ShaderModuleCreateInfo {
         code_size: length,
@@ -914,14 +759,14 @@ fn create_compute_shader_stage(
     }
 }
 
-fn create_test_stage(core: &Core, layouts: &DescriptorSetLayouts) -> Stage {
+fn create_test_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
     let shader_source = include_bytes!("../../shaders/spirv/test.comp.spirv");
     let shader_module = create_shader_module(core, shader_source.as_ptr(), shader_source.len());
 
     let entry_point = CString::new("main").unwrap();
     let shader_stage = create_compute_shader_stage(core, shader_module, &entry_point);
 
-    let descriptor_sets = [layouts.test_data, layouts.swapchain_output];
+    let descriptor_sets = [dc.test_data.layout, dc.swapchain.layout];
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
         set_layout_count: 2,
         p_set_layouts: descriptor_sets.as_ptr(),

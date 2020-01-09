@@ -1,7 +1,8 @@
+use ash::extensions::ext::DebugUtils;
 use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
-use ash::vk;
+use ash::vk::{self, Handle};
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
@@ -18,7 +19,7 @@ pub struct Core {
     pub queue_family_indices: QueueFamilyIndices,
     pub surface_loader: ash::extensions::khr::Surface,
     pub surface: vk::SurfaceKHR,
-    pub debug_utils_loader: ash::extensions::ext::DebugUtils,
+    pub debug_utils_loader: DebugUtils,
     pub debug_messenger: vk::DebugUtilsMessengerEXT,
     pub physical_device: vk::PhysicalDevice,
     pub memory_properties: vk::PhysicalDeviceMemoryProperties,
@@ -51,6 +52,7 @@ impl Core {
         let swapchain_info = create_swapchain(
             &instance,
             &device,
+            &debug_utils_loader,
             physical_device,
             &window,
             &surface_info,
@@ -120,6 +122,31 @@ impl Core {
             return index;
         }
         panic!("Could not find appropriate memory type!");
+    }
+
+    pub fn set_debug_name<VkObject: Handle>(&self, object: VkObject, name: &str) {
+        set_debug_name(&self.device, &self.debug_utils_loader, object, name);
+    }
+}
+
+pub fn set_debug_name<VkObject: Handle>(
+    device: &ash::Device,
+    debug_utils: &DebugUtils,
+    object: VkObject,
+    name: &str,
+) {
+    let name = CString::new(name).unwrap();
+    let name_info = vk::DebugUtilsObjectNameInfoEXT {
+        s_type: vk::StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        object_type: VkObject::TYPE,
+        object_handle: object.as_raw(),
+        p_object_name: name.as_ptr(),
+        ..Default::default()
+    };
+    unsafe {
+        debug_utils
+            .debug_utils_set_object_name(device.handle(), &name_info)
+            .expect("Failed to set debug name.");
     }
 }
 
@@ -239,6 +266,15 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     };
     let message = CStr::from_ptr((*p_callback_data).p_message);
     println!("[Debug]{}{}{:?}", severity, types, message);
+    unsafe {
+        println!(
+            "{:x?}",
+            std::slice::from_raw_parts(
+                (*p_callback_data).p_objects,
+                (*p_callback_data).object_count as usize
+            )
+        );
+    }
 
     vk::FALSE
 }
@@ -573,6 +609,7 @@ fn create_command_pool(device: &ash::Device, queue_family_index: u32) -> vk::Com
 pub fn create_swapchain(
     instance: &ash::Instance,
     device: &ash::Device,
+    debug_utils: &ash::extensions::ext::DebugUtils,
     physical_device: vk::PhysicalDevice,
     window: &winit::window::Window,
     surface_info: &SurfaceInfo,
@@ -644,16 +681,20 @@ pub fn create_swapchain(
             format: surface_format.format,
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
                 level_count: 1,
+                base_array_layer: 0,
                 layer_count: 1,
                 ..Default::default()
             },
             ..Default::default()
         };
         swapchain_image_views.push(unsafe {
-            device
+            let view = device
                 .create_image_view(&create_info, None)
-                .expect("Failed to create image view for swapchain image.")
+                .expect("Failed to create image view for swapchain image.");
+            set_debug_name(device, debug_utils, view, "Swapchain View");
+            view
         });
     }
 

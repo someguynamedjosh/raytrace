@@ -2,6 +2,7 @@ use winit::event_loop::EventLoop;
 
 pub(self) mod constants;
 pub(self) mod core;
+pub(self) mod descriptors;
 pub(self) mod pipeline;
 pub(self) mod platform_specific;
 pub(self) mod util;
