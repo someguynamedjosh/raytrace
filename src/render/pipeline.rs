@@ -2,7 +2,9 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 
 use std::ffi::CString;
+use std::ops::Deref;
 
+use super::constants::*;
 use super::core::Core;
 
 struct Stage {
@@ -28,6 +30,7 @@ pub struct Pipeline {
     frame_complete_fence: vk::Fence,
     descriptor_set_layouts: DescriptorSetLayouts,
     descriptor_sets: DescriptorSets,
+    render_data: RenderData,
 }
 
 impl Pipeline {
@@ -41,6 +44,7 @@ impl Pipeline {
         let descriptor_pool = create_descriptor_pool(core, swapchain_size as u32);
         let (descriptor_set_layouts, descriptor_sets) =
             create_descriptor_sets(core, descriptor_pool);
+        let render_data = RenderData::create(core);
 
         let test_stage = create_test_stage(core, &descriptor_set_layouts);
 
@@ -54,6 +58,7 @@ impl Pipeline {
             frame_complete_fence,
             descriptor_set_layouts,
             descriptor_sets,
+            render_data,
         };
         pipeline.record_command_buffers(core);
         pipeline
@@ -153,8 +158,10 @@ impl Pipeline {
             .device_wait_idle()
             .expect("Failed to wait for device to finish rendering.");
 
-        self.descriptor_set_layouts.destroy(core);
         self.test_stage.destroy(core);
+        self.render_data.destroy(core);
+
+        self.descriptor_set_layouts.destroy(core);
         core.device
             .destroy_descriptor_pool(self.descriptor_pool, None);
         core.device.destroy_command_pool(self.command_pool, None);
@@ -182,6 +189,252 @@ impl DescriptorSetLayouts {
 
 struct DescriptorSets {
     swapchain_outputs: Vec<vk::DescriptorSet>,
+}
+
+struct Buffer {
+    native: vk::Buffer,
+    memory: vk::DeviceMemory,
+}
+
+impl Buffer {
+    fn create(core: &Core, size: u64, usage: vk::BufferUsageFlags) -> Buffer {
+        let create_info = vk::BufferCreateInfo {
+            size,
+            usage,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            ..Default::default()
+        };
+        let buffer = unsafe {
+            core.device
+                .create_buffer(&create_info, None)
+                .expect("Failed to create buffer.")
+        };
+
+        let memory_requirements = unsafe { core.device.get_buffer_memory_requirements(buffer) };
+        let memory_allocation_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_requirements.size,
+            memory_type_index: core.find_compatible_memory_type(
+                memory_requirements.memory_type_bits,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            ),
+            ..Default::default()
+        };
+        let memory = unsafe {
+            core.device
+                .allocate_memory(&memory_allocation_info, None)
+                .expect("Failed to allocate memory for buffer.")
+        };
+        unsafe {
+            core.device
+                .bind_buffer_memory(buffer, memory, 0)
+                .expect("Failed to bind buffer to device memory.");
+        }
+
+        Buffer {
+            native: buffer,
+            memory,
+        }
+    }
+
+    fn destroy(&mut self, core: &Core) {
+        unsafe {
+            core.device.destroy_buffer(self.native, None);
+            core.device.free_memory(self.memory, None);
+        }
+    }
+}
+
+impl Deref for Buffer {
+    type Target = vk::Buffer;
+
+    fn deref(&self) -> &vk::Buffer {
+        &self.native
+    }
+}
+
+struct Image {
+    native: vk::Image,
+    memory: vk::DeviceMemory,
+}
+
+impl Image {
+    fn create(core: &Core, typ: vk::ImageType, extent: vk::Extent3D, format: vk::Format) -> Image {
+        let create_info = vk::ImageCreateInfo {
+            image_type: typ,
+            extent,
+            format,
+            samples: vk::SampleCountFlags::TYPE_1,
+            mip_levels: 1,
+            array_layers: 1,
+            // TODO: Better usage.
+            usage: vk::ImageUsageFlags::TRANSFER_DST,
+            tiling: vk::ImageTiling::OPTIMAL,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            ..Default::default()
+        };
+        let image = unsafe {
+            core.device
+                .create_image(&create_info, None)
+                .expect("Failed to create buffer.")
+        };
+
+        let memory_requirements = unsafe { core.device.get_image_memory_requirements(image) };
+        let memory_allocation_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_requirements.size,
+            memory_type_index: core.find_compatible_memory_type(
+                memory_requirements.memory_type_bits,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            ),
+            ..Default::default()
+        };
+        let memory = unsafe {
+            core.device
+                .allocate_memory(&memory_allocation_info, None)
+                .expect("Failed to allocate memory for image.")
+        };
+        unsafe {
+            core.device
+                .bind_image_memory(image, memory, 0)
+                .expect("Failed to bind image to device memory.");
+        }
+
+        Image {
+            native: image,
+            memory,
+        }
+    }
+
+    fn destroy(&mut self, core: &Core) {
+        unsafe {
+            core.device.destroy_image(self.native, None);
+            core.device.free_memory(self.memory, None);
+        }
+    }
+}
+
+impl Deref for Image {
+    type Target = vk::Image;
+
+    fn deref(&self) -> &vk::Image {
+        &self.native
+    }
+}
+
+struct RenderData {
+    upload_buffers: Vec<Buffer>,
+    upload_destinations: Vec<u16>,
+    block_data_atlas: Image,
+
+    chunk_map: Image,
+    region_map: Image,
+
+    lighting_buffer: Image,
+    depth_buffer: Image,
+    normal_buffer: Image,
+    old_lighting_buffer: Image,
+    old_depth_buffer: Image,
+    old_normal_buffer: Image,
+
+    lighting_pong_buffer: Image,
+    albedo_buffer: Image,
+    emission_buffer: Image,
+    fog_color_buffer: Image,
+}
+
+impl RenderData {
+    fn make_framebuffer(core: &Core, format: vk::Format) -> Image {
+        let dimensions = core.swapchain_info.swapchain_extent;
+        Image::create(
+            core,
+            vk::ImageType::TYPE_2D,
+            vk::Extent3D {
+                width: dimensions.width,
+                height: dimensions.height,
+                depth: 1,
+            },
+            format,
+        )
+    }
+
+    fn create(core: &Core) -> RenderData {
+        RenderData {
+            upload_buffers: (0..NUM_UPLOAD_BUFFERS)
+                .map(|_| {
+                    Buffer::create(
+                        core,
+                        CHUNK_BLOCK_VOLUME as u64,
+                        vk::BufferUsageFlags::TRANSFER_SRC,
+                    )
+                })
+                .collect(),
+            upload_destinations: vec![],
+            block_data_atlas: Image::create(
+                core,
+                vk::ImageType::TYPE_3D,
+                vk::Extent3D {
+                    width: ATLAS_BLOCK_WIDTH,
+                    height: ATLAS_BLOCK_WIDTH,
+                    depth: ATLAS_BLOCK_WIDTH,
+                },
+                vk::Format::R16_UINT,
+            ),
+
+            chunk_map: Image::create(
+                core,
+                vk::ImageType::TYPE_3D,
+                vk::Extent3D {
+                    width: ROOT_CHUNK_WIDTH,
+                    height: ROOT_CHUNK_WIDTH,
+                    depth: ROOT_CHUNK_WIDTH,
+                },
+                vk::Format::R16_UINT,
+            ),
+            region_map: Image::create(
+                core,
+                vk::ImageType::TYPE_3D,
+                vk::Extent3D {
+                    width: ROOT_REGION_WIDTH,
+                    height: ROOT_REGION_WIDTH,
+                    depth: ROOT_REGION_WIDTH,
+                },
+                vk::Format::R16_UINT,
+            ),
+
+            lighting_buffer: Self::make_framebuffer(core, vk::Format::R16G16B16A16_UNORM),
+            depth_buffer: Self::make_framebuffer(core, vk::Format::R16_UINT),
+            normal_buffer: Self::make_framebuffer(core, vk::Format::R8_UINT),
+            old_lighting_buffer: Self::make_framebuffer(core, vk::Format::R16G16B16A16_UNORM),
+            old_depth_buffer: Self::make_framebuffer(core, vk::Format::R16_UINT),
+            old_normal_buffer: Self::make_framebuffer(core, vk::Format::R8_UINT),
+
+            lighting_pong_buffer: Self::make_framebuffer(core, vk::Format::R16G16B16A16_UNORM),
+            albedo_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
+            emission_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
+            fog_color_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
+        }
+    }
+
+    fn destroy(&mut self, core: &Core) {
+        for upload_buffer in &mut self.upload_buffers {
+            upload_buffer.destroy(core);
+        }
+        self.block_data_atlas.destroy(core);
+
+        self.chunk_map.destroy(core);
+        self.region_map.destroy(core);
+
+        self.lighting_buffer.destroy(core);
+        self.depth_buffer.destroy(core);
+        self.normal_buffer.destroy(core);
+        self.old_lighting_buffer.destroy(core);
+        self.old_depth_buffer.destroy(core);
+        self.old_normal_buffer.destroy(core);
+
+        self.lighting_pong_buffer.destroy(core);
+        self.albedo_buffer.destroy(core);
+        self.emission_buffer.destroy(core);
+        self.fog_color_buffer.destroy(core);
+    }
 }
 
 fn create_descriptor_sets(

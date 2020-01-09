@@ -21,6 +21,7 @@ pub struct Core {
     pub debug_utils_loader: ash::extensions::ext::DebugUtils,
     pub debug_messenger: vk::DebugUtilsMessengerEXT,
     pub physical_device: vk::PhysicalDevice,
+    pub memory_properties: vk::PhysicalDeviceMemoryProperties,
     pub device: ash::Device,
     pub swapchain_info: SwapChainInfo,
     pub compute_queue: vk::Queue,
@@ -41,6 +42,8 @@ impl Core {
         let window = Box::new(window);
         let surface_info = create_surface(&entry, &instance, &window);
         let physical_device = pick_physical_device(&instance, &surface_info);
+        let memory_properties =
+            unsafe { instance.get_physical_device_memory_properties(physical_device) };
         let (device, queue_family_indices) =
             create_logical_device(&instance, physical_device, &surface_info);
         let swapchain_info = create_swapchain(
@@ -65,6 +68,7 @@ impl Core {
             debug_utils_loader,
             debug_messenger,
             physical_device,
+            memory_properties,
             device,
             swapchain_info,
             compute_queue,
@@ -91,6 +95,26 @@ impl Core {
                 .destroy_debug_utils_messenger(self.debug_messenger, None);
         }
         self.instance.destroy_instance(None);
+    }
+
+    pub fn find_compatible_memory_type(
+        &self,
+        memory_type_bits: u32,
+        required_flags: vk::MemoryPropertyFlags,
+    ) -> u32 {
+        for index in 0..self.memory_properties.memory_type_count {
+            // Skip over memory types that memory_type_bits does not allow.
+            if memory_type_bits & (1 << index) == 0 {
+                continue;
+            }
+            let properties = self.memory_properties.memory_types[index as usize];
+            // Skip over memory types that don't have the required flags.
+            if (properties.property_flags & required_flags) != required_flags {
+                continue;
+            }
+            return index;
+        }
+        panic!("Could not find appropriate memory type!");
     }
 }
 
@@ -610,7 +634,9 @@ pub fn create_swapchain(
             ..Default::default()
         };
         swapchain_image_views.push(unsafe {
-            device.create_image_view(&create_info, None).expect("Failed to create image view for swapchain image.")
+            device
+                .create_image_view(&create_info, None)
+                .expect("Failed to create image view for swapchain image.")
         });
     }
 

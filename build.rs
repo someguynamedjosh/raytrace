@@ -63,7 +63,11 @@ fn main() {
     let compiler_path = Path::new(&vulkan_sdk_path);
     let compiler_path = compiler_path.join("bin/glslc");
     for (index, (source, target)) in required_compiles.iter().enumerate() {
-        println!("Compiling shader {} of {}.", index + 1, required_compiles.len());
+        println!(
+            "Compiling shader {} of {}.",
+            index + 1,
+            required_compiles.len()
+        );
         let compile_result = Command::new(compiler_path.clone())
             .args(&[source, "-o", target])
             .output()
