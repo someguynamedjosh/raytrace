@@ -43,9 +43,9 @@ impl Pipeline {
 
         let descriptor_pool = create_descriptor_pool(core, swapchain_size as u32);
         let descriptor_set_layouts = DescriptorSetLayouts::create(core);
-        let descriptor_sets =
-            DescriptorSets::create(core, descriptor_pool, &descriptor_set_layouts);
         let render_data = RenderData::create(core);
+        let descriptor_sets =
+            DescriptorSets::create(core, descriptor_pool, &descriptor_set_layouts, &render_data);
 
         let test_stage = create_test_stage(core, &descriptor_set_layouts);
 
@@ -76,9 +76,11 @@ impl Pipeline {
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
             );
-            let set = self.descriptor_sets.swapchain_outputs[index];
             let layout = self.test_stage.pipeline_layout;
-            cmd_bind_descriptor_set(core, buffer, set, layout);
+            let set = self.descriptor_sets.test_data;
+            cmd_bind_descriptor_set(core, buffer, set, layout, 0);
+            let set = self.descriptor_sets.swapchain_outputs[index];
+            cmd_bind_descriptor_set(core, buffer, set, layout, 1);
             cmd_bind_pipeline(core, buffer, self.test_stage.vk_pipeline);
             unsafe {
                 core.device.cmd_dispatch(buffer, 30, 30, 1);
@@ -175,12 +177,14 @@ impl Pipeline {
 
 struct DescriptorSetLayouts {
     swapchain_output: vk::DescriptorSetLayout,
+    test_data: vk::DescriptorSetLayout,
 }
 
 impl DescriptorSetLayouts {
     fn create(core: &Core) -> DescriptorSetLayouts {
         DescriptorSetLayouts {
             swapchain_output: create_descriptor_set_layout(core, &[BindingType::StorageImage]),
+            test_data: create_descriptor_set_layout(core, &[BindingType::Sampler]),
         }
     }
 }
@@ -196,6 +200,7 @@ impl DescriptorSetLayouts {
 
 struct DescriptorSets {
     swapchain_outputs: Vec<vk::DescriptorSet>,
+    test_data: vk::DescriptorSet,
 }
 
 impl DescriptorSets {
@@ -203,13 +208,11 @@ impl DescriptorSets {
         core: &Core,
         pool: vk::DescriptorPool,
         layouts: &DescriptorSetLayouts,
+        data: &RenderData,
     ) -> DescriptorSets {
         DescriptorSets {
-            swapchain_outputs: create_swapchain_output_descriptor_sets(
-                core,
-                pool,
-                layouts.swapchain_output,
-            ),
+            swapchain_outputs: create_swapchain_output_descriptor_sets(core, pool, layouts, data),
+            test_data: create_test_data_descriptor_sets(core, pool, layouts, data),
         }
     }
 }
@@ -721,15 +724,21 @@ fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
 }
 
 fn create_descriptor_pool(core: &Core, num_swapchain_images: u32) -> vk::DescriptorPool {
-    let pool_size = vk::DescriptorPoolSize {
+    let num_storage_images = vk::DescriptorPoolSize {
         ty: vk::DescriptorType::STORAGE_IMAGE,
         descriptor_count: num_swapchain_images,
         ..Default::default()
     };
+    let num_samplers = vk::DescriptorPoolSize {
+        ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        descriptor_count: 1,
+        ..Default::default()
+    };
+    let sizes = [num_storage_images, num_samplers];
     let create_info = vk::DescriptorPoolCreateInfo {
-        pool_size_count: 1,
-        p_pool_sizes: &pool_size,
-        max_sets: num_swapchain_images,
+        pool_size_count: 2,
+        p_pool_sizes: sizes.as_ptr(),
+        max_sets: num_swapchain_images + 1,
         ..Default::default()
     };
     unsafe {
@@ -762,6 +771,7 @@ fn create_descriptor_set_layout(
 
 enum BindingType {
     StorageImage,
+    Sampler,
 }
 
 impl BindingType {
@@ -781,6 +791,7 @@ impl BindingType {
     fn create_descriptor_set_layout_binding(&self, index: u32) -> vk::DescriptorSetLayoutBinding {
         match self {
             Self::StorageImage => Self::simple_binding(index, vk::DescriptorType::STORAGE_IMAGE),
+            Self::Sampler => Self::simple_binding(index, vk::DescriptorType::COMBINED_IMAGE_SAMPLER),
         }
     }
 }
@@ -788,8 +799,10 @@ impl BindingType {
 fn create_swapchain_output_descriptor_sets(
     core: &Core,
     pool: vk::DescriptorPool,
-    layout: vk::DescriptorSetLayout,
+    layouts: &DescriptorSetLayouts,
+    _data: &RenderData,
 ) -> Vec<vk::DescriptorSet> {
+    let layout = layouts.swapchain_output;
     let quantity = core.swapchain_info.swapchain_images.len();
     let mut layouts = vec![];
     for _ in 0..quantity {
@@ -836,6 +849,45 @@ fn create_swapchain_output_descriptor_sets(
     descriptor_sets
 }
 
+fn create_test_data_descriptor_sets(
+    core: &Core,
+    pool: vk::DescriptorPool,
+    layouts: &DescriptorSetLayouts,
+    data: &RenderData,
+) -> vk::DescriptorSet {
+    let layout = layouts.test_data;
+    let allocate_info = vk::DescriptorSetAllocateInfo {
+        descriptor_pool: pool,
+        descriptor_set_count: 1,
+        p_set_layouts: &layout,
+        ..Default::default()
+    };
+    let descriptor_set = unsafe {
+        core.device
+            .allocate_descriptor_sets(&allocate_info)
+            .expect("Failed to create test data descriptor set.")[0]
+    };
+
+    let image_info = vk::DescriptorImageInfo {
+        sampler: data.blue_noise.sampler,
+        image_view: data.blue_noise.image_view,
+        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+    };
+    let write = vk::WriteDescriptorSet {
+        dst_set: descriptor_set,
+        dst_binding: 0,
+        descriptor_count: 1,
+        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        p_image_info: &image_info,
+        ..Default::default()
+    };
+    unsafe {
+        core.device.update_descriptor_sets(&[write], &[]);
+    }
+
+    descriptor_set
+}
+
 fn create_shader_module(core: &Core, shader_source: *const u8, length: usize) -> vk::ShaderModule {
     let shader_module_create_info = vk::ShaderModuleCreateInfo {
         code_size: length,
@@ -869,9 +921,10 @@ fn create_test_stage(core: &Core, layouts: &DescriptorSetLayouts) -> Stage {
     let entry_point = CString::new("main").unwrap();
     let shader_stage = create_compute_shader_stage(core, shader_module, &entry_point);
 
+    let descriptor_sets = [layouts.test_data, layouts.swapchain_output];
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
-        set_layout_count: 1,
-        p_set_layouts: &layouts.swapchain_output,
+        set_layout_count: 2,
+        p_set_layouts: descriptor_sets.as_ptr(),
         ..Default::default()
     };
     let pipeline_layout = unsafe {
@@ -996,13 +1049,14 @@ fn cmd_bind_descriptor_set(
     buffer: vk::CommandBuffer,
     descriptor_set: vk::DescriptorSet,
     pipeline_layout: vk::PipelineLayout,
+    index: u32,
 ) {
     unsafe {
         core.device.cmd_bind_descriptor_sets(
             buffer,
             vk::PipelineBindPoint::COMPUTE,
             pipeline_layout,
-            0,
+            index,
             &[descriptor_set],
             &[],
         );

@@ -9,7 +9,7 @@ fn main() {
         panic!("The environment variable $VULKAN_SDK is blank.");
     }
 
-    println!("cargo:rerun-if-changed=shaders/glsl/");
+    println!("cargo:rerun-if-changed=shaders/glsl/*");
 
     let mut required_compiles = vec![];
     let mut total_shaders = 0;
