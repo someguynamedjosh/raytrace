@@ -4,6 +4,8 @@ use ash::vk;
 use std::ffi::CString;
 use std::ops::Deref;
 
+use image::GenericImageView;
+
 use super::constants::*;
 use super::core::Core;
 
@@ -22,7 +24,6 @@ impl Stage {
 
 pub struct Pipeline {
     test_stage: Stage,
-    command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     descriptor_pool: vk::DescriptorPool,
     frame_available_semaphore: vk::Semaphore,
@@ -38,8 +39,7 @@ impl Pipeline {
         let (frame_available_semaphore, frame_complete_semaphore) = create_semaphores(core);
         let (frame_complete_fence,) = create_fences(core);
         let swapchain_size = core.swapchain_info.swapchain_images.len();
-        let command_pool = create_command_pool(core);
-        let command_buffers = create_command_buffers(core, command_pool);
+        let command_buffers = create_command_buffers(core);
 
         let descriptor_pool = create_descriptor_pool(core, swapchain_size as u32);
         let descriptor_set_layouts = DescriptorSetLayouts::create(core);
@@ -51,7 +51,6 @@ impl Pipeline {
 
         let mut pipeline = Pipeline {
             test_stage,
-            command_pool,
             command_buffers,
             descriptor_pool,
             frame_available_semaphore,
@@ -165,7 +164,6 @@ impl Pipeline {
         self.descriptor_set_layouts.destroy(core);
         core.device
             .destroy_descriptor_pool(self.descriptor_pool, None);
-        core.device.destroy_command_pool(self.command_pool, None);
 
         core.device.destroy_fence(self.frame_complete_fence, None);
         core.device
@@ -219,6 +217,7 @@ impl DescriptorSets {
 struct Buffer {
     native: vk::Buffer,
     memory: vk::DeviceMemory,
+    size: u64,
 }
 
 impl Buffer {
@@ -258,7 +257,18 @@ impl Buffer {
         Buffer {
             native: buffer,
             memory,
+            size,
         }
+    }
+
+    unsafe fn bind_all<PtrType>(&mut self, core: &Core) -> *mut PtrType {
+        core.device
+            .map_memory(self.memory, 0, self.size, Default::default())
+            .expect("Failed to bind memory.") as *mut PtrType
+    }
+
+    unsafe fn unbind(&mut self, core: &Core) {
+        core.device.unmap_memory(self.memory)
     }
 
     fn destroy(&mut self, core: &Core) {
@@ -350,6 +360,7 @@ struct SampledImage {
     image_view: vk::ImageView,
     sampler: vk::Sampler,
     memory: vk::DeviceMemory,
+    extent: vk::Extent3D,
 }
 
 impl SampledImage {
@@ -404,7 +415,7 @@ impl SampledImage {
                 vk::ImageType::TYPE_1D => vk::ImageViewType::TYPE_1D,
                 vk::ImageType::TYPE_2D => vk::ImageViewType::TYPE_2D,
                 vk::ImageType::TYPE_3D => vk::ImageViewType::TYPE_3D,
-                _ => unreachable!("Encountered unspecified ImageType.")
+                _ => unreachable!("Encountered unspecified ImageType."),
             },
             format,
             subresource_range: vk::ImageSubresourceRange {
@@ -444,7 +455,55 @@ impl SampledImage {
             image_view,
             sampler,
             memory,
+            extent,
         }
+    }
+
+    fn load_from_png(&mut self, core: &Core, bytes: &[u8]) {
+        let size = self.extent.width * self.extent.height * self.extent.depth;
+        let data = image::load_from_memory_with_format(bytes, image::ImageFormat::PNG)
+            .expect("Failed to decode PNG data.");
+        let mut buffer = Buffer::create(
+            core,
+            size as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
+        );
+        unsafe {
+            let buffer_ptr = buffer.bind_all::<u8>(core);
+            for (index, pixel) in data.pixels().enumerate() {
+                // RGBA
+                *buffer_ptr.offset(index as isize * 4 + 0) = (pixel.2).0[0];
+                *buffer_ptr.offset(index as isize * 4 + 1) = (pixel.2).0[1];
+                *buffer_ptr.offset(index as isize * 4 + 2) = (pixel.2).0[2];
+                *buffer_ptr.offset(index as isize * 4 + 3) = (pixel.2).0[3];
+            }
+            buffer.unbind(core);
+        }
+        let upload_commands = create_command_buffer(core);
+        cmd_begin_one_time_submit(core, upload_commands);
+        cmd_transition_layout(
+            core,
+            upload_commands,
+            self.image,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        cmd_copy_buffer_to_image(
+            core,
+            upload_commands,
+            buffer.native,
+            self.image,
+            self.extent,
+        );
+        cmd_transition_layout(
+            core,
+            upload_commands,
+            self.image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
+        cmd_end(core, upload_commands);
+        execute_and_destroy_buffer(core, upload_commands);
     }
 
     fn destroy(&mut self, core: &Core) {
@@ -559,16 +618,20 @@ impl RenderData {
             emission_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
             fog_color_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
 
-            blue_noise: SampledImage::create(
-                core,
-                vk::ImageType::TYPE_2D,
-                vk::Extent3D {
-                    width: 512,
-                    height: 512,
-                    depth: 1,
-                },
-                vk::Format::R8G8B8A8_UNORM,
-            ),
+            blue_noise: {
+                let mut tex = SampledImage::create(
+                    core,
+                    vk::ImageType::TYPE_2D,
+                    vk::Extent3D {
+                        width: BLUE_NOISE_WIDTH,
+                        height: BLUE_NOISE_HEIGHT,
+                        depth: 1,
+                    },
+                    vk::Format::R8G8B8A8_UNORM,
+                );
+                tex.load_from_png(core, include_bytes!("blue_noise_512.png"));
+                tex
+            },
         }
     }
 
@@ -628,22 +691,24 @@ fn create_fences(core: &Core) -> (vk::Fence,) {
     },)
 }
 
-fn create_command_pool(core: &Core) -> vk::CommandPool {
-    let create_info = vk::CommandPoolCreateInfo {
-        queue_family_index: core.queue_family_indices.compute.unwrap(),
+fn create_command_buffer(core: &Core) -> vk::CommandBuffer {
+    let allocate_info = vk::CommandBufferAllocateInfo {
+        command_buffer_count: 1,
+        command_pool: core.command_pool,
+        level: vk::CommandBufferLevel::PRIMARY,
         ..Default::default()
     };
     unsafe {
         core.device
-            .create_command_pool(&create_info, None)
-            .expect("Failed to create command pool.")
+            .allocate_command_buffers(&allocate_info)
+            .expect("Failed to allocate single-use command buffer.")[0]
     }
 }
 
-fn create_command_buffers(core: &Core, command_pool: vk::CommandPool) -> Vec<vk::CommandBuffer> {
+fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
     let allocate_info = vk::CommandBufferAllocateInfo {
         command_buffer_count: core.swapchain_info.swapchain_images.len() as u32,
-        command_pool,
+        command_pool: core.command_pool,
         level: vk::CommandBufferLevel::PRIMARY,
         ..Default::default()
     };
@@ -840,8 +905,39 @@ fn create_test_stage(core: &Core, layouts: &DescriptorSetLayouts) -> Stage {
     }
 }
 
+fn execute_and_destroy_buffer(core: &Core, buffer: vk::CommandBuffer) {
+    let submit_info = vk::SubmitInfo {
+        command_buffer_count: 1,
+        p_command_buffers: &buffer,
+        ..Default::default()
+    };
+
+    unsafe {
+        core.device
+            .queue_submit(core.compute_queue, &[submit_info], vk::Fence::null())
+            .expect("Failed to submit command queue.");
+        core.device
+            .queue_wait_idle(core.compute_queue)
+            .expect("Failed to wait for queue completion.");
+        core.device
+            .free_command_buffers(core.command_pool, &[buffer]);
+    }
+}
+
 fn cmd_begin(core: &Core, buffer: vk::CommandBuffer) {
     let begin_info = vk::CommandBufferBeginInfo {
+        ..Default::default()
+    };
+    unsafe {
+        core.device
+            .begin_command_buffer(buffer, &begin_info)
+            .expect("Failed to begin command buffer.");
+    }
+}
+
+fn cmd_begin_one_time_submit(core: &Core, buffer: vk::CommandBuffer) {
+    let begin_info = vk::CommandBufferBeginInfo {
+        flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
         ..Default::default()
     };
     unsafe {
@@ -916,5 +1012,39 @@ fn cmd_bind_pipeline(core: &Core, buffer: vk::CommandBuffer, pipeline: vk::Pipel
     unsafe {
         core.device
             .cmd_bind_pipeline(buffer, vk::PipelineBindPoint::COMPUTE, pipeline);
+    }
+}
+
+fn cmd_copy_buffer_to_image(
+    core: &Core,
+    buffer: vk::CommandBuffer,
+    data_buffer: vk::Buffer,
+    image: vk::Image,
+    extent: vk::Extent3D,
+) {
+    let copy_info = vk::BufferImageCopy {
+        buffer_offset: 0,
+        buffer_row_length: 0,
+        buffer_image_height: 0,
+
+        image_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+
+        image_extent: extent,
+        ..Default::default()
+    };
+
+    unsafe {
+        core.device.cmd_copy_buffer_to_image(
+            buffer,
+            data_buffer,
+            image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[copy_info],
+        );
     }
 }

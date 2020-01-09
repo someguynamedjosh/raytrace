@@ -13,6 +13,11 @@ pub const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_KHRONOS_validation"];
 pub const DEVICE_EXTENSIONS: &[&str] = &["VK_KHR_swapchain"];
 
 // Pipeline constants.
+pub const BLUE_NOISE_WIDTH: u32 = 512;
+pub const BLUE_NOISE_HEIGHT: u32 = 512;
+pub const BLUE_NOISE_CHANNELS: u32 = 4;
+pub const BLUE_NOISE_SIZE: u32 = BLUE_NOISE_WIDTH * BLUE_NOISE_HEIGHT * BLUE_NOISE_CHANNELS;
+
 pub const CHUNK_BLOCK_WIDTH: u32 = 8;
 pub const CHUNK_BLOCK_VOLUME: u32 = CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH * CHUNK_BLOCK_WIDTH;
 

@@ -26,6 +26,7 @@ pub struct Core {
     pub swapchain_info: SwapChainInfo,
     pub compute_queue: vk::Queue,
     pub present_queue: vk::Queue,
+    pub command_pool: vk::CommandPool,
     pub window: Box<Window>,
 }
 
@@ -46,6 +47,7 @@ impl Core {
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
         let (device, queue_family_indices) =
             create_logical_device(&instance, physical_device, &surface_info);
+        let command_pool = create_command_pool(&device, queue_family_indices.compute.unwrap());
         let swapchain_info = create_swapchain(
             &instance,
             &device,
@@ -73,6 +75,7 @@ impl Core {
             swapchain_info,
             compute_queue,
             present_queue,
+            command_pool,
             window,
         }
     }
@@ -85,6 +88,8 @@ impl Core {
         self.swapchain_info
             .swapchain_loader
             .destroy_swapchain(self.swapchain_info.swapchain, None);
+
+        self.device.destroy_command_pool(self.command_pool, None);
 
         self.device.destroy_device(None);
 
@@ -550,6 +555,18 @@ pub fn query_swapchain_support(
             formats,
             present_modes,
         }
+    }
+}
+
+fn create_command_pool(device: &ash::Device, queue_family_index: u32) -> vk::CommandPool {
+    let create_info = vk::CommandPoolCreateInfo {
+        queue_family_index,
+        ..Default::default()
+    };
+    unsafe {
+        device
+            .create_command_pool(&create_info, None)
+            .expect("Failed to create command pool.")
     }
 }
 
