@@ -345,6 +345,126 @@ impl Deref for Image {
     }
 }
 
+struct SampledImage {
+    image: vk::Image,
+    image_view: vk::ImageView,
+    sampler: vk::Sampler,
+    memory: vk::DeviceMemory,
+}
+
+impl SampledImage {
+    fn create(
+        core: &Core,
+        typ: vk::ImageType,
+        extent: vk::Extent3D,
+        format: vk::Format,
+    ) -> SampledImage {
+        let create_info = vk::ImageCreateInfo {
+            image_type: typ,
+            extent,
+            format,
+            samples: vk::SampleCountFlags::TYPE_1,
+            mip_levels: 1,
+            array_layers: 1,
+            // TODO: Better usage.
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            tiling: vk::ImageTiling::OPTIMAL,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            ..Default::default()
+        };
+        let image = unsafe {
+            core.device
+                .create_image(&create_info, None)
+                .expect("Failed to create buffer.")
+        };
+
+        let memory_requirements = unsafe { core.device.get_image_memory_requirements(image) };
+        let memory_allocation_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_requirements.size,
+            memory_type_index: core.find_compatible_memory_type(
+                memory_requirements.memory_type_bits,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            ),
+            ..Default::default()
+        };
+        let memory = unsafe {
+            core.device
+                .allocate_memory(&memory_allocation_info, None)
+                .expect("Failed to allocate memory for image.")
+        };
+        unsafe {
+            core.device
+                .bind_image_memory(image, memory, 0)
+                .expect("Failed to bind image to device memory.");
+        }
+
+        let image_view_create_info = vk::ImageViewCreateInfo {
+            image,
+            view_type: match typ {
+                vk::ImageType::TYPE_1D => vk::ImageViewType::TYPE_1D,
+                vk::ImageType::TYPE_2D => vk::ImageViewType::TYPE_2D,
+                vk::ImageType::TYPE_3D => vk::ImageViewType::TYPE_3D,
+                _ => unreachable!("Encountered unspecified ImageType.")
+            },
+            format,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            ..Default::default()
+        };
+        let image_view = unsafe {
+            core.device
+                .create_image_view(&image_view_create_info, None)
+                .expect("Failed to create image view for sampled image.")
+        };
+
+        let sampler_create_info = vk::SamplerCreateInfo {
+            mag_filter: vk::Filter::NEAREST,
+            min_filter: vk::Filter::NEAREST,
+            address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
+            unnormalized_coordinates: vk::TRUE, // Make coords in the range 0-(width) instead of 0-1
+            compare_enable: vk::FALSE,
+            ..Default::default()
+        };
+        let sampler = unsafe {
+            core.device
+                .create_sampler(&sampler_create_info, None)
+                .expect("Failed to create sampler for sampled image.")
+        };
+
+        SampledImage {
+            image,
+            image_view,
+            sampler,
+            memory,
+        }
+    }
+
+    fn destroy(&mut self, core: &Core) {
+        unsafe {
+            core.device.destroy_sampler(self.sampler, None);
+            core.device.destroy_image_view(self.image_view, None);
+            core.device.destroy_image(self.image, None);
+            core.device.free_memory(self.memory, None);
+        }
+    }
+}
+
+impl Deref for SampledImage {
+    type Target = vk::Sampler;
+
+    fn deref(&self) -> &vk::Sampler {
+        &self.sampler
+    }
+}
+
 struct RenderData {
     upload_buffers: Vec<Buffer>,
     upload_destinations: Vec<u16>,
@@ -364,6 +484,8 @@ struct RenderData {
     albedo_buffer: Image,
     emission_buffer: Image,
     fog_color_buffer: Image,
+
+    blue_noise: SampledImage,
 }
 
 impl RenderData {
@@ -436,6 +558,17 @@ impl RenderData {
             albedo_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
             emission_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
             fog_color_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
+
+            blue_noise: SampledImage::create(
+                core,
+                vk::ImageType::TYPE_2D,
+                vk::Extent3D {
+                    width: 512,
+                    height: 512,
+                    depth: 1,
+                },
+                vk::Format::R8G8B8A8_UNORM,
+            ),
         }
     }
 
@@ -459,6 +592,8 @@ impl RenderData {
         self.albedo_buffer.destroy(core);
         self.emission_buffer.destroy(core);
         self.fog_color_buffer.destroy(core);
+
+        self.blue_noise.destroy(core);
     }
 }
 
