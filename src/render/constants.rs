@@ -10,5 +10,3 @@ pub const WINDOW_HEIGHT: u32 = 512;
 pub const ENABLE_DEBUG: bool = cfg!(debug_assertions);
 pub const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_KHRONOS_validation"];
 pub const DEVICE_EXTENSIONS: &[&str] = &["VK_KHR_swapchain"];
-
-pub const MAX_FRAMES_IN_FLIGHT: usize = 2;

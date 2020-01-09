@@ -3,7 +3,6 @@ use ash::vk;
 
 use std::ffi::CString;
 
-use super::constants::*;
 use super::core::Core;
 
 struct Stage {
@@ -24,21 +23,18 @@ pub struct Pipeline {
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     descriptor_pool: vk::DescriptorPool,
-    frame_available_semaphores: Vec<vk::Semaphore>,
-    frame_complete_semaphores: Vec<vk::Semaphore>,
-    frame_complete_fences: Vec<vk::Fence>,
-    swapchain_image_available_fences: Vec<Option<vk::Fence>>,
+    frame_available_semaphore: vk::Semaphore,
+    frame_complete_semaphore: vk::Semaphore,
+    frame_complete_fence: vk::Fence,
     descriptor_set_layouts: DescriptorSetLayouts,
     descriptor_sets: DescriptorSets,
-    current_frame: usize,
 }
 
 impl Pipeline {
     pub fn new(core: &Core) -> Pipeline {
-        let (frame_available_semaphores, frame_complete_semaphores) = create_semaphores(core);
-        let frame_complete_fences = create_fences(core);
+        let (frame_available_semaphore, frame_complete_semaphore) = create_semaphores(core);
+        let (frame_complete_fence,) = create_fences(core);
         let swapchain_size = core.swapchain_info.swapchain_images.len();
-        let swapchain_image_available_fences = (0..swapchain_size).map(|_| None).collect();
         let command_pool = create_command_pool(core);
         let command_buffers = create_command_buffers(core, command_pool);
 
@@ -53,13 +49,11 @@ impl Pipeline {
             command_pool,
             command_buffers,
             descriptor_pool,
-            frame_available_semaphores,
-            frame_complete_semaphores,
-            frame_complete_fences,
-            swapchain_image_available_fences,
+            frame_available_semaphore,
+            frame_complete_semaphore,
+            frame_complete_fence,
             descriptor_set_layouts,
             descriptor_sets,
-            current_frame: 0,
         };
         pipeline.record_command_buffers(core);
         pipeline
@@ -96,39 +90,20 @@ impl Pipeline {
     }
 
     pub fn draw_frame(&mut self, core: &Core) {
-        unsafe {
-            core.device
-                .wait_for_fences(
-                    &[self.frame_complete_fences[self.current_frame]],
-                    true,
-                    std::u64::MAX,
-                )
-                .expect("Failed to wait for previous frame to finish rendering.");
-        }
-
         let (image_index, _is_suboptimal) = unsafe {
             core.swapchain_info
                 .swapchain_loader
                 .acquire_next_image(
                     core.swapchain_info.swapchain,
                     std::u64::MAX,
-                    self.frame_available_semaphores[self.current_frame],
+                    self.frame_available_semaphore,
                     vk::Fence::null(),
                 )
                 .expect("Failed to acquire next swapchain image.")
         };
 
-        if let Some(fence) = self.swapchain_image_available_fences[image_index as usize] {
-            unsafe {
-                core.device
-                    .wait_for_fences(&[fence], true, std::u64::MAX)
-                    .expect("Failed to wait for swapchain image to finish being used.");
-            }
-        }
-        self.swapchain_image_available_fences[image_index as usize] =
-            Some(self.frame_complete_fences[self.current_frame]);
-        let wait_semaphores = [self.frame_available_semaphores[self.current_frame]];
-        let signal_semaphores = [self.frame_complete_semaphores[self.current_frame]];
+        let wait_semaphores = [self.frame_available_semaphore];
+        let signal_semaphores = [self.frame_complete_semaphore];
         let wait_stage_mask = [vk::PipelineStageFlags::ALL_COMMANDS];
         let submit_info = vk::SubmitInfo {
             wait_semaphore_count: 1,
@@ -142,7 +117,10 @@ impl Pipeline {
         };
 
         unsafe {
-            let wait_fence = self.frame_complete_fences[self.current_frame];
+            let wait_fence = self.frame_complete_fence;
+            core.device
+                .wait_for_fences(&[wait_fence], true, std::u64::MAX)
+                .expect("Failed to wait for previous frame to finish rendering.");
             core.device
                 .reset_fences(&[wait_fence])
                 .expect("Failed to reset fence.");
@@ -151,7 +129,7 @@ impl Pipeline {
                 .expect("Failed to submit command queue.");
         }
 
-        let wait_semaphores = [self.frame_complete_semaphores[self.current_frame]];
+        let wait_semaphores = [self.frame_complete_semaphore];
         let swapchains = [core.swapchain_info.swapchain];
         let present_info = vk::PresentInfoKHR {
             wait_semaphore_count: 1,
@@ -168,8 +146,6 @@ impl Pipeline {
                 .queue_present(core.present_queue, &present_info)
                 .expect("Failed to present swapchain image.");
         }
-
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     pub unsafe fn destroy(&mut self, core: &Core) {
@@ -183,16 +159,11 @@ impl Pipeline {
             .destroy_descriptor_pool(self.descriptor_pool, None);
         core.device.destroy_command_pool(self.command_pool, None);
 
-        for fence in self.frame_complete_fences.iter() {
-            core.device.destroy_fence(*fence, None);
-        }
-        // Don't destroy swapchain_available_fences because they just point to elements in
-        // frame_complete_fences.
-        let semaphores1 = self.frame_available_semaphores.iter();
-        let semaphores2 = self.frame_complete_semaphores.iter();
-        for semaphore in semaphores1.chain(semaphores2) {
-            core.device.destroy_semaphore(*semaphore, None);
-        }
+        core.device.destroy_fence(self.frame_complete_fence, None);
+        core.device
+            .destroy_semaphore(self.frame_available_semaphore, None);
+        core.device
+            .destroy_semaphore(self.frame_complete_semaphore, None);
     }
 }
 
@@ -229,46 +200,35 @@ fn create_descriptor_sets(
     )
 }
 
-fn create_semaphores(core: &Core) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>) {
-    let mut a_semaphores = vec![];
-    let mut b_semaphores = vec![];
-
+fn create_semaphores(core: &Core) -> (vk::Semaphore, vk::Semaphore) {
     let create_info = Default::default();
 
-    for _ in 0..MAX_FRAMES_IN_FLIGHT {
-        a_semaphores.push(unsafe {
+    (
+        unsafe {
             core.device
                 .create_semaphore(&create_info, None)
                 .expect("Failed to create semaphore.")
-        });
-        b_semaphores.push(unsafe {
+        },
+        unsafe {
             core.device
                 .create_semaphore(&create_info, None)
                 .expect("Failed to create semaphore.")
-        });
-    }
-
-    (a_semaphores, b_semaphores)
+        },
+    )
 }
 
-fn create_fences(core: &Core) -> Vec<vk::Fence> {
-    let mut fences = vec![];
-
+fn create_fences(core: &Core) -> (vk::Fence,) {
     let create_info = vk::FenceCreateInfo {
         // Start the fences signalled so we don't wait on the first couple of frames.
         flags: vk::FenceCreateFlags::SIGNALED,
         ..Default::default()
     };
 
-    for _ in 0..MAX_FRAMES_IN_FLIGHT {
-        fences.push(unsafe {
-            core.device
-                .create_fence(&create_info, None)
-                .expect("Failed to create semaphore.")
-        });
-    }
-
-    fences
+    (unsafe {
+        core.device
+            .create_fence(&create_info, None)
+            .expect("Failed to create fence.")
+    },)
 }
 
 fn create_command_pool(core: &Core) -> vk::CommandPool {
