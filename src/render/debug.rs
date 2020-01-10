@@ -74,45 +74,24 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     let message = message_cstring.to_string_lossy().to_owned();
 
     let mut formatted_error = if message_type.contains(vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION) {
-        let vulkan_spec_quote_start = message
-            .find("The Vulkan spec states:")
-            .expect("Malformed validation message.");
-        let spec_url_start = message
-            .find("https://")
-            .expect("Malformed validation message.");
-        let error_text = &message[0..vulkan_spec_quote_start];
-        let error_text = error_text.replace(": ", ":\n > ");
-        let doc_quote = &message[vulkan_spec_quote_start..(spec_url_start - 2)];
-        let url = &message[spec_url_start..(message.len() - 2)];
-        format!(" > {}\nEXPLANATION:\n{}\n{}", error_text, doc_quote, url)
+        if message.contains("The Vulkan spec states:") {
+            let vulkan_spec_quote_start = message
+                .find("The Vulkan spec states:")
+                .expect("Malformed validation message: {}");
+            let spec_url_start = message
+                .find("https://")
+                .expect("Malformed validation message.");
+            let error_text = &message[0..vulkan_spec_quote_start];
+            let error_text = error_text.replace(": ", ":\n > ");
+            let doc_quote = &message[vulkan_spec_quote_start..(spec_url_start - 2)];
+            let url = &message[spec_url_start..(message.len() - 2)];
+            format!(" > {}\nEXPLANATION:\n{}\n{}", error_text, doc_quote, url)
+        } else {
+            message.into()
+        }
     } else {
         message.into()
     };
-
-    let objects = std::slice::from_raw_parts(
-        (*p_callback_data).p_objects,
-        (*p_callback_data).object_count as usize,
-    );
-    let objects: Vec<_> = objects
-        .iter()
-        .map(|object_desc| {
-            let name = if object_desc.p_object_name.is_null() {
-                format!(
-                    "{}@0x{:X?}",
-                    name_of_type(object_desc.object_type),
-                    object_desc.object_handle
-                )
-            } else {
-                let c_string = CStr::from_ptr(object_desc.p_object_name).to_owned();
-                String::from(c_string.to_string_lossy())
-            };
-            let formatted_handle = format!("0x{:x?}", object_desc.object_handle);
-            (formatted_handle, name)
-        })
-        .collect();
-    for (ugly_name, nice_name) in objects.iter() {
-        formatted_error = formatted_error.replace(ugly_name, nice_name);
-    }
 
     let header = format!("[Debug]{}{}", severity, types);
     let header = if message_severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {
