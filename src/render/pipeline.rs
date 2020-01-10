@@ -1,6 +1,8 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
 
+use cgmath::Vector3;
+
 use std::ffi::CString;
 
 use super::commands as cmd;
@@ -9,7 +11,7 @@ use super::core::Core;
 #[macro_use]
 use crate::create_descriptor_collection_struct;
 use super::descriptors::DescriptorPrototype;
-use super::structures::{Buffer, Image, SampledImage};
+use super::structures::{Buffer, Image, ObjectBuffer, SampledImage};
 
 struct Stage {
     vk_pipeline: vk::Pipeline,
@@ -175,103 +177,77 @@ impl Pipeline {
     }
 }
 
-create_descriptor_collection_struct! {
-    name: DescriptorCollection,
-    aux_data_type: RenderData,
-    items: {
-        denoise = generate_denoise_ds_prototypes,
-        finalize = generate_finalize_ds_prototypes,
-        raytrace = generate_raytrace_ds_prototypes,
-        swapchain = generate_swapchain_ds_prototypes,
+fn create_semaphores(core: &Core) -> (vk::Semaphore, vk::Semaphore) {
+    let create_info = Default::default();
+
+    (
+        unsafe {
+            core.device
+                .create_semaphore(&create_info, None)
+                .expect("Failed to create semaphore.")
+        },
+        unsafe {
+            core.device
+                .create_semaphore(&create_info, None)
+                .expect("Failed to create semaphore.")
+        },
+    )
+}
+
+fn create_fences(core: &Core) -> (vk::Fence,) {
+    let create_info = vk::FenceCreateInfo {
+        // Start the fences signalled so we don't wait on the first couple of frames.
+        flags: vk::FenceCreateFlags::SIGNALED,
+        ..Default::default()
+    };
+
+    let fence = unsafe {
+        core.device
+            .create_fence(&create_info, None)
+            .expect("Failed to create fence.")
+    };
+    core.set_debug_name(fence, "wait_for_frame_end");
+    (fence,)
+}
+
+fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
+    // TODO: debug names.
+    let allocate_info = vk::CommandBufferAllocateInfo {
+        command_buffer_count: core.swapchain_info.swapchain_images.len() as u32,
+        command_pool: core.command_pool,
+        level: vk::CommandBufferLevel::PRIMARY,
+        ..Default::default()
+    };
+    unsafe {
+        core.device
+            .allocate_command_buffers(&allocate_info)
+            .expect("Failed to allocate command buffers.")
     }
 }
 
-fn generate_denoise_ds_prototypes(
-    _core: &Core,
-    render_data: &RenderData,
-) -> Vec<Vec<DescriptorPrototype>> {
-    use DescriptorPrototype as DP;
-    vec![
-        vec![
-            DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
-            DP::storage_image(&render_data.normal_buffer, vk::ImageLayout::GENERAL),
-            DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
-            //
-            DP::storage_image(&render_data.lighting_pong_buffer, vk::ImageLayout::GENERAL),
-        ],
-        vec![
-            DP::storage_image(&render_data.lighting_pong_buffer, vk::ImageLayout::GENERAL),
-            DP::storage_image(&render_data.normal_buffer, vk::ImageLayout::GENERAL),
-            DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
-            //
-            DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
-        ],
-    ]
-}
-
-fn generate_finalize_ds_prototypes(
-    _core: &Core,
-    render_data: &RenderData,
-) -> Vec<Vec<DescriptorPrototype>> {
-    use DescriptorPrototype as DP;
-    vec![vec![
-        DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.albedo_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.emission_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.fog_color_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
-        //
-        DP::combined_img_sampler(
-            &render_data.blue_noise,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        ),
-    ]]
-}
-
-fn generate_raytrace_ds_prototypes(
-    _core: &Core,
-    render_data: &RenderData,
-) -> Vec<Vec<DescriptorPrototype>> {
-    use DescriptorPrototype as DP;
-    vec![vec![
-        DP::storage_image(&render_data.block_data_atlas, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.chunk_map, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.region_map, vk::ImageLayout::GENERAL),
-        //
-        DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.albedo_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.emission_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.fog_color_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.normal_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
-        //
-        DP::storage_image(&render_data.old_lighting_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.old_normal_buffer, vk::ImageLayout::GENERAL),
-        DP::storage_image(&render_data.old_depth_buffer, vk::ImageLayout::GENERAL),
-        //
-        DP::combined_img_sampler(
-            &render_data.blue_noise,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        ),
-        // TODO: push_data
-    ]]
-}
-
-fn generate_swapchain_ds_prototypes(
-    core: &Core,
-    _render_data: &RenderData,
-) -> Vec<Vec<DescriptorPrototype>> {
-    use DescriptorPrototype as DP;
-    let views = &core.swapchain_info.swapchain_image_views;
-    views
-        .iter()
-        .map(|image_view| {
-            vec![DP::StorageImage(
-                *image_view,
-                vk::ImageLayout::GENERAL,
-            )]
-        })
-        .collect()
+#[repr(C)]
+struct RaytracePushData {
+    sun_angle: f32,
+    seed: u32,
+    _padding0: u64,
+    origin: Vector3<f32>,
+    _padding1: u32,
+    forward: Vector3<f32>,
+    _padding2: u32,
+    up: Vector3<f32>,
+    _padding3: u32,
+    right: Vector3<f32>,
+    _padding4: u32,
+    old_origin: Vector3<f32>,
+    _padding5: u32,
+    old_transform_c0: Vector3<f32>,
+    _padding6: u32,
+    old_transform_c1: Vector3<f32>,
+    _padding7: u32,
+    old_transform_c2: Vector3<f32>,
+    _padding8: u32,
+    region_offset: Vector3<i32>,
+    _padding9: u32,
 }
 
 struct RenderData {
@@ -295,6 +271,9 @@ struct RenderData {
     fog_color_buffer: Image,
 
     blue_noise: SampledImage,
+
+    raytrace_push_data: RaytracePushData,
+    raytrace_push_data_buffer: ObjectBuffer<RaytracePushData>,
 }
 
 impl RenderData {
@@ -392,6 +371,35 @@ impl RenderData {
                 tex.load_from_png(core, include_bytes!("blue_noise_512.png"));
                 tex
             },
+
+            raytrace_push_data: RaytracePushData {
+                sun_angle: 0.0,
+                seed: 0,
+                origin: [0.0, 0.0, 0.0].into(),
+                forward: [0.0, 0.0, 0.0].into(),
+                up: [0.0, 0.0, 0.0].into(),
+                right: [0.0, 0.0, 0.0].into(),
+                old_origin: [0.0, 0.0, 0.0].into(),
+                old_transform_c0: [0.0, 0.0, 0.0].into(),
+                old_transform_c1: [0.0, 0.0, 0.0].into(),
+                old_transform_c2: [0.0, 0.0, 0.0].into(),
+                region_offset: [0, 0, 0].into(),
+                _padding0: 0,
+                _padding1: 0,
+                _padding2: 0,
+                _padding3: 0,
+                _padding4: 0,
+                _padding5: 0,
+                _padding6: 0,
+                _padding7: 0,
+                _padding8: 0,
+                _padding9: 0,
+            },
+            raytrace_push_data_buffer: ObjectBuffer::create(
+                core,
+                "raytrace_push_data",
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+            ),
         }
     }
 
@@ -420,52 +428,96 @@ impl RenderData {
     }
 }
 
-fn create_semaphores(core: &Core) -> (vk::Semaphore, vk::Semaphore) {
-    let create_info = Default::default();
-
-    (
-        unsafe {
-            core.device
-                .create_semaphore(&create_info, None)
-                .expect("Failed to create semaphore.")
-        },
-        unsafe {
-            core.device
-                .create_semaphore(&create_info, None)
-                .expect("Failed to create semaphore.")
-        },
-    )
-}
-
-fn create_fences(core: &Core) -> (vk::Fence,) {
-    let create_info = vk::FenceCreateInfo {
-        // Start the fences signalled so we don't wait on the first couple of frames.
-        flags: vk::FenceCreateFlags::SIGNALED,
-        ..Default::default()
-    };
-
-    let fence = unsafe {
-        core.device
-            .create_fence(&create_info, None)
-            .expect("Failed to create fence.")
-    };
-    core.set_debug_name(fence, "wait_for_frame_end");
-    (fence,)
-}
-
-fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
-    // TODO: debug names.
-    let allocate_info = vk::CommandBufferAllocateInfo {
-        command_buffer_count: core.swapchain_info.swapchain_images.len() as u32,
-        command_pool: core.command_pool,
-        level: vk::CommandBufferLevel::PRIMARY,
-        ..Default::default()
-    };
-    unsafe {
-        core.device
-            .allocate_command_buffers(&allocate_info)
-            .expect("Failed to allocate command buffers.")
+create_descriptor_collection_struct! {
+    name: DescriptorCollection,
+    aux_data_type: RenderData,
+    items: {
+        denoise = generate_denoise_ds_prototypes,
+        finalize = generate_finalize_ds_prototypes,
+        raytrace = generate_raytrace_ds_prototypes,
+        swapchain = generate_swapchain_ds_prototypes,
     }
+}
+
+#[rustfmt::skip] // It keeps trying to spread my beautiful descriptors over 3 lines :(
+fn generate_denoise_ds_prototypes(
+    _core: &Core,
+    render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    vec![
+        vec![
+            render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
+            render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
+            render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+            //
+            render_data.lighting_pong_buffer.create_dp(vk::ImageLayout::GENERAL),
+        ],
+        vec![
+            render_data.lighting_pong_buffer.create_dp(vk::ImageLayout::GENERAL),
+            render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
+            render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+            //
+            render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
+        ],
+    ]
+}
+
+#[rustfmt::skip]
+fn generate_finalize_ds_prototypes(
+    _core: &Core,
+    render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    vec![vec![
+        render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.albedo_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.emission_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.fog_color_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+        //
+        render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+    ]]
+}
+
+#[rustfmt::skip]
+fn generate_raytrace_ds_prototypes(
+    _core: &Core,
+    render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    vec![vec![
+        render_data.block_data_atlas.create_dp(vk::ImageLayout::GENERAL),
+        render_data.chunk_map.create_dp(vk::ImageLayout::GENERAL),
+        render_data.region_map.create_dp(vk::ImageLayout::GENERAL),
+        //
+        render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.albedo_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.emission_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.fog_color_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+        //
+        render_data.old_lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.old_normal_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.old_depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+        //
+        render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+        render_data.raytrace_push_data_buffer.create_dp(),
+    ]]
+}
+
+fn generate_swapchain_ds_prototypes(
+    core: &Core,
+    _render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    let views = &core.swapchain_info.swapchain_image_views;
+    views
+        .iter()
+        .map(|image_view| {
+            vec![DescriptorPrototype::StorageImage(
+                *image_view,
+                vk::ImageLayout::GENERAL,
+            )]
+        })
+        .collect()
 }
 
 fn create_shader_module(core: &Core, shader_source: *const u8, length: usize) -> vk::ShaderModule {

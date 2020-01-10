@@ -2,22 +2,14 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 
 use super::core::Core;
-use super::structures::{Buffer, Image, SampledImage};
 
 pub enum DescriptorPrototype {
     StorageImage(vk::ImageView, vk::ImageLayout),
     CombinedImageSampler(vk::ImageView, vk::ImageLayout, vk::Sampler),
+    UniformBuffer(vk::Buffer, u64, u64),
 }
 
 impl DescriptorPrototype {
-    pub fn storage_image(image: &Image, layout: vk::ImageLayout) -> Self {
-        Self::StorageImage(image.image_view, layout)
-    }
-
-    pub fn combined_img_sampler(image: &SampledImage, layout: vk::ImageLayout) -> Self {
-        Self::CombinedImageSampler(image.image_view, layout, image.sampler)
-    }
-
     fn matches(&self, other: &Self) -> bool {
         match self {
             Self::StorageImage(..) => {
@@ -34,6 +26,13 @@ impl DescriptorPrototype {
                     false
                 }
             }
+            Self::UniformBuffer(..) => {
+                if let Self::UniformBuffer(..) = other {
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -41,6 +40,7 @@ impl DescriptorPrototype {
         match self {
             Self::StorageImage(..) => vk::DescriptorType::STORAGE_IMAGE,
             Self::CombinedImageSampler(..) => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            Self::UniformBuffer(..) => vk::DescriptorType::UNIFORM_BUFFER,
         }
     }
 
@@ -71,6 +71,14 @@ impl DescriptorPrototype {
                     ..Default::default()
                 })
             }
+            Self::UniformBuffer(buffer, offset, range) => {
+                DescriptorPayload::BufferInfo(vk::DescriptorBufferInfo {
+                    buffer,
+                    offset,
+                    range,
+                    ..Default::default()
+                })
+            }
         }
     }
 }
@@ -78,12 +86,14 @@ impl DescriptorPrototype {
 #[derive(Debug)]
 enum DescriptorPayload {
     ImageInfo(vk::DescriptorImageInfo),
+    BufferInfo(vk::DescriptorBufferInfo),
 }
 
 impl DescriptorPayload {
     fn add_to_write_op(&self, write_op: &mut vk::WriteDescriptorSet) {
         match self {
             Self::ImageInfo(image_info) => write_op.p_image_info = image_info,
+            Self::BufferInfo(buffer_info) => write_op.p_buffer_info = buffer_info,
         }
     }
 }
@@ -113,15 +123,26 @@ struct DescriptorTypeAccumulator {
 impl DescriptorTypeAccumulator {
     fn new() -> DescriptorTypeAccumulator {
         DescriptorTypeAccumulator {
-            totals: (0..2).map(|_| 0).collect(),
+            totals: (0..13).map(|_| 0).collect(),
         }
     }
 
     fn index(&self, typ: vk::DescriptorType) -> usize {
         match typ {
-            vk::DescriptorType::STORAGE_IMAGE => 0,
+            vk::DescriptorType::ACCELERATION_STRUCTURE_NV => 0,
             vk::DescriptorType::COMBINED_IMAGE_SAMPLER => 1,
-            _ => unimplemented!(),
+            vk::DescriptorType::INLINE_UNIFORM_BLOCK_EXT => 2,
+            vk::DescriptorType::INPUT_ATTACHMENT => 3,
+            vk::DescriptorType::SAMPLED_IMAGE => 4,
+            vk::DescriptorType::SAMPLER => 5,
+            vk::DescriptorType::STORAGE_BUFFER => 6,
+            vk::DescriptorType::STORAGE_BUFFER_DYNAMIC => 7,
+            vk::DescriptorType::STORAGE_IMAGE => 8,
+            vk::DescriptorType::STORAGE_TEXEL_BUFFER => 9,
+            vk::DescriptorType::UNIFORM_BUFFER => 10,
+            vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC => 11,
+            vk::DescriptorType::UNIFORM_TEXEL_BUFFER => 12,
+            _ => unreachable!("Encountered invalid descriptor type."),
         }
     }
 
@@ -132,8 +153,19 @@ impl DescriptorTypeAccumulator {
 
     fn all_totals(&self) -> Vec<(vk::DescriptorType, u32)> {
         vec![
-            (vk::DescriptorType::STORAGE_IMAGE, self.totals[0]),
+            (vk::DescriptorType::ACCELERATION_STRUCTURE_NV, self.totals[0]),
             (vk::DescriptorType::COMBINED_IMAGE_SAMPLER, self.totals[1]),
+            (vk::DescriptorType::INLINE_UNIFORM_BLOCK_EXT, self.totals[2]),
+            (vk::DescriptorType::INPUT_ATTACHMENT, self.totals[3]),
+            (vk::DescriptorType::SAMPLED_IMAGE, self.totals[4]),
+            (vk::DescriptorType::SAMPLER, self.totals[5]),
+            (vk::DescriptorType::STORAGE_BUFFER, self.totals[6]),
+            (vk::DescriptorType::STORAGE_BUFFER_DYNAMIC, self.totals[7]),
+            (vk::DescriptorType::STORAGE_IMAGE, self.totals[8]),
+            (vk::DescriptorType::STORAGE_TEXEL_BUFFER, self.totals[9]),
+            (vk::DescriptorType::UNIFORM_BUFFER, self.totals[10]),
+            (vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC, self.totals[11]),
+            (vk::DescriptorType::UNIFORM_TEXEL_BUFFER, self.totals[12]),
         ]
     }
 }

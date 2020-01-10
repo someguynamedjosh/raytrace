@@ -3,8 +3,11 @@ use ash::vk;
 
 use image::GenericImageView;
 
+use std::marker::PhantomData;
+
 use super::commands as cmd;
 use super::core::Core;
+use super::descriptors::DescriptorPrototype;
 
 pub struct Buffer {
     pub buffer: vk::Buffer,
@@ -59,6 +62,84 @@ impl Buffer {
         core.device
             .map_memory(self.memory, 0, self.size, Default::default())
             .expect("Failed to bind memory.") as *mut PtrType
+    }
+
+    pub unsafe fn unbind(&mut self, core: &Core) {
+        core.device.unmap_memory(self.memory)
+    }
+
+    pub fn destroy(&mut self, core: &Core) {
+        unsafe {
+            core.device.destroy_buffer(self.buffer, None);
+            core.device.free_memory(self.memory, None);
+        }
+    }
+}
+
+pub struct ObjectBuffer<ObjectType> {
+    pub buffer: vk::Buffer,
+    memory: vk::DeviceMemory,
+    size: u64,
+    buffer_data: PhantomData<ObjectType>,
+}
+
+impl<ObjectType> ObjectBuffer<ObjectType> {
+    pub fn create(
+        core: &Core,
+        name: &str,
+        usage: vk::BufferUsageFlags,
+    ) -> Self {
+        let size = std::mem::size_of::<ObjectType>() as u64;
+        let create_info = vk::BufferCreateInfo {
+            size,
+            usage,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            ..Default::default()
+        };
+        let buffer = unsafe {
+            core.device
+                .create_buffer(&create_info, None)
+                .expect("Failed to create buffer.")
+        };
+        core.set_debug_name(buffer, name);
+
+        let memory_requirements = unsafe { core.device.get_buffer_memory_requirements(buffer) };
+        let memory_allocation_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_requirements.size,
+            memory_type_index: core.find_compatible_memory_type(
+                memory_requirements.memory_type_bits,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            ),
+            ..Default::default()
+        };
+        let memory = unsafe {
+            core.device
+                .allocate_memory(&memory_allocation_info, None)
+                .expect("Failed to allocate memory for buffer.")
+        };
+        unsafe {
+            core.device
+                .bind_buffer_memory(buffer, memory, 0)
+                .expect("Failed to bind buffer to device memory.");
+        }
+        core.set_debug_name(memory, &format!("{}_memory", name));
+
+        Self {
+            buffer,
+            memory,
+            size,
+            buffer_data: PhantomData,
+        }
+    }
+
+    pub fn create_dp(&self) -> DescriptorPrototype {
+        DescriptorPrototype::UniformBuffer(self.buffer, 0, self.size)
+    }
+
+    pub unsafe fn bind_all(&mut self, core: &Core) -> *mut ObjectType {
+        core.device
+            .map_memory(self.memory, 0, self.size, Default::default())
+            .expect("Failed to bind memory.") as *mut ObjectType
     }
 
     pub unsafe fn unbind(&mut self, core: &Core) {
@@ -158,6 +239,10 @@ impl Image {
             image_view,
             memory,
         }
+    }
+
+    pub fn create_dp(&self, layout: vk::ImageLayout) -> DescriptorPrototype {
+        DescriptorPrototype::StorageImage(self.image_view, layout)
     }
 
     pub fn destroy(&mut self, core: &Core) {
@@ -275,6 +360,10 @@ impl SampledImage {
             memory,
             extent,
         }
+    }
+
+    pub fn create_dp(&self, layout: vk::ImageLayout) -> DescriptorPrototype {
+        DescriptorPrototype::CombinedImageSampler(self.image_view, layout, self.sampler)
     }
 
     pub fn load_from_png(&mut self, core: &Core, bytes: &[u8]) {
