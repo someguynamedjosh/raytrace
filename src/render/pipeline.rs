@@ -48,6 +48,24 @@ impl Pipeline {
         let render_data = RenderData::create(core);
         let descriptor_collection = DescriptorCollection::create(core, &render_data);
 
+        let change_layouts = cmd::create_buffer(core, "change_layouts");
+        cmd::begin(core, change_layouts);
+        cmd::transition_layout(core, change_layouts, render_data.albedo_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.block_data_atlas.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.chunk_map.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.depth_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.emission_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.fog_color_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.lighting_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.lighting_pong_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.normal_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.old_depth_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.old_lighting_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.old_normal_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::transition_layout(core, change_layouts, render_data.region_map.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        cmd::end(core, change_layouts);
+        cmd::execute_and_destroy(core, change_layouts);
+
         let denoise_stage = create_denoise_stage(core, &descriptor_collection);
         let finalize_stage = create_finalize_stage(core, &descriptor_collection);
         let raytrace_stage = create_raytrace_stage(core, &descriptor_collection);
@@ -294,7 +312,7 @@ impl RenderData {
 
     fn create(core: &Core) -> RenderData {
         let rgba16_unorm = vk::Format::R16G16B16A16_UNORM;
-        let rgba8_unorm = vk::Format::R8G8B8A8_UINT;
+        let rgba8_unorm = vk::Format::R8G8B8A8_UNORM;
         let r16_uint = vk::Format::R16_UINT;
         let r8_uint = vk::Format::R8_UINT;
         RenderData {
@@ -425,6 +443,7 @@ impl RenderData {
         self.fog_color_buffer.destroy(core);
 
         self.blue_noise.destroy(core);
+        self.raytrace_push_data_buffer.destroy(core);
     }
 }
 

@@ -248,6 +248,7 @@ impl Image {
     pub fn destroy(&mut self, core: &Core) {
         unsafe {
             core.device.destroy_image(self.image, None);
+            core.device.destroy_image_view(self.image_view, None);
             core.device.free_memory(self.memory, None);
         }
     }
