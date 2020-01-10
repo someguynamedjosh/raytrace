@@ -163,3 +163,114 @@ pub fn copy_buffer_to_image(
         );
     }
 }
+
+pub fn transition_and_copy_buffer_to_image(
+    core: &Core,
+    buffer: vk::CommandBuffer,
+    data_buffer: vk::Buffer,
+    image: vk::Image,
+    extent: vk::Extent3D,
+) {
+    transition_layout(
+        core,
+        buffer,
+        image,
+        vk::ImageLayout::UNDEFINED,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+    );
+    copy_buffer_to_image(core, buffer, data_buffer, image, extent);
+    transition_layout(
+        core,
+        buffer,
+        image,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        vk::ImageLayout::GENERAL,
+    );
+}
+
+pub fn copy_image_to_buffer(
+    core: &Core,
+    buffer: vk::CommandBuffer,
+    image: vk::Image,
+    data_buffer: vk::Buffer,
+    extent: vk::Extent3D,
+) {
+    let copy_info = vk::BufferImageCopy {
+        buffer_offset: 0,
+        buffer_row_length: 0,
+        buffer_image_height: 0,
+
+        image_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+
+        image_extent: extent,
+        ..Default::default()
+    };
+
+    unsafe {
+        core.device.cmd_copy_image_to_buffer(
+            buffer,
+            image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            data_buffer,
+            &[copy_info],
+        );
+    }
+}
+
+pub fn transition_and_copy_image_to_buffer(
+    core: &Core,
+    buffer: vk::CommandBuffer,
+    image: vk::Image,
+    data_buffer: vk::Buffer,
+    extent: vk::Extent3D,
+) {
+    transition_layout(
+        core,
+        buffer,
+        image,
+        vk::ImageLayout::GENERAL,
+        vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+    );
+    copy_image_to_buffer(core, buffer, image, data_buffer, extent);
+}
+
+pub fn copy_image_to_image(
+    core: &Core,
+    buffer: vk::CommandBuffer,
+    source: vk::Image,
+    dest: vk::Image,
+    extent: vk::Extent3D,
+) {
+    let copy_info = vk::ImageCopy {
+        src_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+        dst_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+        extent,
+        ..Default::default()
+    };
+
+    unsafe {
+        core.device.cmd_copy_image(
+            buffer,
+            source,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            dest,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[copy_info],
+        );
+    }
+}

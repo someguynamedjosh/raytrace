@@ -1,5 +1,5 @@
 use cgmath::InnerSpace;
-use winit::VirtualKeyCode;
+use winit::event::VirtualKeyCode;
 
 use crate::render::Camera;
 use crate::util;

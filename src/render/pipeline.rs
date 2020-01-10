@@ -5,6 +5,8 @@ use cgmath::Vector3;
 
 use std::ffi::CString;
 
+use crate::game::Game;
+
 use super::commands as cmd;
 use super::constants::*;
 use super::core::Core;
@@ -46,36 +48,8 @@ impl Pipeline {
         let command_buffers = create_command_buffers(core);
 
         let render_data = RenderData::create(core);
+        render_data.initialize(core);
         let descriptor_collection = DescriptorCollection::create(core, &render_data);
-
-        let change_layouts = cmd::create_buffer(core, "change_layouts");
-        cmd::begin(core, change_layouts);
-        let images = [
-            &render_data.albedo_buffer,
-            &render_data.block_data_atlas,
-            &render_data.chunk_map,
-            &render_data.depth_buffer,
-            &render_data.emission_buffer,
-            &render_data.fog_color_buffer,
-            &render_data.lighting_buffer,
-            &render_data.lighting_pong_buffer,
-            &render_data.normal_buffer,
-            &render_data.old_depth_buffer,
-            &render_data.old_lighting_buffer,
-            &render_data.old_normal_buffer,
-            &render_data.region_map,
-        ];
-        for img in images.iter() {
-            cmd::transition_layout(
-                core,
-                change_layouts,
-                img.image,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::GENERAL,
-            );
-        }
-        cmd::end(core, change_layouts);
-        cmd::execute_and_destroy(core, change_layouts);
 
         let denoise_stage = create_denoise_stage(core, &descriptor_collection);
         let finalize_stage = create_finalize_stage(core, &descriptor_collection);
@@ -101,7 +75,23 @@ impl Pipeline {
         for (index, buffer) in self.command_buffers.iter().enumerate() {
             let swapchain_image = core.swapchain_info.swapchain_images[index];
             let buffer = *buffer;
+
             cmd::begin(core, buffer);
+            cmd::transition_and_copy_buffer_to_image(
+                core,
+                buffer,
+                self.render_data.chunk_map_buffer.buffer,
+                self.render_data.chunk_map.image,
+                self.render_data.chunk_map.extent,
+            );
+            cmd::transition_and_copy_buffer_to_image(
+                core,
+                buffer,
+                self.render_data.region_map_buffer.buffer,
+                self.render_data.region_map.image,
+                self.render_data.region_map.extent,
+            );
+
             let layout = self.raytrace_stage.pipeline_layout;
             let set = self.descriptor_collection.raytrace.variants[0];
             cmd::bind_descriptor_set(core, buffer, set, layout, 0);
@@ -109,6 +99,7 @@ impl Pipeline {
             unsafe {
                 core.device.cmd_dispatch(buffer, 30, 30, 1);
             }
+
             cmd::transition_layout(
                 core,
                 buffer,
@@ -125,6 +116,21 @@ impl Pipeline {
             unsafe {
                 core.device.cmd_dispatch(buffer, 30, 30, 1);
             }
+
+            cmd::transition_and_copy_image_to_buffer(
+                core,
+                buffer,
+                self.render_data.chunk_map.image,
+                self.render_data.chunk_map_buffer.buffer,
+                self.render_data.chunk_map.extent,
+            );
+            cmd::transition_and_copy_image_to_buffer(
+                core,
+                buffer,
+                self.render_data.region_map.image,
+                self.render_data.region_map_buffer.buffer,
+                self.render_data.region_map.extent,
+            );
             cmd::transition_layout(
                 core,
                 buffer,
@@ -136,7 +142,7 @@ impl Pipeline {
         }
     }
 
-    pub fn draw_frame(&mut self, core: &Core) {
+    pub fn draw_frame(&mut self, core: &Core, game: &Game) {
         let (image_index, _is_suboptimal) = unsafe {
             core.swapchain_info
                 .swapchain_loader
@@ -171,6 +177,18 @@ impl Pipeline {
             core.device
                 .reset_fences(&[wait_fence])
                 .expect("Failed to reset fence.");
+        }
+
+
+
+        unsafe {
+            let buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all(core);
+            *buffer_content = self.render_data.raytrace_uniform_data.clone();
+            self.render_data.raytrace_uniform_data_buffer.unbind(core);
+        }
+
+        unsafe {
+            let wait_fence = self.frame_complete_fence;
             core.device
                 .queue_submit(core.compute_queue, &[submit_info], wait_fence)
                 .expect("Failed to submit command queue.");
@@ -264,6 +282,7 @@ fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
 }
 
 #[repr(C)]
+#[derive(Clone, Debug)]
 struct RaytraceUniformData {
     sun_angle: f32,
     seed: u32,
@@ -289,6 +308,7 @@ struct RaytraceUniformData {
 }
 
 #[repr(C)]
+#[derive(Clone, Debug)]
 struct DenoisePushData {
     size: i32,
 }
@@ -299,7 +319,9 @@ struct RenderData {
     block_data_atlas: Image,
 
     chunk_map: Image,
+    chunk_map_buffer: Buffer,
     region_map: Image,
+    region_map_buffer: Buffer,
 
     lighting_buffer: Image,
     depth_buffer: Image,
@@ -375,6 +397,12 @@ impl RenderData {
                 },
                 vk::Format::R16_UINT,
             ),
+            chunk_map_buffer: Buffer::create(
+                core,
+                "chunk_map_buffer",
+                ROOT_CHUNK_VOLUME as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
+            ),
             region_map: Image::create(
                 core,
                 "region_map",
@@ -385,6 +413,12 @@ impl RenderData {
                     depth: ROOT_REGION_WIDTH,
                 },
                 vk::Format::R16_UINT,
+            ),
+            region_map_buffer: Buffer::create(
+                core,
+                "region_map_buffer",
+                ROOT_REGION_VOLUME as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
             ),
 
             lighting_buffer: Self::make_framebuffer(core, "lighting_buf", rgba16_unorm),
@@ -444,6 +478,37 @@ impl RenderData {
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
             ),
         }
+    }
+
+    fn initialize(&self, core: &Core) {
+        let commands = cmd::create_buffer(core, "change_layouts");
+        cmd::begin(core, commands);
+        let generic_layout_images = [
+            &self.albedo_buffer,
+            &self.block_data_atlas,
+            &self.chunk_map,
+            &self.depth_buffer,
+            &self.emission_buffer,
+            &self.fog_color_buffer,
+            &self.lighting_buffer,
+            &self.lighting_pong_buffer,
+            &self.normal_buffer,
+            &self.old_depth_buffer,
+            &self.old_lighting_buffer,
+            &self.old_normal_buffer,
+            &self.region_map,
+        ];
+        for img in generic_layout_images.iter() {
+            cmd::transition_layout(
+                core,
+                commands,
+                img.image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::GENERAL,
+            );
+        }
+        cmd::end(core, commands);
+        cmd::execute_and_destroy(core, commands);
     }
 
     fn destroy(&mut self, core: &Core) {

@@ -157,6 +157,7 @@ impl<ObjectType> ObjectBuffer<ObjectType> {
 pub struct Image {
     pub image: vk::Image,
     pub image_view: vk::ImageView,
+    pub extent: vk::Extent3D,
     memory: vk::DeviceMemory,
 }
 
@@ -237,6 +238,7 @@ impl Image {
         Image {
             image,
             image_view,
+            extent,
             memory,
         }
     }

@@ -1,7 +1,10 @@
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
+mod game;
 mod render;
+mod world;
+mod util;
 
 fn main() {
     let event_loop = EventLoop::new();
