@@ -5,8 +5,8 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, rgba16) uniform image2D lighting_buffer;
 layout(set = 0, binding = 1, rgba8) uniform image2D albedo_buffer;
 layout(set = 0, binding = 2, rgba8) uniform image2D emission_buffer;
-layout(set = 0, binding = 3, r16ui) uniform uimage2D depth_buffer;
-layout(set = 0, binding = 4, rgba8) uniform image2D fog_color_buffer;
+layout(set = 0, binding = 3, rgba8) uniform image2D fog_color_buffer;
+layout(set = 0, binding = 4, r16ui) uniform uimage2D depth_buffer;
 layout(set = 0, binding = 5) uniform sampler2D blue_noise;
 layout(set = 1, binding = 0, rgba8) uniform writeonly image2D final_output;
 

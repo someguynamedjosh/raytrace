@@ -102,6 +102,13 @@ impl Pipeline {
             let swapchain_image = core.swapchain_info.swapchain_images[index];
             let buffer = *buffer;
             cmd::begin(core, buffer);
+            let layout = self.raytrace_stage.pipeline_layout;
+            let set = self.descriptor_collection.raytrace.variants[0];
+            cmd::bind_descriptor_set(core, buffer, set, layout, 0);
+            cmd::bind_pipeline(core, buffer, self.raytrace_stage.vk_pipeline);
+            unsafe {
+                core.device.cmd_dispatch(buffer, 30, 30, 1);
+            }
             cmd::transition_layout(
                 core,
                 buffer,
@@ -109,10 +116,12 @@ impl Pipeline {
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
             );
-            let layout = self.raytrace_stage.pipeline_layout;
-            let set = self.descriptor_collection.raytrace.variants[0];
+            let layout = self.finalize_stage.pipeline_layout;
+            let set = self.descriptor_collection.finalize.variants[0];
             cmd::bind_descriptor_set(core, buffer, set, layout, 0);
-            cmd::bind_pipeline(core, buffer, self.raytrace_stage.vk_pipeline);
+            let set = self.descriptor_collection.swapchain.variants[index];
+            cmd::bind_descriptor_set(core, buffer, set, layout, 1);
+            cmd::bind_pipeline(core, buffer, self.finalize_stage.vk_pipeline);
             unsafe {
                 core.device.cmd_dispatch(buffer, 30, 30, 1);
             }
