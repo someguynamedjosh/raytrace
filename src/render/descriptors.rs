@@ -2,6 +2,7 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 
 use super::core::Core;
+use super::structures::{Buffer, Image, SampledImage};
 
 pub enum DescriptorPrototype {
     StorageImage(vk::ImageView, vk::ImageLayout),
@@ -9,6 +10,14 @@ pub enum DescriptorPrototype {
 }
 
 impl DescriptorPrototype {
+    pub fn storage_image(image: &Image, layout: vk::ImageLayout) -> Self {
+        Self::StorageImage(image.image_view, layout)
+    }
+
+    pub fn combined_img_sampler(image: &SampledImage, layout: vk::ImageLayout) -> Self {
+        Self::CombinedImageSampler(image.image_view, layout, image.sampler)
+    }
+
     fn matches(&self, other: &Self) -> bool {
         match self {
             Self::StorageImage(..) => {

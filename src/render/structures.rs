@@ -7,7 +7,7 @@ use super::commands as cmd;
 use super::core::Core;
 
 pub struct Buffer {
-    pub native: vk::Buffer,
+    pub buffer: vk::Buffer,
     memory: vk::DeviceMemory,
     size: u64,
 }
@@ -49,7 +49,7 @@ impl Buffer {
         core.set_debug_name(memory, &format!("{}_memory", name));
 
         Buffer {
-            native: buffer,
+            buffer,
             memory,
             size,
         }
@@ -67,14 +67,15 @@ impl Buffer {
 
     pub fn destroy(&mut self, core: &Core) {
         unsafe {
-            core.device.destroy_buffer(self.native, None);
+            core.device.destroy_buffer(self.buffer, None);
             core.device.free_memory(self.memory, None);
         }
     }
 }
 
 pub struct Image {
-    pub native: vk::Image,
+    pub image: vk::Image,
+    pub image_view: vk::ImageView,
     memory: vk::DeviceMemory,
 }
 
@@ -94,7 +95,7 @@ impl Image {
             mip_levels: 1,
             array_layers: 1,
             // TODO: Better usage.
-            usage: vk::ImageUsageFlags::TRANSFER_DST,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
             tiling: vk::ImageTiling::OPTIMAL,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             ..Default::default()
@@ -127,15 +128,41 @@ impl Image {
                 .expect("Failed to bind image to device memory.");
         }
 
+        let image_view_create_info = vk::ImageViewCreateInfo {
+            image,
+            view_type: match typ {
+                vk::ImageType::TYPE_1D => vk::ImageViewType::TYPE_1D,
+                vk::ImageType::TYPE_2D => vk::ImageViewType::TYPE_2D,
+                vk::ImageType::TYPE_3D => vk::ImageViewType::TYPE_3D,
+                _ => unreachable!("Encountered unspecified ImageType."),
+            },
+            format,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            ..Default::default()
+        };
+        let image_view = unsafe {
+            core.device
+                .create_image_view(&image_view_create_info, None)
+                .expect("Failed to create image view for storage image.")
+        };
+        core.set_debug_name(image_view, &format!("{}_view", name));
+
         Image {
-            native: image,
+            image,
+            image_view,
             memory,
         }
     }
 
     pub fn destroy(&mut self, core: &Core) {
         unsafe {
-            core.device.destroy_image(self.native, None);
+            core.device.destroy_image(self.image, None);
             core.device.free_memory(self.memory, None);
         }
     }
@@ -283,7 +310,7 @@ impl SampledImage {
         cmd::copy_buffer_to_image(
             core,
             upload_commands,
-            buffer.native,
+            buffer.buffer,
             self.image,
             self.extent,
         );

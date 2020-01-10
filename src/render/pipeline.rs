@@ -8,7 +8,7 @@ use super::constants::*;
 use super::core::Core;
 #[macro_use]
 use crate::create_descriptor_collection_struct;
-use super::descriptors::{self, DescriptorData, DescriptorPrototype, PrototypeGenerator};
+use super::descriptors::DescriptorPrototype;
 use super::structures::{Buffer, Image, SampledImage};
 
 struct Stage {
@@ -31,7 +31,10 @@ pub struct Pipeline {
     frame_complete_fence: vk::Fence,
     render_data: RenderData,
     descriptor_collection: DescriptorCollection,
-    test_stage: Stage,
+
+    denoise_stage: Stage,
+    finalize_stage: Stage,
+    raytrace_stage: Stage,
 }
 
 impl Pipeline {
@@ -43,7 +46,9 @@ impl Pipeline {
         let render_data = RenderData::create(core);
         let descriptor_collection = DescriptorCollection::create(core, &render_data);
 
-        let test_stage = create_test_stage(core, &descriptor_collection);
+        let denoise_stage = create_denoise_stage(core, &descriptor_collection);
+        let finalize_stage = create_finalize_stage(core, &descriptor_collection);
+        let raytrace_stage = create_raytrace_stage(core, &descriptor_collection);
 
         let mut pipeline = Pipeline {
             command_buffers,
@@ -52,7 +57,10 @@ impl Pipeline {
             frame_complete_fence,
             render_data,
             descriptor_collection,
-            test_stage,
+
+            denoise_stage,
+            finalize_stage,
+            raytrace_stage,
         };
         pipeline.record_command_buffers(core);
         pipeline
@@ -70,12 +78,10 @@ impl Pipeline {
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
             );
-            let layout = self.test_stage.pipeline_layout;
-            let set = self.descriptor_collection.test_data.variants[0];
+            let layout = self.raytrace_stage.pipeline_layout;
+            let set = self.descriptor_collection.raytrace.variants[0];
             cmd::bind_descriptor_set(core, buffer, set, layout, 0);
-            let set = self.descriptor_collection.swapchain.variants[index];
-            cmd::bind_descriptor_set(core, buffer, set, layout, 1);
-            cmd::bind_pipeline(core, buffer, self.test_stage.vk_pipeline);
+            cmd::bind_pipeline(core, buffer, self.raytrace_stage.vk_pipeline);
             unsafe {
                 core.device.cmd_dispatch(buffer, 30, 30, 1);
             }
@@ -154,7 +160,9 @@ impl Pipeline {
             .device_wait_idle()
             .expect("Failed to wait for device to finish rendering.");
 
-        self.test_stage.destroy(core);
+        self.denoise_stage.destroy(core);
+        self.finalize_stage.destroy(core);
+        self.raytrace_stage.destroy(core);
 
         self.descriptor_collection.destroy(core);
         self.render_data.destroy(core);
@@ -171,37 +179,99 @@ create_descriptor_collection_struct! {
     name: DescriptorCollection,
     aux_data_type: RenderData,
     items: {
+        denoise = generate_denoise_ds_prototypes,
+        finalize = generate_finalize_ds_prototypes,
+        raytrace = generate_raytrace_ds_prototypes,
         swapchain = generate_swapchain_ds_prototypes,
-        test_data = generate_test_data_ds_prototypes,
     }
+}
+
+fn generate_denoise_ds_prototypes(
+    _core: &Core,
+    render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    use DescriptorPrototype as DP;
+    vec![
+        vec![
+            DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
+            DP::storage_image(&render_data.normal_buffer, vk::ImageLayout::GENERAL),
+            DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
+            //
+            DP::storage_image(&render_data.lighting_pong_buffer, vk::ImageLayout::GENERAL),
+        ],
+        vec![
+            DP::storage_image(&render_data.lighting_pong_buffer, vk::ImageLayout::GENERAL),
+            DP::storage_image(&render_data.normal_buffer, vk::ImageLayout::GENERAL),
+            DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
+            //
+            DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
+        ],
+    ]
+}
+
+fn generate_finalize_ds_prototypes(
+    _core: &Core,
+    render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    use DescriptorPrototype as DP;
+    vec![vec![
+        DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.albedo_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.emission_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.fog_color_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
+        //
+        DP::combined_img_sampler(
+            &render_data.blue_noise,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        ),
+    ]]
+}
+
+fn generate_raytrace_ds_prototypes(
+    _core: &Core,
+    render_data: &RenderData,
+) -> Vec<Vec<DescriptorPrototype>> {
+    use DescriptorPrototype as DP;
+    vec![vec![
+        DP::storage_image(&render_data.block_data_atlas, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.chunk_map, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.region_map, vk::ImageLayout::GENERAL),
+        //
+        DP::storage_image(&render_data.lighting_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.albedo_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.emission_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.fog_color_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.normal_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.depth_buffer, vk::ImageLayout::GENERAL),
+        //
+        DP::storage_image(&render_data.old_lighting_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.old_normal_buffer, vk::ImageLayout::GENERAL),
+        DP::storage_image(&render_data.old_depth_buffer, vk::ImageLayout::GENERAL),
+        //
+        DP::combined_img_sampler(
+            &render_data.blue_noise,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        ),
+        // TODO: push_data
+    ]]
 }
 
 fn generate_swapchain_ds_prototypes(
     core: &Core,
     _render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
+    use DescriptorPrototype as DP;
     let views = &core.swapchain_info.swapchain_image_views;
     views
         .iter()
         .map(|image_view| {
-            vec![DescriptorPrototype::StorageImage(
+            vec![DP::StorageImage(
                 *image_view,
                 vk::ImageLayout::GENERAL,
             )]
         })
         .collect()
-}
-
-fn generate_test_data_ds_prototypes(
-    _core: &Core,
-    render_data: &RenderData,
-) -> Vec<Vec<DescriptorPrototype>> {
-    let blue_noise = &render_data.blue_noise;
-    vec![vec![DescriptorPrototype::CombinedImageSampler(
-        blue_noise.image_view,
-        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        blue_noise.sampler,
-    )]]
 }
 
 struct RenderData {
@@ -460,13 +530,35 @@ fn create_compute_shader_stage(
     }
 }
 
-fn create_test_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
-    let shader_source = include_bytes!("../../shaders/spirv/test.comp.spirv");
+fn create_denoise_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
+    let shader_source = include_bytes!("../../shaders/spirv/bilateral_denoise.comp.spirv");
     create_compute_shader_stage(
         core,
-        "test_stage",
+        "raytrace",
         shader_source,
         "main",
-        &[dc.test_data.layout, dc.swapchain.layout],
+        &[dc.raytrace.layout],
+    )
+}
+
+fn create_finalize_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
+    let shader_source = include_bytes!("../../shaders/spirv/finalize.comp.spirv");
+    create_compute_shader_stage(
+        core,
+        "finalize",
+        shader_source,
+        "main",
+        &[dc.finalize.layout, dc.swapchain.layout],
+    )
+}
+
+fn create_raytrace_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
+    let shader_source = include_bytes!("../../shaders/spirv/raytrace.comp.spirv");
+    create_compute_shader_stage(
+        core,
+        "raytrace",
+        shader_source,
+        "main",
+        &[dc.raytrace.layout],
     )
 }

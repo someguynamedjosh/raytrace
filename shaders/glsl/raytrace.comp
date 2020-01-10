@@ -5,16 +5,19 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data_atlas;
 layout(set = 0, binding = 1, r16ui) uniform uimage3D chunk_map;
 layout(set = 0, binding = 2, r16ui) uniform uimage3D region_map;
-layout(set = 0, binding = 3, rgba16_snorm) uniform writeonly image2D lighting_buffer;
-layout(set = 0, binding = 4, r16ui) uniform writeonly uimage2D depth_buffer;
-layout(set = 0, binding = 5, r8ui) uniform writeonly uimage2D normal_buffer;
-layout(set = 0, binding = 6, rgba8_snorm) uniform writeonly image2D albedo_buffer;
-layout(set = 0, binding = 7, rgba8_snorm) uniform writeonly image2D emission_buffer;
-layout(set = 0, binding = 8) uniform sampler2D blue_noise;
+
+layout(set = 0, binding = 3, rgba16_unorm) uniform writeonly image2D lighting_buffer;
+layout(set = 0, binding = 4, rgba8_unorm) uniform writeonly image2D albedo_buffer;
+layout(set = 0, binding = 5, rgba8_unorm) uniform writeonly image2D emission_buffer;
+layout(set = 0, binding = 6, rgba8_unorm) uniform writeonly image2D fog_color_buffer;
+layout(set = 0, binding = 7, r8ui) uniform writeonly uimage2D normal_buffer;
+layout(set = 0, binding = 8, r16ui) uniform writeonly uimage2D depth_buffer;
+
 layout(set = 0, binding = 9, rgba16_snorm) uniform readonly image2D old_lighting_buffer;
 layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
 layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
-layout(set = 0, binding = 12, rgba8_snorm) uniform writeonly image2D fog_color_buffer;
+
+layout(set = 0, binding = 12) uniform sampler2D blue_noise;
 layout(set = 0, binding = 13) uniform PushData {
     vec3 origin, forward, up, right;
     // For some reason doing mat3 still loads 16 elements but the rust bindings give it 9, making
