@@ -178,7 +178,9 @@ impl DescriptorCollection {
             Box::new(generate_test_data_descriptor_prototypes) as PrototypeGenerator<RenderData>,
             Box::new(generate_swapchain_descriptor_prototypes) as PrototypeGenerator<RenderData>,
         ];
-        let (pool, datas) = descriptors::generate_descriptor_pool(&generators, core, render_data);
+        let names = ["test_data", "swapchain"];
+        let (pool, datas) =
+            descriptors::generate_descriptor_pool(&generators, &names, core, render_data);
         let mut datas_consumer = datas.into_iter();
         DescriptorCollection {
             pool,
@@ -233,7 +235,7 @@ struct Buffer {
 }
 
 impl Buffer {
-    fn create(core: &Core, size: u64, usage: vk::BufferUsageFlags) -> Buffer {
+    fn create(core: &Core, name: &str, size: u64, usage: vk::BufferUsageFlags) -> Buffer {
         let create_info = vk::BufferCreateInfo {
             size,
             usage,
@@ -245,6 +247,7 @@ impl Buffer {
                 .create_buffer(&create_info, None)
                 .expect("Failed to create buffer.")
         };
+        core.set_debug_name(buffer, name);
 
         let memory_requirements = unsafe { core.device.get_buffer_memory_requirements(buffer) };
         let memory_allocation_info = vk::MemoryAllocateInfo {
@@ -265,6 +268,7 @@ impl Buffer {
                 .bind_buffer_memory(buffer, memory, 0)
                 .expect("Failed to bind buffer to device memory.");
         }
+        core.set_debug_name(memory, &format!("{}_memory", name));
 
         Buffer {
             native: buffer,
@@ -305,7 +309,13 @@ struct Image {
 }
 
 impl Image {
-    fn create(core: &Core, typ: vk::ImageType, extent: vk::Extent3D, format: vk::Format) -> Image {
+    fn create(
+        core: &Core,
+        name: &str,
+        typ: vk::ImageType,
+        extent: vk::Extent3D,
+        format: vk::Format,
+    ) -> Image {
         let create_info = vk::ImageCreateInfo {
             image_type: typ,
             extent,
@@ -324,6 +334,7 @@ impl Image {
                 .create_image(&create_info, None)
                 .expect("Failed to create buffer.")
         };
+        core.set_debug_name(image, name);
 
         let memory_requirements = unsafe { core.device.get_image_memory_requirements(image) };
         let memory_allocation_info = vk::MemoryAllocateInfo {
@@ -339,6 +350,7 @@ impl Image {
                 .allocate_memory(&memory_allocation_info, None)
                 .expect("Failed to allocate memory for image.")
         };
+        core.set_debug_name(memory, &format!("{}_memory", name));
         unsafe {
             core.device
                 .bind_image_memory(image, memory, 0)
@@ -378,6 +390,7 @@ struct SampledImage {
 impl SampledImage {
     fn create(
         core: &Core,
+        name: &str,
         typ: vk::ImageType,
         extent: vk::Extent3D,
         format: vk::Format,
@@ -400,6 +413,7 @@ impl SampledImage {
                 .create_image(&create_info, None)
                 .expect("Failed to create buffer.")
         };
+        core.set_debug_name(image, &format!("{}", name));
 
         let memory_requirements = unsafe { core.device.get_image_memory_requirements(image) };
         let memory_allocation_info = vk::MemoryAllocateInfo {
@@ -415,6 +429,7 @@ impl SampledImage {
                 .allocate_memory(&memory_allocation_info, None)
                 .expect("Failed to allocate memory for image.")
         };
+        core.set_debug_name(memory, &format!("{}_memory", name));
         unsafe {
             core.device
                 .bind_image_memory(image, memory, 0)
@@ -444,7 +459,7 @@ impl SampledImage {
                 .create_image_view(&image_view_create_info, None)
                 .expect("Failed to create image view for sampled image.")
         };
-        core.set_debug_name(image_view, "Texture view");
+        core.set_debug_name(image_view, &format!("{}_view", name));
 
         let sampler_create_info = vk::SamplerCreateInfo {
             mag_filter: vk::Filter::NEAREST,
@@ -462,6 +477,7 @@ impl SampledImage {
                 .create_sampler(&sampler_create_info, None)
                 .expect("Failed to create sampler for sampled image.")
         };
+        core.set_debug_name(sampler, &format!("{}_sampler", name));
 
         SampledImage {
             image,
@@ -478,6 +494,7 @@ impl SampledImage {
             .expect("Failed to decode PNG data.");
         let mut buffer = Buffer::create(
             core,
+            "texture_upload_buffer",
             size as u64,
             vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
         );
@@ -492,7 +509,7 @@ impl SampledImage {
             }
             buffer.unbind(core);
         }
-        let upload_commands = create_command_buffer(core);
+        let upload_commands = create_command_buffer(core, "texture_upload_queue");
         cmd_begin_one_time_submit(core, upload_commands);
         cmd_transition_layout(
             core,
@@ -562,10 +579,11 @@ struct RenderData {
 }
 
 impl RenderData {
-    fn make_framebuffer(core: &Core, format: vk::Format) -> Image {
+    fn make_framebuffer(core: &Core, name: &str, format: vk::Format) -> Image {
         let dimensions = core.swapchain_info.swapchain_extent;
         Image::create(
             core,
+            name,
             vk::ImageType::TYPE_2D,
             vk::Extent3D {
                 width: dimensions.width,
@@ -577,11 +595,16 @@ impl RenderData {
     }
 
     fn create(core: &Core) -> RenderData {
+        let rgba16_unorm = vk::Format::R16G16B16A16_UNORM;
+        let rgba8_unorm = vk::Format::R8G8B8A8_UINT;
+        let r16_uint = vk::Format::R16_UINT;
+        let r8_uint = vk::Format::R8_UINT;
         RenderData {
             upload_buffers: (0..NUM_UPLOAD_BUFFERS)
-                .map(|_| {
+                .map(|index| {
                     Buffer::create(
                         core,
+                        &format!("upload_buffer_{}", index),
                         CHUNK_BLOCK_VOLUME as u64,
                         vk::BufferUsageFlags::TRANSFER_SRC,
                     )
@@ -590,6 +613,7 @@ impl RenderData {
             upload_destinations: vec![],
             block_data_atlas: Image::create(
                 core,
+                "block_data_atlas",
                 vk::ImageType::TYPE_3D,
                 vk::Extent3D {
                     width: ATLAS_BLOCK_WIDTH,
@@ -601,6 +625,7 @@ impl RenderData {
 
             chunk_map: Image::create(
                 core,
+                "chunk_map",
                 vk::ImageType::TYPE_3D,
                 vk::Extent3D {
                     width: ROOT_CHUNK_WIDTH,
@@ -611,6 +636,7 @@ impl RenderData {
             ),
             region_map: Image::create(
                 core,
+                "region_map",
                 vk::ImageType::TYPE_3D,
                 vk::Extent3D {
                     width: ROOT_REGION_WIDTH,
@@ -620,21 +646,22 @@ impl RenderData {
                 vk::Format::R16_UINT,
             ),
 
-            lighting_buffer: Self::make_framebuffer(core, vk::Format::R16G16B16A16_UNORM),
-            depth_buffer: Self::make_framebuffer(core, vk::Format::R16_UINT),
-            normal_buffer: Self::make_framebuffer(core, vk::Format::R8_UINT),
-            old_lighting_buffer: Self::make_framebuffer(core, vk::Format::R16G16B16A16_UNORM),
-            old_depth_buffer: Self::make_framebuffer(core, vk::Format::R16_UINT),
-            old_normal_buffer: Self::make_framebuffer(core, vk::Format::R8_UINT),
+            lighting_buffer: Self::make_framebuffer(core, "lighting_buf", rgba16_unorm),
+            depth_buffer: Self::make_framebuffer(core, "depth_buf", r16_uint),
+            normal_buffer: Self::make_framebuffer(core, "normal_buf", r8_uint),
+            old_lighting_buffer: Self::make_framebuffer(core, "old_lighting_buf", rgba16_unorm),
+            old_depth_buffer: Self::make_framebuffer(core, "old_depth_buf", r16_uint),
+            old_normal_buffer: Self::make_framebuffer(core, "old_normal_buf", r8_uint),
 
-            lighting_pong_buffer: Self::make_framebuffer(core, vk::Format::R16G16B16A16_UNORM),
-            albedo_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
-            emission_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
-            fog_color_buffer: Self::make_framebuffer(core, vk::Format::R8G8B8A8_UNORM),
+            lighting_pong_buffer: Self::make_framebuffer(core, "lighting_pong_buf", rgba16_unorm),
+            albedo_buffer: Self::make_framebuffer(core, "albedo_buf", rgba8_unorm),
+            emission_buffer: Self::make_framebuffer(core, "emission_buf", rgba8_unorm),
+            fog_color_buffer: Self::make_framebuffer(core, "fog_color_buf", rgba8_unorm),
 
             blue_noise: {
                 let mut tex = SampledImage::create(
                     core,
+                    "blue_noise",
                     vk::ImageType::TYPE_2D,
                     vk::Extent3D {
                         width: BLUE_NOISE_WIDTH,
@@ -698,28 +725,33 @@ fn create_fences(core: &Core) -> (vk::Fence,) {
         ..Default::default()
     };
 
-    (unsafe {
+    let fence = unsafe {
         core.device
             .create_fence(&create_info, None)
             .expect("Failed to create fence.")
-    },)
+    };
+    core.set_debug_name(fence, "wait_for_frame_end");
+    (fence,)
 }
 
-fn create_command_buffer(core: &Core) -> vk::CommandBuffer {
+fn create_command_buffer(core: &Core, name: &str) -> vk::CommandBuffer {
     let allocate_info = vk::CommandBufferAllocateInfo {
         command_buffer_count: 1,
         command_pool: core.command_pool,
         level: vk::CommandBufferLevel::PRIMARY,
         ..Default::default()
     };
-    unsafe {
+    let command_buffer = unsafe {
         core.device
             .allocate_command_buffers(&allocate_info)
             .expect("Failed to allocate single-use command buffer.")[0]
-    }
+    };
+    core.set_debug_name(command_buffer, name);
+    command_buffer
 }
 
 fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
+    // TODO: debug names.
     let allocate_info = vk::CommandBufferAllocateInfo {
         command_buffer_count: core.swapchain_info.swapchain_images.len() as u32,
         command_pool: core.command_pool,
@@ -747,29 +779,24 @@ fn create_shader_module(core: &Core, shader_source: *const u8, length: usize) ->
 }
 
 fn create_compute_shader_stage(
-    _core: &Core,
-    module: vk::ShaderModule,
-    entry_point: &CString,
-) -> vk::PipelineShaderStageCreateInfo {
-    vk::PipelineShaderStageCreateInfo {
-        module,
-        p_name: entry_point.as_ptr(),
+    core: &Core,
+    name: &str,
+    shader_source: &[u8],
+    entry_point: &str,
+    descriptor_set_layouts: &[vk::DescriptorSetLayout],
+) -> Stage {
+    let shader_module = create_shader_module(core, shader_source.as_ptr(), shader_source.len());
+    let entry_point_cstring = CString::new(entry_point).unwrap();
+    let vk_stage = vk::PipelineShaderStageCreateInfo {
+        module: shader_module,
+        p_name: entry_point_cstring.as_ptr(),
         stage: vk::ShaderStageFlags::COMPUTE,
         ..Default::default()
-    }
-}
+    };
 
-fn create_test_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
-    let shader_source = include_bytes!("../../shaders/spirv/test.comp.spirv");
-    let shader_module = create_shader_module(core, shader_source.as_ptr(), shader_source.len());
-
-    let entry_point = CString::new("main").unwrap();
-    let shader_stage = create_compute_shader_stage(core, shader_module, &entry_point);
-
-    let descriptor_sets = [dc.test_data.layout, dc.swapchain.layout];
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
-        set_layout_count: 2,
-        p_set_layouts: descriptor_sets.as_ptr(),
+        set_layout_count: descriptor_set_layouts.len() as u32,
+        p_set_layouts: descriptor_set_layouts.as_ptr(),
         ..Default::default()
     };
     let pipeline_layout = unsafe {
@@ -777,31 +804,38 @@ fn create_test_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
             .create_pipeline_layout(&pipeline_layout_create_info, None)
             .expect("Failed to create pipeline layout.")
     };
+    core.set_debug_name(pipeline_layout, &format!("{}_layout", name));
 
-    let compute_pipeline_create_info = vk::ComputePipelineCreateInfo {
-        stage: shader_stage,
+    let pipeline_create_info = vk::ComputePipelineCreateInfo {
+        stage: vk_stage,
         layout: pipeline_layout,
         ..Default::default()
     };
-
-    let compute_pipeline = unsafe {
+    let pipeline = unsafe {
         core.device
-            .create_compute_pipelines(
-                vk::PipelineCache::null(),
-                &[compute_pipeline_create_info],
-                None,
-            )
+            .create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None)
             .expect("Failed to create compute pipeline.")[0]
     };
+    core.set_debug_name(pipeline, name);
 
     unsafe {
         core.device.destroy_shader_module(shader_module, None);
     }
-
     Stage {
-        vk_pipeline: compute_pipeline,
+        vk_pipeline: pipeline,
         pipeline_layout,
     }
+}
+
+fn create_test_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
+    let shader_source = include_bytes!("../../shaders/spirv/test.comp.spirv");
+    create_compute_shader_stage(
+        core,
+        "test_stage",
+        shader_source,
+        "main",
+        &[dc.test_data.layout, dc.swapchain.layout],
+    )
 }
 
 fn execute_and_destroy_buffer(core: &Core, buffer: vk::CommandBuffer) {

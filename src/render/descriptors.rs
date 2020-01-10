@@ -53,7 +53,7 @@ impl DescriptorPrototype {
                     image_layout,
                     ..Default::default()
                 })
-            },
+            }
             Self::CombinedImageSampler(image_view, image_layout, sampler) => {
                 DescriptorPayload::ImageInfo(vk::DescriptorImageInfo {
                     image_view,
@@ -61,14 +61,14 @@ impl DescriptorPrototype {
                     sampler,
                     ..Default::default()
                 })
-            },
+            }
         }
     }
 }
 
 #[derive(Debug)]
 enum DescriptorPayload {
-    ImageInfo(vk::DescriptorImageInfo)
+    ImageInfo(vk::DescriptorImageInfo),
 }
 
 impl DescriptorPayload {
@@ -133,6 +133,7 @@ pub type PrototypeGenerator<Data> = Box<dyn Fn(&Core, &Data) -> Vec<Vec<Descript
 
 pub fn generate_descriptor_pool<Data>(
     prototype_generators: &[PrototypeGenerator<Data>],
+    names: &[&str],
     core: &Core,
     data: &Data,
 ) -> (vk::DescriptorPool, Vec<DescriptorData>) {
@@ -151,14 +152,15 @@ pub fn generate_descriptor_pool<Data>(
     let mut total_descriptors = 0;
     let layout_info: Vec<_> = prototypes
         .iter()
-        .map(|variants| {
+        .enumerate()
+        .map(|(index, variants)| {
             total_descriptor_sets += variants.len() as u32;
             let arbitrary_variant = if variants.len() == 0 {
                 &empty_variant // If there are no variants, then just make an empty layout.
             } else {
                 &variants[0]
             };
-            total_descriptors += (variants.len() * arbitrary_variant.len());
+            total_descriptors += variants.len() * arbitrary_variant.len();
 
             for item in arbitrary_variant {
                 counter.increment(item.get_descriptor_type(), variants.len() as u32);
@@ -178,6 +180,7 @@ pub fn generate_descriptor_pool<Data>(
                     .create_descriptor_set_layout(&create_info, None)
                     .expect("Failed to create descriptor set layout.")
             };
+            core.set_debug_name(layout, &format!("{}_ds_layout", names[index]));
             (layout, variants.len())
         })
         .collect();
@@ -203,6 +206,7 @@ pub fn generate_descriptor_pool<Data>(
             .create_descriptor_pool(&pool_create_info, None)
             .expect("Failed to create descriptor pool.")
     };
+    core.set_debug_name(descriptor_pool, "primary_descriptor_pool");
 
     let mut request_layouts = vec![];
     for (layout, quantity) in &layout_info {
@@ -247,12 +251,15 @@ pub fn generate_descriptor_pool<Data>(
     }
 
     let mut descriptor_datas = vec![];
-    for (layout, quantity) in layout_info {
-        let variants= descriptor_sets.drain(0..quantity).collect();
-        descriptor_datas.push(DescriptorData {
-            layout,
-            variants,
-        });
+    for (layout_index, (layout, quantity)) in layout_info.into_iter().enumerate() {
+        let variants: Vec<_> = descriptor_sets.drain(0..quantity).collect();
+        for (variant_index, variant) in variants.iter().enumerate() {
+            core.set_debug_name(
+                *variant,
+                &format!("{}_ds_variant_{}", names[layout_index], variant_index),
+            );
+        }
+        descriptor_datas.push(DescriptorData { layout, variants });
     }
 
     (descriptor_pool, descriptor_datas)

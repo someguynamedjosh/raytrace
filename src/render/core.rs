@@ -6,7 +6,7 @@ use ash::vk::{self, Handle};
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
-use std::ffi::{CString};
+use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
 
@@ -51,7 +51,11 @@ impl Core {
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
         let (device, queue_family_indices) =
             create_logical_device(&instance, physical_device, &surface_info);
-        let command_pool = create_command_pool(&device, queue_family_indices.compute.unwrap());
+        let command_pool = create_command_pool(
+            &device,
+            &debug_utils_loader,
+            queue_family_indices.compute.unwrap(),
+        );
         let swapchain_info = create_swapchain(
             &instance,
             &device,
@@ -503,16 +507,22 @@ pub fn query_swapchain_support(
     }
 }
 
-fn create_command_pool(device: &ash::Device, queue_family_index: u32) -> vk::CommandPool {
+fn create_command_pool(
+    device: &ash::Device,
+    debug_utils: &DebugUtils,
+    queue_family_index: u32,
+) -> vk::CommandPool {
     let create_info = vk::CommandPoolCreateInfo {
         queue_family_index,
         ..Default::default()
     };
-    unsafe {
+    let pool = unsafe {
         device
             .create_command_pool(&create_info, None)
             .expect("Failed to create command pool.")
-    }
+    };
+    debug::set_debug_name(device, debug_utils, pool, "primary_command_pool");
+    pool
 }
 
 pub fn create_swapchain(
@@ -583,7 +593,13 @@ pub fn create_swapchain(
     };
 
     let mut swapchain_image_views = vec![];
-    for image in &swapchain_images {
+    for (index, image) in swapchain_images.iter().enumerate() {
+        debug::set_debug_name(
+            device,
+            debug_utils,
+            *image,
+            &format!("swapchain_img_{}", index),
+        );
         let create_info = vk::ImageViewCreateInfo {
             image: *image,
             view_type: vk::ImageViewType::TYPE_2D,
@@ -602,7 +618,12 @@ pub fn create_swapchain(
             let view = device
                 .create_image_view(&create_info, None)
                 .expect("Failed to create image view for swapchain image.");
-            debug::set_debug_name(device, debug_utils, view, "Swapchain View");
+            debug::set_debug_name(
+                device,
+                debug_utils,
+                view,
+                &format!("swapchain_img_view_{}", index),
+            );
             view
         });
     }
