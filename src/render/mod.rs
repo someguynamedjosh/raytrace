@@ -1,11 +1,13 @@
 use winit::event_loop::EventLoop;
 
+pub(self) mod commands;
 pub(self) mod constants;
 pub(self) mod core;
 pub(self) mod debug;
 pub(self) mod descriptors;
 pub(self) mod pipeline;
 pub(self) mod platform_specific;
+pub(self) mod structures;
 pub(self) mod util;
 
 use self::core::Core;
