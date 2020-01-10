@@ -6,6 +6,8 @@ use std::ffi::CString;
 use super::commands as cmd;
 use super::constants::*;
 use super::core::Core;
+#[macro_use]
+use crate::create_descriptor_collection_struct;
 use super::descriptors::{self, DescriptorData, DescriptorPrototype, PrototypeGenerator};
 use super::structures::{Buffer, Image, SampledImage};
 
@@ -165,41 +167,16 @@ impl Pipeline {
     }
 }
 
-struct DescriptorCollection {
-    pool: vk::DescriptorPool,
-    swapchain: DescriptorData,
-    test_data: DescriptorData,
-}
-
-impl DescriptorCollection {
-    fn create(core: &Core, render_data: &RenderData) -> DescriptorCollection {
-        let generators = [
-            Box::new(generate_test_data_descriptor_prototypes) as PrototypeGenerator<RenderData>,
-            Box::new(generate_swapchain_descriptor_prototypes) as PrototypeGenerator<RenderData>,
-        ];
-        let names = ["test_data", "swapchain"];
-        let (pool, datas) =
-            descriptors::generate_descriptor_pool(&generators, &names, core, render_data);
-        let mut datas_consumer = datas.into_iter();
-        DescriptorCollection {
-            pool,
-            test_data: datas_consumer.next().unwrap(),
-            swapchain: datas_consumer.next().unwrap(),
-        }
-    }
-
-    fn destroy(&mut self, core: &Core) {
-        unsafe {
-            core.device
-                .destroy_descriptor_set_layout(self.swapchain.layout, None);
-            core.device
-                .destroy_descriptor_set_layout(self.test_data.layout, None);
-            core.device.destroy_descriptor_pool(self.pool, None);
-        }
+create_descriptor_collection_struct! {
+    name: DescriptorCollection,
+    aux_data_type: RenderData,
+    items: {
+        swapchain = generate_swapchain_ds_prototypes,
+        test_data = generate_test_data_ds_prototypes,
     }
 }
 
-fn generate_swapchain_descriptor_prototypes(
+fn generate_swapchain_ds_prototypes(
     core: &Core,
     _render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
@@ -215,7 +192,7 @@ fn generate_swapchain_descriptor_prototypes(
         .collect()
 }
 
-fn generate_test_data_descriptor_prototypes(
+fn generate_test_data_ds_prototypes(
     _core: &Core,
     render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
