@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 ash = "0.29"
 cgmath = "0.17"
+colored = "1.9"
 image = "0.22"
 winit = "0.20.0-alpha6"
 time = "0.2"

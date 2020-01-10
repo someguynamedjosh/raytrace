@@ -6,11 +6,14 @@ use ash::vk::{self, Handle};
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
-use std::ffi::{CStr, CString};
+use std::ffi::{CString};
 use std::os::raw::{c_char, c_void};
 use std::ptr;
 
-use super::{constants::*, platform_specific, util};
+use super::constants::*;
+use super::debug;
+use super::platform_specific;
+use super::util;
 
 // TODO: Organize these members.
 pub struct Core {
@@ -35,7 +38,7 @@ impl Core {
     pub fn new(event_loop: &EventLoop<()>) -> Core {
         let entry = ash::Entry::new().unwrap();
         let instance = create_instance(&entry, WINDOW_TITLE);
-        let (debug_utils_loader, debug_messenger) = setup_debug_utils(&entry, &instance);
+        let (debug_utils_loader, debug_messenger) = debug::setup_debug_utils(&entry, &instance);
         let window = WindowBuilder::new()
             .with_title(WINDOW_TITLE)
             .with_inner_size((WINDOW_WIDTH, WINDOW_HEIGHT).into())
@@ -125,28 +128,7 @@ impl Core {
     }
 
     pub fn set_debug_name<VkObject: Handle>(&self, object: VkObject, name: &str) {
-        set_debug_name(&self.device, &self.debug_utils_loader, object, name);
-    }
-}
-
-pub fn set_debug_name<VkObject: Handle>(
-    device: &ash::Device,
-    debug_utils: &DebugUtils,
-    object: VkObject,
-    name: &str,
-) {
-    let name = CString::new(name).unwrap();
-    let name_info = vk::DebugUtilsObjectNameInfoEXT {
-        s_type: vk::StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-        object_type: VkObject::TYPE,
-        object_handle: object.as_raw(),
-        p_object_name: name.as_ptr(),
-        ..Default::default()
-    };
-    unsafe {
-        debug_utils
-            .debug_utils_set_object_name(device.handle(), &name_info)
-            .expect("Failed to set debug name.");
+        debug::set_debug_name(&self.device, &self.debug_utils_loader, object, name);
     }
 }
 
@@ -200,7 +182,7 @@ pub fn create_instance(entry: &ash::Entry, window_title: &str) -> ash::Instance 
     };
 
     // This create info used to debug issues in vk::createInstance and vk::destroyInstance.
-    let debug_utils_create_info = build_debug_utils_create_info();
+    let debug_utils_create_info = debug::build_debug_utils_create_info();
 
     let extension_names = platform_specific::required_extension_names();
 
@@ -245,40 +227,6 @@ pub fn create_instance(entry: &ash::Entry, window_title: &str) -> ash::Instance 
     instance
 }
 
-unsafe extern "system" fn vulkan_debug_utils_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _p_user_data: *mut c_void,
-) -> vk::Bool32 {
-    let severity = match message_severity {
-        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[Verbose]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[Warning]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[Error]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[Info]",
-        _ => "[Unknown]",
-    };
-    let types = match message_type {
-        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[General]",
-        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[Performance]",
-        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[Validation]",
-        _ => "[Unknown]",
-    };
-    let message = CStr::from_ptr((*p_callback_data).p_message);
-    println!("[Debug]{}{}{:?}", severity, types, message);
-    unsafe {
-        println!(
-            "{:x?}",
-            std::slice::from_raw_parts(
-                (*p_callback_data).p_objects,
-                (*p_callback_data).object_count as usize
-            )
-        );
-    }
-
-    vk::FALSE
-}
-
 pub fn check_validation_layer_support(entry: &ash::Entry) -> bool {
     // if support validation layer, then return true
 
@@ -308,45 +256,6 @@ pub fn check_validation_layer_support(entry: &ash::Entry) -> bool {
     }
 
     true
-}
-
-pub fn setup_debug_utils(
-    entry: &ash::Entry,
-    instance: &ash::Instance,
-) -> (ash::extensions::ext::DebugUtils, vk::DebugUtilsMessengerEXT) {
-    let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
-
-    if ENABLE_DEBUG {
-        let messenger_ci = build_debug_utils_create_info();
-
-        let utils_messenger = unsafe {
-            debug_utils_loader
-                .create_debug_utils_messenger(&messenger_ci, None)
-                .expect("Debug Utils Callback")
-        };
-
-        (debug_utils_loader, utils_messenger)
-    } else {
-        (debug_utils_loader, ash::vk::DebugUtilsMessengerEXT::null())
-    }
-}
-
-pub fn build_debug_utils_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
-    vk::DebugUtilsMessengerCreateInfoEXT {
-        s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-        p_next: ptr::null(),
-        flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
-        // TODO: Maybe command line flags to turn these on / off?
-        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
-            // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
-            // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
-            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-        pfn_user_callback: Some(vulkan_debug_utils_callback),
-        p_user_data: ptr::null_mut(),
-    }
 }
 
 pub fn create_surface(
@@ -693,7 +602,7 @@ pub fn create_swapchain(
             let view = device
                 .create_image_view(&create_info, None)
                 .expect("Failed to create image view for swapchain image.");
-            set_debug_name(device, debug_utils, view, "Swapchain View");
+            debug::set_debug_name(device, debug_utils, view, "Swapchain View");
             view
         });
     }
