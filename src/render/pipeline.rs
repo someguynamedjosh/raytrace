@@ -50,19 +50,30 @@ impl Pipeline {
 
         let change_layouts = cmd::create_buffer(core, "change_layouts");
         cmd::begin(core, change_layouts);
-        cmd::transition_layout(core, change_layouts, render_data.albedo_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.block_data_atlas.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.chunk_map.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.depth_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.emission_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.fog_color_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.lighting_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.lighting_pong_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.normal_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.old_depth_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.old_lighting_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.old_normal_buffer.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
-        cmd::transition_layout(core, change_layouts, render_data.region_map.image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
+        let images = [
+            &render_data.albedo_buffer,
+            &render_data.block_data_atlas,
+            &render_data.chunk_map,
+            &render_data.depth_buffer,
+            &render_data.emission_buffer,
+            &render_data.fog_color_buffer,
+            &render_data.lighting_buffer,
+            &render_data.lighting_pong_buffer,
+            &render_data.normal_buffer,
+            &render_data.old_depth_buffer,
+            &render_data.old_lighting_buffer,
+            &render_data.old_normal_buffer,
+            &render_data.region_map,
+        ];
+        for img in images.iter() {
+            cmd::transition_layout(
+                core,
+                change_layouts,
+                img.image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::GENERAL,
+            );
+        }
         cmd::end(core, change_layouts);
         cmd::execute_and_destroy(core, change_layouts);
 
@@ -244,7 +255,7 @@ fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
 }
 
 #[repr(C)]
-struct RaytracePushData {
+struct RaytraceUniformData {
     sun_angle: f32,
     seed: u32,
     _padding0: u64,
@@ -266,6 +277,11 @@ struct RaytracePushData {
     _padding8: u32,
     region_offset: Vector3<i32>,
     _padding9: u32,
+}
+
+#[repr(C)]
+struct DenoisePushData {
+    size: i32,
 }
 
 struct RenderData {
@@ -290,8 +306,8 @@ struct RenderData {
 
     blue_noise: SampledImage,
 
-    raytrace_push_data: RaytracePushData,
-    raytrace_push_data_buffer: ObjectBuffer<RaytracePushData>,
+    raytrace_uniform_data: RaytraceUniformData,
+    raytrace_uniform_data_buffer: ObjectBuffer<RaytraceUniformData>,
 }
 
 impl RenderData {
@@ -390,7 +406,7 @@ impl RenderData {
                 tex
             },
 
-            raytrace_push_data: RaytracePushData {
+            raytrace_uniform_data: RaytraceUniformData {
                 sun_angle: 0.0,
                 seed: 0,
                 origin: [0.0, 0.0, 0.0].into(),
@@ -413,9 +429,9 @@ impl RenderData {
                 _padding8: 0,
                 _padding9: 0,
             },
-            raytrace_push_data_buffer: ObjectBuffer::create(
+            raytrace_uniform_data_buffer: ObjectBuffer::create(
                 core,
-                "raytrace_push_data",
+                "raytrace_uniform_data",
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
             ),
         }
@@ -443,7 +459,7 @@ impl RenderData {
         self.fog_color_buffer.destroy(core);
 
         self.blue_noise.destroy(core);
-        self.raytrace_push_data_buffer.destroy(core);
+        self.raytrace_uniform_data_buffer.destroy(core);
     }
 }
 
@@ -519,7 +535,7 @@ fn generate_raytrace_ds_prototypes(
         render_data.old_depth_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
-        render_data.raytrace_push_data_buffer.create_dp(),
+        render_data.raytrace_uniform_data_buffer.create_dp(),
     ]]
 }
 
@@ -558,6 +574,7 @@ fn create_compute_shader_stage(
     shader_source: &[u8],
     entry_point: &str,
     descriptor_set_layouts: &[vk::DescriptorSetLayout],
+    push_constant_ranges: &[vk::PushConstantRange],
 ) -> Stage {
     let shader_module = create_shader_module(core, shader_source.as_ptr(), shader_source.len());
     let entry_point_cstring = CString::new(entry_point).unwrap();
@@ -571,6 +588,8 @@ fn create_compute_shader_stage(
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
         set_layout_count: descriptor_set_layouts.len() as u32,
         p_set_layouts: descriptor_set_layouts.as_ptr(),
+        push_constant_range_count: push_constant_ranges.len() as u32,
+        p_push_constant_ranges: push_constant_ranges.as_ptr(),
         ..Default::default()
     };
     let pipeline_layout = unsafe {
@@ -609,6 +628,11 @@ fn create_denoise_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
         shader_source,
         "main",
         &[dc.raytrace.layout],
+        &[vk::PushConstantRange {
+            stage_flags: vk::ShaderStageFlags::COMPUTE,
+            offset: 0,
+            size: std::mem::size_of::<DenoisePushData>() as u32,
+        }],
     )
 }
 
@@ -620,6 +644,7 @@ fn create_finalize_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
         shader_source,
         "main",
         &[dc.finalize.layout, dc.swapchain.layout],
+        &[],
     )
 }
 
@@ -631,5 +656,6 @@ fn create_raytrace_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
         shader_source,
         "main",
         &[dc.raytrace.layout],
+        &[],
     )
 }
