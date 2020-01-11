@@ -1,11 +1,12 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
 
-use cgmath::Vector3;
+use cgmath::{Matrix3, SquareMatrix, Vector3};
 
 use std::ffi::CString;
 
 use crate::game::Game;
+use crate::util;
 
 use super::commands as cmd;
 use super::constants::*;
@@ -47,7 +48,7 @@ impl Pipeline {
         let (frame_complete_fence,) = create_fences(core);
         let command_buffers = create_command_buffers(core);
 
-        let render_data = RenderData::create(core);
+        let mut render_data = RenderData::create(core);
         render_data.initialize(core);
         let descriptor_collection = DescriptorCollection::create(core, &render_data);
 
@@ -142,7 +143,7 @@ impl Pipeline {
         }
     }
 
-    pub fn draw_frame(&mut self, core: &Core, game: &Game) {
+    pub fn draw_frame(&mut self, core: &Core, game: &mut Game) {
         let (image_index, _is_suboptimal) = unsafe {
             core.swapchain_info
                 .swapchain_loader
@@ -179,13 +180,98 @@ impl Pipeline {
                 .expect("Failed to reset fence.");
         }
 
+        let camera = game.borrow_camera();
+        let util::TripleEulerVector { forward, up, right } =
+            util::compute_triple_euler_vector(camera.heading, camera.pitch);
 
+        let uniform_data = &mut self.render_data.raytrace_uniform_data;
+        uniform_data.origin = camera.origin;
+        uniform_data.forward = forward;
+        uniform_data.up = up * 0.4;
+        uniform_data.right = right * 0.4;
+        // Modulus to prevent overflowing the seed.
+        uniform_data.seed = (uniform_data.seed + 1) % BLUE_NOISE_SIZE;
+        uniform_data.sun_angle = game.get_sun_angle();
 
         unsafe {
             let buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all(core);
-            *buffer_content = self.render_data.raytrace_uniform_data.clone();
+            buffer_content[0] = uniform_data.clone();
             self.render_data.raytrace_uniform_data_buffer.unbind(core);
         }
+
+        self.process_feedback(core, game);
+        if self.render_data.upload_destinations.len() > 0 {
+            println!(
+                "Uploading {} chunks.",
+                self.render_data.upload_destinations.len()
+            );
+            let commands = cmd::create_buffer(core, "chunk_upload_commands");
+            cmd::begin(core, commands);
+            cmd::transition_layout(
+                core,
+                commands,
+                self.render_data.block_data_atlas.image,
+                vk::ImageLayout::GENERAL,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
+            let upload_buffer_iter = self.render_data.upload_buffers.iter();
+            let destination_iter = self.render_data.upload_destinations.iter();
+            for (upload_buffer, destination) in upload_buffer_iter.zip(destination_iter) {
+                let (cx, cy, cz) = (
+                    *destination as u32 % ATLAS_CHUNK_WIDTH,
+                    *destination as u32 / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH,
+                    *destination as u32 / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH,
+                );
+                cmd::copy_buffer_to_image_offset(
+                    core,
+                    commands,
+                    upload_buffer.buffer,
+                    self.render_data.block_data_atlas.image,
+                    vk::Offset3D {
+                        x: (cx * CHUNK_BLOCK_WIDTH) as i32,
+                        y: (cy * CHUNK_BLOCK_WIDTH) as i32,
+                        z: (cz * CHUNK_BLOCK_WIDTH) as i32,
+                    },
+                    vk::Extent3D {
+                        width: CHUNK_BLOCK_WIDTH,
+                        height: CHUNK_BLOCK_WIDTH,
+                        depth: CHUNK_BLOCK_WIDTH,
+                    },
+                );
+            }
+            cmd::transition_layout(
+                core,
+                commands,
+                self.render_data.block_data_atlas.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::GENERAL,
+            );
+            cmd::end(core, commands);
+            cmd::execute_and_destroy(core, commands);
+            // TODO: A more efficient wait method.
+            unsafe {
+                core.device
+                    .device_wait_idle()
+                    .expect("Failed to wait for device to complete command buffer.");
+            }
+            self.render_data.upload_destinations.clear();
+        }
+
+        // Do this after we set the buffer so that it will only affect the next frame.
+        let uniform_data = &mut self.render_data.raytrace_uniform_data;
+        uniform_data.old_origin = uniform_data.origin;
+        let current_transform_matrix = {
+            // Multiplying {screenx * depth, screeny * depth, depth} by this gets pixel position in world space.
+            let screen_to_world_space =
+                Matrix3::from_cols(right.clone() * 0.4, up.clone() * 0.4, forward.clone());
+            // Inverting it gives us world space to screen space.
+            screen_to_world_space
+                .invert()
+                .expect("Screen space vectors should cover entire coordinate space.")
+        };
+        uniform_data.old_transform_c0 = current_transform_matrix[0].clone();
+        uniform_data.old_transform_c1 = current_transform_matrix[1].clone();
+        uniform_data.old_transform_c2 = current_transform_matrix[2].clone();
 
         unsafe {
             let wait_fence = self.frame_complete_fence;
@@ -210,6 +296,70 @@ impl Pipeline {
                 .swapchain_loader
                 .queue_present(core.present_queue, &present_info)
                 .expect("Failed to present swapchain image.");
+        }
+    }
+
+    fn process_feedback(&mut self, core: &Core, game: &mut Game) {
+        let chunk_map_data = unsafe { self.render_data.chunk_map_buffer.bind_all::<u16>(core) };
+        let region_map_data = unsafe { self.render_data.region_map_buffer.bind_all::<u16>(core) };
+        let mut current_buffer = 0;
+        for region_index in 0..ROOT_REGION_VOLUME {
+            let region_content = region_map_data[region_index as usize];
+            if region_content != REQUEST_LOAD_CHUNK_INDEX {
+                continue;
+            }
+            let region_coord = util::index_to_coord_3d(region_index, ROOT_REGION_WIDTH);
+            let possible_region = game.borrow_world_mut().borrow_region(region_coord);
+            let region_data = if let Some(data) = possible_region {
+                data
+            } else {
+                region_map_data[region_index as usize] = EMPTY_CHUNK_INDEX;
+                continue;
+            };
+            region_map_data[region_index as usize] = 1;
+            let chunk_coord = util::scale_coord_3d(&region_coord, REGION_CHUNK_WIDTH);
+            // The index of the first chunk in the region.
+            let region_offset = util::coord_to_index_3d(&chunk_coord, ROOT_CHUNK_WIDTH);
+            for local_coord in util::coord_iter_3d(REGION_CHUNK_WIDTH) {
+                let global_index =
+                    util::coord_to_index_3d(&local_coord, ROOT_CHUNK_WIDTH) + region_offset;
+                if chunk_map_data[global_index as usize] != REQUEST_LOAD_CHUNK_INDEX {
+                    continue;
+                }
+                let local_index = util::coord_to_index_3d(&local_coord, REGION_CHUNK_WIDTH);
+                let chunk_data = if let Some(data) = &region_data.chunks[local_index as usize] {
+                    data
+                } else {
+                    chunk_map_data[global_index as usize] = EMPTY_CHUNK_INDEX;
+                    continue;
+                };
+
+                chunk_map_data[global_index as usize] = self.render_data.chunk_upload_index;
+                self.render_data
+                    .upload_destinations
+                    .push(self.render_data.chunk_upload_index);
+                self.render_data.chunk_upload_index += 1;
+                let upload_buffer =
+                    unsafe { self.render_data.upload_buffers[current_buffer].bind_all(core) };
+                for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
+                    upload_buffer[block_index] = chunk_data.block_data[block_index];
+                }
+                unsafe {
+                    self.render_data.upload_buffers[current_buffer].unbind(core);
+                }
+                current_buffer += 1;
+                if current_buffer == NUM_UPLOAD_BUFFERS {
+                    unsafe {
+                        self.render_data.chunk_map_buffer.unbind(core);
+                        self.render_data.region_map_buffer.unbind(core);
+                    }
+                    return;
+                }
+            }
+        }
+        unsafe {
+            self.render_data.chunk_map_buffer.unbind(core);
+            self.render_data.region_map_buffer.unbind(core);
         }
     }
 
@@ -316,6 +466,7 @@ struct DenoisePushData {
 struct RenderData {
     upload_buffers: Vec<Buffer>,
     upload_destinations: Vec<u16>,
+    chunk_upload_index: u16,
     block_data_atlas: Image,
 
     chunk_map: Image,
@@ -354,6 +505,7 @@ impl RenderData {
                 depth: 1,
             },
             format,
+            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::STORAGE,
         )
     }
 
@@ -368,12 +520,13 @@ impl RenderData {
                     Buffer::create(
                         core,
                         &format!("upload_buffer_{}", index),
-                        CHUNK_BLOCK_VOLUME as u64,
+                        CHUNK_BLOCK_VOLUME as u64 * 2,
                         vk::BufferUsageFlags::TRANSFER_SRC,
                     )
                 })
                 .collect(),
             upload_destinations: vec![],
+            chunk_upload_index: 0,
             block_data_atlas: Image::create(
                 core,
                 "block_data_atlas",
@@ -384,6 +537,9 @@ impl RenderData {
                     depth: ATLAS_BLOCK_WIDTH,
                 },
                 vk::Format::R16_UINT,
+                vk::ImageUsageFlags::TRANSFER_SRC
+                    | vk::ImageUsageFlags::TRANSFER_DST
+                    | vk::ImageUsageFlags::STORAGE,
             ),
 
             chunk_map: Image::create(
@@ -396,11 +552,14 @@ impl RenderData {
                     depth: ROOT_CHUNK_WIDTH,
                 },
                 vk::Format::R16_UINT,
+                vk::ImageUsageFlags::TRANSFER_SRC
+                    | vk::ImageUsageFlags::TRANSFER_DST
+                    | vk::ImageUsageFlags::STORAGE,
             ),
             chunk_map_buffer: Buffer::create(
                 core,
                 "chunk_map_buffer",
-                ROOT_CHUNK_VOLUME as u64,
+                ROOT_CHUNK_VOLUME as u64 * std::mem::size_of::<u16>() as u64,
                 vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
             ),
             region_map: Image::create(
@@ -413,11 +572,14 @@ impl RenderData {
                     depth: ROOT_REGION_WIDTH,
                 },
                 vk::Format::R16_UINT,
+                vk::ImageUsageFlags::TRANSFER_SRC
+                    | vk::ImageUsageFlags::TRANSFER_DST
+                    | vk::ImageUsageFlags::STORAGE,
             ),
             region_map_buffer: Buffer::create(
                 core,
                 "region_map_buffer",
-                ROOT_REGION_VOLUME as u64,
+                ROOT_REGION_VOLUME as u64 * std::mem::size_of::<u16>() as u64,
                 vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
             ),
 
@@ -480,7 +642,9 @@ impl RenderData {
         }
     }
 
-    fn initialize(&self, core: &Core) {
+    fn initialize(&mut self, core: &Core) {
+        self.chunk_map_buffer.fill(core, &UNLOADED_CHUNK_INDEX);
+        self.region_map_buffer.fill(core, &UNLOADED_CHUNK_INDEX);
         let commands = cmd::create_buffer(core, "change_layouts");
         cmd::begin(core, commands);
         let generic_layout_images = [
@@ -518,7 +682,9 @@ impl RenderData {
         self.block_data_atlas.destroy(core);
 
         self.chunk_map.destroy(core);
+        self.chunk_map_buffer.destroy(core);
         self.region_map.destroy(core);
+        self.region_map_buffer.destroy(core);
 
         self.lighting_buffer.destroy(core);
         self.depth_buffer.destroy(core);

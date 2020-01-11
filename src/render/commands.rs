@@ -164,6 +164,42 @@ pub fn copy_buffer_to_image(
     }
 }
 
+pub fn copy_buffer_to_image_offset(
+    core: &Core,
+    buffer: vk::CommandBuffer,
+    data_buffer: vk::Buffer,
+    image: vk::Image,
+    offset: vk::Offset3D,
+    extent: vk::Extent3D,
+) {
+    let copy_info = vk::BufferImageCopy {
+        buffer_offset: 0,
+        buffer_row_length: 0,
+        buffer_image_height: 0,
+
+        image_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+
+        image_extent: extent,
+        image_offset: offset,
+        ..Default::default()
+    };
+
+    unsafe {
+        core.device.cmd_copy_buffer_to_image(
+            buffer,
+            data_buffer,
+            image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[copy_info],
+        );
+    }
+}
+
 pub fn transition_and_copy_buffer_to_image(
     core: &Core,
     buffer: vk::CommandBuffer,

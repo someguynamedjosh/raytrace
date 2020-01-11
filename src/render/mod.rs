@@ -54,8 +54,16 @@ impl VulkanApp {
         }
     }
 
+    pub fn on_mouse_move(&mut self, x: f64, y: f64) {
+        self.game.on_mouse_move(x, y);
+    }
+
+    pub fn tick(&mut self, dt: f32) {
+        self.game.tick(dt as f32)
+    }
+
     pub fn draw_frame(&mut self) {
-        self.pipeline.draw_frame(&self.core, &self.game);
+        self.pipeline.draw_frame(&self.core, &mut self.game);
     }
 }
 

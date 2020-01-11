@@ -58,14 +58,26 @@ impl Buffer {
         }
     }
 
-    pub unsafe fn bind_all<PtrType>(&mut self, core: &Core) -> *mut PtrType {
-        core.device
+    pub unsafe fn bind_all<PtrType>(&mut self, core: &Core) -> &mut [PtrType] {
+        let ptr = core
+            .device
             .map_memory(self.memory, 0, self.size, Default::default())
-            .expect("Failed to bind memory.") as *mut PtrType
+            .expect("Failed to bind memory.") as *mut PtrType;
+        std::slice::from_raw_parts_mut(ptr, self.size as usize / std::mem::size_of::<PtrType>())
     }
 
     pub unsafe fn unbind(&mut self, core: &Core) {
         core.device.unmap_memory(self.memory)
+    }
+
+    pub fn fill<ElementType: Clone>(&mut self, core: &Core, value: &ElementType) {
+        let range = unsafe { self.bind_all::<ElementType>(core) };
+        for item in range.iter_mut() {
+            *item = value.clone();
+        }
+        unsafe {
+            self.unbind(core);
+        }
     }
 
     pub fn destroy(&mut self, core: &Core) {
@@ -84,11 +96,7 @@ pub struct ObjectBuffer<ObjectType> {
 }
 
 impl<ObjectType> ObjectBuffer<ObjectType> {
-    pub fn create(
-        core: &Core,
-        name: &str,
-        usage: vk::BufferUsageFlags,
-    ) -> Self {
+    pub fn create(core: &Core, name: &str, usage: vk::BufferUsageFlags) -> Self {
         let size = std::mem::size_of::<ObjectType>() as u64;
         let create_info = vk::BufferCreateInfo {
             size,
@@ -136,10 +144,12 @@ impl<ObjectType> ObjectBuffer<ObjectType> {
         DescriptorPrototype::UniformBuffer(self.buffer, 0, self.size)
     }
 
-    pub unsafe fn bind_all(&mut self, core: &Core) -> *mut ObjectType {
-        core.device
+    pub unsafe fn bind_all(&mut self, core: &Core) -> &mut [ObjectType] {
+        let ptr = core
+            .device
             .map_memory(self.memory, 0, self.size, Default::default())
-            .expect("Failed to bind memory.") as *mut ObjectType
+            .expect("Failed to bind memory.") as *mut ObjectType;
+        std::slice::from_raw_parts_mut(ptr, self.size as usize / std::mem::size_of::<ObjectType>())
     }
 
     pub unsafe fn unbind(&mut self, core: &Core) {
@@ -168,6 +178,7 @@ impl Image {
         typ: vk::ImageType,
         extent: vk::Extent3D,
         format: vk::Format,
+        usage: vk::ImageUsageFlags,
     ) -> Image {
         let create_info = vk::ImageCreateInfo {
             image_type: typ,
@@ -176,8 +187,7 @@ impl Image {
             samples: vk::SampleCountFlags::TYPE_1,
             mip_levels: 1,
             array_layers: 1,
-            // TODO: Better usage.
-            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
+            usage,
             tiling: vk::ImageTiling::OPTIMAL,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             ..Default::default()
@@ -383,10 +393,10 @@ impl SampledImage {
             let buffer_ptr = buffer.bind_all::<u8>(core);
             for (index, pixel) in data.pixels().enumerate() {
                 // RGBA
-                *buffer_ptr.offset(index as isize * 4 + 0) = (pixel.2).0[0];
-                *buffer_ptr.offset(index as isize * 4 + 1) = (pixel.2).0[1];
-                *buffer_ptr.offset(index as isize * 4 + 2) = (pixel.2).0[2];
-                *buffer_ptr.offset(index as isize * 4 + 3) = (pixel.2).0[3];
+                buffer_ptr[index as usize * 4 + 0] = (pixel.2).0[0];
+                buffer_ptr[index as usize * 4 + 1] = (pixel.2).0[1];
+                buffer_ptr[index as usize * 4 + 2] = (pixel.2).0[2];
+                buffer_ptr[index as usize * 4 + 3] = (pixel.2).0[3];
             }
             buffer.unbind(core);
         }
