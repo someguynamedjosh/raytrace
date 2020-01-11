@@ -40,3 +40,4 @@ pub const UNLOADED_CHUNK_INDEX: u16 = 0xFFFE;
 pub const REQUEST_LOAD_CHUNK_INDEX: u16 = 0xFFFD;
 
 pub const NUM_UPLOAD_BUFFERS: usize = 32;
+pub const SHADER_GROUP_SIZE: u32 = 8; // Each compute shader works on 8x8 groups.

@@ -37,6 +37,9 @@ impl Drop for Stage {
 pub struct Pipeline {
     core: Rc<Core>,
 
+    x_shader_groups: u32,
+    y_shader_groups: u32,
+
     command_buffers: Vec<CommandBuffer>,
     frame_available_semaphore: vk::Semaphore,
     frame_complete_semaphore: vk::Semaphore,
@@ -57,6 +60,10 @@ impl Pipeline {
         let swapchain_length = core.swapchain.swapchain_images.len() as u32;
         let command_buffers = CommandBuffer::create_multiple(core.clone(), swapchain_length);
 
+        let swapchain_extent = core.swapchain.swapchain_extent;
+        let x_shader_groups = swapchain_extent.width / SHADER_GROUP_SIZE;
+        let y_shader_groups = swapchain_extent.height / SHADER_GROUP_SIZE;
+
         let mut render_data = RenderData::create(core.clone());
         render_data.initialize();
         let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
@@ -67,6 +74,9 @@ impl Pipeline {
 
         let mut pipeline = Pipeline {
             core,
+
+            x_shader_groups,
+            y_shader_groups,
 
             command_buffers,
             frame_available_semaphore,
@@ -105,7 +115,7 @@ impl Pipeline {
             let set = self.descriptor_collection.raytrace.variants[0];
             buffer.bind_descriptor_set(layout, 0, set);
             buffer.bind_pipeline(self.raytrace_stage.vk_pipeline);
-            buffer.dispatch(30, 30, 1);
+            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
 
             buffer.transition_layout(
                 &swapchain_image,
@@ -118,7 +128,7 @@ impl Pipeline {
             let set = self.descriptor_collection.swapchain.variants[index];
             buffer.bind_descriptor_set(layout, 1, set);
             buffer.bind_pipeline(self.finalize_stage.vk_pipeline);
-            buffer.dispatch(30, 30, 1);
+            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
 
             buffer.transition_and_copy_image_to_buffer(
                 &self.render_data.chunk_map,
