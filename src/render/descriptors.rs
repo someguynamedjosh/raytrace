@@ -1,6 +1,8 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
 
+use std::rc::Rc;
+
 use super::core::Core;
 
 pub enum DescriptorPrototype {
@@ -170,18 +172,18 @@ impl DescriptorTypeAccumulator {
     }
 }
 
-pub type PrototypeGenerator<Data> = Box<dyn Fn(&Core, &Data) -> Vec<Vec<DescriptorPrototype>>>;
+pub type PrototypeGenerator<Data> = Box<dyn Fn(Rc<Core>, &Data) -> Vec<Vec<DescriptorPrototype>>>;
 
 pub fn generate_descriptor_pool<Data>(
     prototype_generators: &[PrototypeGenerator<Data>],
     names: &[&str],
-    core: &Core,
+    core: Rc<Core>,
     data: &Data,
 ) -> (vk::DescriptorPool, Vec<DescriptorData>) {
     let prototypes: Vec<_> = prototype_generators
         .into_iter()
         .map(|generator| {
-            let variants = generator(core, data);
+            let variants = generator(core.clone(), data);
             debug_assert!(variants_match(&variants));
             variants
         })
@@ -335,34 +337,38 @@ macro_rules! create_descriptor_collection_struct {
         } $(,)*
     } => { 
         struct $struct_name {
+            core: std::rc::Rc<crate::render::core::Core>,
             pool: vk::DescriptorPool,
             $($field_name : crate::render::descriptors::DescriptorData),*
         }
 
         impl $struct_name {
-            fn create(core: &crate::render::core::Core, aux_data: &$aux_data_type) -> Self {
+            fn create(core: std::rc::Rc<crate::render::core::Core>, aux_data: &$aux_data_type) -> Self {
                 let generators = [$(
                     Box::new($generator_name) 
                     as crate::render::descriptors::PrototypeGenerator<$aux_data_type>
                 ),*];
                 let names = [$(stringify!($field_name)),*];
                 let (pool, datas) = crate::render::descriptors::generate_descriptor_pool(
-                    &generators, &names, core, aux_data
+                    &generators, &names, core.clone(), aux_data
                 );
                 let mut datas_consumer = datas.into_iter();
                 $struct_name {
+                    core,
                     pool,
                     $($field_name : datas_consumer.next().unwrap()),*
                 }
             }
+        }
 
-            fn destroy(&mut self, core: &crate::render::core::Core) {
+        impl Drop for $struct_name {
+            fn drop(&mut self) {
                 unsafe {
-                    $(core.device.destroy_descriptor_set_layout(
+                    $(self.core.device.destroy_descriptor_set_layout(
                         self.$field_name.layout, 
                         None
                     );)*
-                    core.device.destroy_descriptor_pool(self.pool, None);
+                    self.core.device.destroy_descriptor_pool(self.pool, None);
                 }
             }
         }

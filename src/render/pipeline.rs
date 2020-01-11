@@ -4,33 +4,40 @@ use ash::vk;
 use cgmath::{Matrix3, SquareMatrix, Vector3};
 
 use std::ffi::CString;
+use std::rc::Rc;
 
 use crate::game::Game;
 use crate::util;
 
-use super::commands as cmd;
+use super::command_buffer::CommandBuffer;
 use super::constants::*;
 use super::core::Core;
 #[macro_use]
 use crate::create_descriptor_collection_struct;
 use super::descriptors::DescriptorPrototype;
-use super::structures::{Buffer, Image, ObjectBuffer, SampledImage};
+use super::structures::{Buffer, SampledImage, StorageImage};
 
 struct Stage {
+    core: Rc<Core>,
     vk_pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
 }
 
-impl Stage {
-    unsafe fn destroy(&mut self, core: &Core) {
-        core.device
-            .destroy_pipeline_layout(self.pipeline_layout, None);
-        core.device.destroy_pipeline(self.vk_pipeline, None);
+impl Drop for Stage {
+    fn drop(&mut self) {
+        unsafe {
+            self.core
+                .device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.core.device.destroy_pipeline(self.vk_pipeline, None);
+        }
     }
 }
 
 pub struct Pipeline {
-    command_buffers: Vec<vk::CommandBuffer>,
+    core: Rc<Core>,
+
+    command_buffers: Vec<CommandBuffer>,
     frame_available_semaphore: vk::Semaphore,
     frame_complete_semaphore: vk::Semaphore,
     frame_complete_fence: vk::Fence,
@@ -43,20 +50,24 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(core: &Core) -> Pipeline {
-        let (frame_available_semaphore, frame_complete_semaphore) = create_semaphores(core);
-        let (frame_complete_fence,) = create_fences(core);
-        let command_buffers = create_command_buffers(core);
+    pub fn new(core: Rc<Core>) -> Pipeline {
+        let frame_available_semaphore = core.create_semaphore("frame_available");
+        let frame_complete_semaphore = core.create_semaphore("frame_complete");
+        let frame_complete_fence = core.create_fence(true, "frame_complete");
+        let swapchain_length = core.swapchain.swapchain_images.len() as u32;
+        let command_buffers = CommandBuffer::create_multiple(core.clone(), swapchain_length);
 
-        let mut render_data = RenderData::create(core);
-        render_data.initialize(core);
-        let descriptor_collection = DescriptorCollection::create(core, &render_data);
+        let mut render_data = RenderData::create(core.clone());
+        render_data.initialize();
+        let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
 
-        let denoise_stage = create_denoise_stage(core, &descriptor_collection);
-        let finalize_stage = create_finalize_stage(core, &descriptor_collection);
-        let raytrace_stage = create_raytrace_stage(core, &descriptor_collection);
+        let denoise_stage = create_denoise_stage(core.clone(), &descriptor_collection);
+        let finalize_stage = create_finalize_stage(core.clone(), &descriptor_collection);
+        let raytrace_stage = create_raytrace_stage(core.clone(), &descriptor_collection);
 
         let mut pipeline = Pipeline {
+            core,
+
             command_buffers,
             frame_available_semaphore,
             frame_complete_semaphore,
@@ -68,87 +79,73 @@ impl Pipeline {
             finalize_stage,
             raytrace_stage,
         };
-        pipeline.record_command_buffers(core);
+        pipeline.record_command_buffers();
         pipeline
     }
 
-    fn record_command_buffers(&mut self, core: &Core) {
+    fn record_command_buffers(&mut self) {
         for (index, buffer) in self.command_buffers.iter().enumerate() {
-            let swapchain_image = core.swapchain_info.swapchain_images[index];
-            let buffer = *buffer;
+            let swapchain_image = self.core.swapchain.swapchain_images[index];
 
-            cmd::begin(core, buffer);
-            cmd::transition_and_copy_buffer_to_image(
-                core,
-                buffer,
-                self.render_data.chunk_map_buffer.buffer,
-                self.render_data.chunk_map.image,
-                self.render_data.chunk_map.extent,
+            buffer.set_debug_name(&format!("primary_command_buffer_{}", index));
+
+            buffer.begin();
+            buffer.transition_and_copy_buffer_to_image(
+                &self.render_data.chunk_map_buffer,
+                &self.render_data.chunk_map,
+                &self.render_data.chunk_map,
             );
-            cmd::transition_and_copy_buffer_to_image(
-                core,
-                buffer,
-                self.render_data.region_map_buffer.buffer,
-                self.render_data.region_map.image,
-                self.render_data.region_map.extent,
+            buffer.transition_and_copy_buffer_to_image(
+                &self.render_data.region_map_buffer,
+                &self.render_data.region_map,
+                &self.render_data.region_map,
             );
 
             let layout = self.raytrace_stage.pipeline_layout;
             let set = self.descriptor_collection.raytrace.variants[0];
-            cmd::bind_descriptor_set(core, buffer, set, layout, 0);
-            cmd::bind_pipeline(core, buffer, self.raytrace_stage.vk_pipeline);
-            unsafe {
-                core.device.cmd_dispatch(buffer, 30, 30, 1);
-            }
+            buffer.bind_descriptor_set(layout, 0, set);
+            buffer.bind_pipeline(self.raytrace_stage.vk_pipeline);
+            buffer.dispatch(30, 30, 1);
 
-            cmd::transition_layout(
-                core,
-                buffer,
-                swapchain_image,
+            buffer.transition_layout(
+                &swapchain_image,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
             );
             let layout = self.finalize_stage.pipeline_layout;
             let set = self.descriptor_collection.finalize.variants[0];
-            cmd::bind_descriptor_set(core, buffer, set, layout, 0);
+            buffer.bind_descriptor_set(layout, 0, set);
             let set = self.descriptor_collection.swapchain.variants[index];
-            cmd::bind_descriptor_set(core, buffer, set, layout, 1);
-            cmd::bind_pipeline(core, buffer, self.finalize_stage.vk_pipeline);
-            unsafe {
-                core.device.cmd_dispatch(buffer, 30, 30, 1);
-            }
+            buffer.bind_descriptor_set(layout, 1, set);
+            buffer.bind_pipeline(self.finalize_stage.vk_pipeline);
+            buffer.dispatch(30, 30, 1);
 
-            cmd::transition_and_copy_image_to_buffer(
-                core,
-                buffer,
-                self.render_data.chunk_map.image,
-                self.render_data.chunk_map_buffer.buffer,
-                self.render_data.chunk_map.extent,
+            buffer.transition_and_copy_image_to_buffer(
+                &self.render_data.chunk_map,
+                &self.render_data.chunk_map,
+                &self.render_data.chunk_map_buffer,
             );
-            cmd::transition_and_copy_image_to_buffer(
-                core,
-                buffer,
-                self.render_data.region_map.image,
-                self.render_data.region_map_buffer.buffer,
-                self.render_data.region_map.extent,
+            buffer.transition_and_copy_image_to_buffer(
+                &self.render_data.region_map,
+                &self.render_data.region_map,
+                &self.render_data.region_map_buffer,
             );
-            cmd::transition_layout(
-                core,
-                buffer,
-                swapchain_image,
+            buffer.transition_layout(
+                &swapchain_image,
                 vk::ImageLayout::GENERAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
-            cmd::end(core, buffer);
+            buffer.end();
         }
     }
 
-    pub fn draw_frame(&mut self, core: &Core, game: &mut Game) {
+    pub fn draw_frame(&mut self, game: &mut Game) {
         let (image_index, _is_suboptimal) = unsafe {
-            core.swapchain_info
+            self.core
+                .swapchain
                 .swapchain_loader
                 .acquire_next_image(
-                    core.swapchain_info.swapchain,
+                    self.core.swapchain.swapchain,
                     std::u64::MAX,
                     self.frame_available_semaphore,
                     vk::Fence::null(),
@@ -164,7 +161,7 @@ impl Pipeline {
             p_wait_semaphores: wait_semaphores.as_ptr(),
             p_wait_dst_stage_mask: wait_stage_mask.as_ptr(),
             command_buffer_count: 1,
-            p_command_buffers: &self.command_buffers[image_index as usize],
+            p_command_buffers: &self.command_buffers[image_index as usize].get_vk_command_buffer(),
             signal_semaphore_count: 1,
             p_signal_semaphores: signal_semaphores.as_ptr(),
             ..Default::default()
@@ -172,10 +169,12 @@ impl Pipeline {
 
         unsafe {
             let wait_fence = self.frame_complete_fence;
-            core.device
+            self.core
+                .device
                 .wait_for_fences(&[wait_fence], true, std::u64::MAX)
                 .expect("Failed to wait for previous frame to finish rendering.");
-            core.device
+            self.core
+                .device
                 .reset_fences(&[wait_fence])
                 .expect("Failed to reset fence.");
         }
@@ -193,24 +192,21 @@ impl Pipeline {
         uniform_data.seed = (uniform_data.seed + 1) % BLUE_NOISE_SIZE;
         uniform_data.sun_angle = game.get_sun_angle();
 
-        unsafe {
-            let buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all(core);
-            buffer_content[0] = uniform_data.clone();
-            self.render_data.raytrace_uniform_data_buffer.unbind(core);
-        }
+        let mut buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all();
+        buffer_content[0] = uniform_data.clone();
+        drop(buffer_content);
 
-        self.process_feedback(core, game);
+        self.process_feedback(game);
         if self.render_data.upload_destinations.len() > 0 {
             println!(
                 "Uploading {} chunks.",
                 self.render_data.upload_destinations.len()
             );
-            let commands = cmd::create_buffer(core, "chunk_upload_commands");
-            cmd::begin(core, commands);
-            cmd::transition_layout(
-                core,
-                commands,
-                self.render_data.block_data_atlas.image,
+            let commands = CommandBuffer::create_single(self.core.clone());
+            commands.set_debug_name("chunk_upload_commands");
+            commands.begin_one_time_submit();
+            commands.transition_layout(
+                &self.render_data.block_data_atlas,
                 vk::ImageLayout::GENERAL,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             );
@@ -222,38 +218,29 @@ impl Pipeline {
                     *destination as u32 / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH,
                     *destination as u32 / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH,
                 );
-                cmd::copy_buffer_to_image_offset(
-                    core,
-                    commands,
-                    upload_buffer.buffer,
-                    self.render_data.block_data_atlas.image,
+                commands.copy_buffer_to_image_offset(
+                    upload_buffer,
+                    &self.render_data.block_data_atlas,
+                    &vk::Extent3D {
+                        width: CHUNK_BLOCK_WIDTH,
+                        height: CHUNK_BLOCK_WIDTH,
+                        depth: CHUNK_BLOCK_WIDTH,
+                    },
                     vk::Offset3D {
                         x: (cx * CHUNK_BLOCK_WIDTH) as i32,
                         y: (cy * CHUNK_BLOCK_WIDTH) as i32,
                         z: (cz * CHUNK_BLOCK_WIDTH) as i32,
                     },
-                    vk::Extent3D {
-                        width: CHUNK_BLOCK_WIDTH,
-                        height: CHUNK_BLOCK_WIDTH,
-                        depth: CHUNK_BLOCK_WIDTH,
-                    },
                 );
             }
-            cmd::transition_layout(
-                core,
-                commands,
-                self.render_data.block_data_atlas.image,
+            commands.transition_layout(
+                &self.render_data.block_data_atlas,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 vk::ImageLayout::GENERAL,
             );
-            cmd::end(core, commands);
-            cmd::execute_and_destroy(core, commands);
+            commands.end();
             // TODO: A more efficient wait method.
-            unsafe {
-                core.device
-                    .device_wait_idle()
-                    .expect("Failed to wait for device to complete command buffer.");
-            }
+            commands.blocking_execute_and_destroy();
             self.render_data.upload_destinations.clear();
         }
 
@@ -275,13 +262,14 @@ impl Pipeline {
 
         unsafe {
             let wait_fence = self.frame_complete_fence;
-            core.device
-                .queue_submit(core.compute_queue, &[submit_info], wait_fence)
+            self.core
+                .device
+                .queue_submit(self.core.compute_queue, &[submit_info], wait_fence)
                 .expect("Failed to submit command queue.");
         }
 
         let wait_semaphores = [self.frame_complete_semaphore];
-        let swapchains = [core.swapchain_info.swapchain];
+        let swapchains = [self.core.swapchain.swapchain];
         let present_info = vk::PresentInfoKHR {
             wait_semaphore_count: 1,
             p_wait_semaphores: wait_semaphores.as_ptr(),
@@ -292,16 +280,17 @@ impl Pipeline {
         };
 
         unsafe {
-            core.swapchain_info
+            self.core
+                .swapchain
                 .swapchain_loader
-                .queue_present(core.present_queue, &present_info)
+                .queue_present(self.core.present_queue, &present_info)
                 .expect("Failed to present swapchain image.");
         }
     }
 
-    fn process_feedback(&mut self, core: &Core, game: &mut Game) {
-        let chunk_map_data = unsafe { self.render_data.chunk_map_buffer.bind_all::<u16>(core) };
-        let region_map_data = unsafe { self.render_data.region_map_buffer.bind_all::<u16>(core) };
+    fn process_feedback(&mut self, game: &mut Game) {
+        let mut chunk_map_data = self.render_data.chunk_map_buffer.bind_all();
+        let mut region_map_data = self.render_data.region_map_buffer.bind_all();
         let mut current_buffer = 0;
         for region_index in 0..ROOT_REGION_VOLUME {
             let region_content = region_map_data[region_index as usize];
@@ -339,95 +328,37 @@ impl Pipeline {
                     .upload_destinations
                     .push(self.render_data.chunk_upload_index);
                 self.render_data.chunk_upload_index += 1;
-                let upload_buffer =
-                    unsafe { self.render_data.upload_buffers[current_buffer].bind_all(core) };
+                let mut upload_buffer = self.render_data.upload_buffers[current_buffer].bind_all();
                 for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
                     upload_buffer[block_index] = chunk_data.block_data[block_index];
                 }
-                unsafe {
-                    self.render_data.upload_buffers[current_buffer].unbind(core);
-                }
                 current_buffer += 1;
                 if current_buffer == NUM_UPLOAD_BUFFERS {
-                    unsafe {
-                        self.render_data.chunk_map_buffer.unbind(core);
-                        self.render_data.region_map_buffer.unbind(core);
-                    }
                     return;
                 }
             }
         }
+    }
+}
+
+impl Drop for Pipeline {
+    fn drop(&mut self) {
         unsafe {
-            self.render_data.chunk_map_buffer.unbind(core);
-            self.render_data.region_map_buffer.unbind(core);
+            self.core
+                .device
+                .device_wait_idle()
+                .expect("Failed to wait for device to finish rendering.");
+
+            self.core
+                .device
+                .destroy_fence(self.frame_complete_fence, None);
+            self.core
+                .device
+                .destroy_semaphore(self.frame_available_semaphore, None);
+            self.core
+                .device
+                .destroy_semaphore(self.frame_complete_semaphore, None);
         }
-    }
-
-    pub unsafe fn destroy(&mut self, core: &Core) {
-        core.device
-            .device_wait_idle()
-            .expect("Failed to wait for device to finish rendering.");
-
-        self.denoise_stage.destroy(core);
-        self.finalize_stage.destroy(core);
-        self.raytrace_stage.destroy(core);
-
-        self.descriptor_collection.destroy(core);
-        self.render_data.destroy(core);
-
-        core.device.destroy_fence(self.frame_complete_fence, None);
-        core.device
-            .destroy_semaphore(self.frame_available_semaphore, None);
-        core.device
-            .destroy_semaphore(self.frame_complete_semaphore, None);
-    }
-}
-
-fn create_semaphores(core: &Core) -> (vk::Semaphore, vk::Semaphore) {
-    let create_info = Default::default();
-
-    (
-        unsafe {
-            core.device
-                .create_semaphore(&create_info, None)
-                .expect("Failed to create semaphore.")
-        },
-        unsafe {
-            core.device
-                .create_semaphore(&create_info, None)
-                .expect("Failed to create semaphore.")
-        },
-    )
-}
-
-fn create_fences(core: &Core) -> (vk::Fence,) {
-    let create_info = vk::FenceCreateInfo {
-        // Start the fences signalled so we don't wait on the first couple of frames.
-        flags: vk::FenceCreateFlags::SIGNALED,
-        ..Default::default()
-    };
-
-    let fence = unsafe {
-        core.device
-            .create_fence(&create_info, None)
-            .expect("Failed to create fence.")
-    };
-    core.set_debug_name(fence, "wait_for_frame_end");
-    (fence,)
-}
-
-fn create_command_buffers(core: &Core) -> Vec<vk::CommandBuffer> {
-    // TODO: debug names.
-    let allocate_info = vk::CommandBufferAllocateInfo {
-        command_buffer_count: core.swapchain_info.swapchain_images.len() as u32,
-        command_pool: core.command_pool,
-        level: vk::CommandBufferLevel::PRIMARY,
-        ..Default::default()
-    };
-    unsafe {
-        core.device
-            .allocate_command_buffers(&allocate_info)
-            .expect("Failed to allocate command buffers.")
     }
 }
 
@@ -464,38 +395,40 @@ struct DenoisePushData {
 }
 
 struct RenderData {
-    upload_buffers: Vec<Buffer>,
+    core: Rc<Core>,
+
+    upload_buffers: Vec<Buffer<u16>>,
     upload_destinations: Vec<u16>,
     chunk_upload_index: u16,
-    block_data_atlas: Image,
+    block_data_atlas: StorageImage,
 
-    chunk_map: Image,
-    chunk_map_buffer: Buffer,
-    region_map: Image,
-    region_map_buffer: Buffer,
+    chunk_map: StorageImage,
+    chunk_map_buffer: Buffer<u16>,
+    region_map: StorageImage,
+    region_map_buffer: Buffer<u16>,
 
-    lighting_buffer: Image,
-    depth_buffer: Image,
-    normal_buffer: Image,
-    old_lighting_buffer: Image,
-    old_depth_buffer: Image,
-    old_normal_buffer: Image,
+    lighting_buffer: StorageImage,
+    depth_buffer: StorageImage,
+    normal_buffer: StorageImage,
+    old_lighting_buffer: StorageImage,
+    old_depth_buffer: StorageImage,
+    old_normal_buffer: StorageImage,
 
-    lighting_pong_buffer: Image,
-    albedo_buffer: Image,
-    emission_buffer: Image,
-    fog_color_buffer: Image,
+    lighting_pong_buffer: StorageImage,
+    albedo_buffer: StorageImage,
+    emission_buffer: StorageImage,
+    fog_color_buffer: StorageImage,
 
     blue_noise: SampledImage,
 
     raytrace_uniform_data: RaytraceUniformData,
-    raytrace_uniform_data_buffer: ObjectBuffer<RaytraceUniformData>,
+    raytrace_uniform_data_buffer: Buffer<RaytraceUniformData>,
 }
 
 impl RenderData {
-    fn make_framebuffer(core: &Core, name: &str, format: vk::Format) -> Image {
-        let dimensions = core.swapchain_info.swapchain_extent;
-        Image::create(
+    fn make_framebuffer(core: Rc<Core>, name: &str, format: vk::Format) -> StorageImage {
+        let dimensions = core.swapchain.swapchain_extent;
+        StorageImage::create(
             core,
             name,
             vk::ImageType::TYPE_2D,
@@ -509,26 +442,28 @@ impl RenderData {
         )
     }
 
-    fn create(core: &Core) -> RenderData {
+    fn create(core: Rc<Core>) -> RenderData {
         let rgba16_unorm = vk::Format::R16G16B16A16_UNORM;
         let rgba8_unorm = vk::Format::R8G8B8A8_UNORM;
         let r16_uint = vk::Format::R16_UINT;
         let r8_uint = vk::Format::R8_UINT;
         RenderData {
+            core: core.clone(),
+
             upload_buffers: (0..NUM_UPLOAD_BUFFERS)
                 .map(|index| {
                     Buffer::create(
-                        core,
+                        core.clone(),
                         &format!("upload_buffer_{}", index),
-                        CHUNK_BLOCK_VOLUME as u64 * 2,
+                        CHUNK_BLOCK_VOLUME as u64,
                         vk::BufferUsageFlags::TRANSFER_SRC,
                     )
                 })
                 .collect(),
             upload_destinations: vec![],
             chunk_upload_index: 0,
-            block_data_atlas: Image::create(
-                core,
+            block_data_atlas: StorageImage::create(
+                core.clone(),
                 "block_data_atlas",
                 vk::ImageType::TYPE_3D,
                 vk::Extent3D {
@@ -542,8 +477,8 @@ impl RenderData {
                     | vk::ImageUsageFlags::STORAGE,
             ),
 
-            chunk_map: Image::create(
-                core,
+            chunk_map: StorageImage::create(
+                core.clone(),
                 "chunk_map",
                 vk::ImageType::TYPE_3D,
                 vk::Extent3D {
@@ -557,13 +492,13 @@ impl RenderData {
                     | vk::ImageUsageFlags::STORAGE,
             ),
             chunk_map_buffer: Buffer::create(
-                core,
+                core.clone(),
                 "chunk_map_buffer",
-                ROOT_CHUNK_VOLUME as u64 * std::mem::size_of::<u16>() as u64,
+                ROOT_CHUNK_VOLUME as u64,
                 vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
             ),
-            region_map: Image::create(
-                core,
+            region_map: StorageImage::create(
+                core.clone(),
                 "region_map",
                 vk::ImageType::TYPE_3D,
                 vk::Extent3D {
@@ -577,27 +512,35 @@ impl RenderData {
                     | vk::ImageUsageFlags::STORAGE,
             ),
             region_map_buffer: Buffer::create(
-                core,
+                core.clone(),
                 "region_map_buffer",
-                ROOT_REGION_VOLUME as u64 * std::mem::size_of::<u16>() as u64,
+                ROOT_REGION_VOLUME as u64,
                 vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
             ),
 
-            lighting_buffer: Self::make_framebuffer(core, "lighting_buf", rgba16_unorm),
-            depth_buffer: Self::make_framebuffer(core, "depth_buf", r16_uint),
-            normal_buffer: Self::make_framebuffer(core, "normal_buf", r8_uint),
-            old_lighting_buffer: Self::make_framebuffer(core, "old_lighting_buf", rgba16_unorm),
-            old_depth_buffer: Self::make_framebuffer(core, "old_depth_buf", r16_uint),
-            old_normal_buffer: Self::make_framebuffer(core, "old_normal_buf", r8_uint),
+            lighting_buffer: Self::make_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
+            depth_buffer: Self::make_framebuffer(core.clone(), "depth_buf", r16_uint),
+            normal_buffer: Self::make_framebuffer(core.clone(), "normal_buf", r8_uint),
+            old_lighting_buffer: Self::make_framebuffer(
+                core.clone(),
+                "old_lighting_buf",
+                rgba16_unorm,
+            ),
+            old_depth_buffer: Self::make_framebuffer(core.clone(), "old_depth_buf", r16_uint),
+            old_normal_buffer: Self::make_framebuffer(core.clone(), "old_normal_buf", r8_uint),
 
-            lighting_pong_buffer: Self::make_framebuffer(core, "lighting_pong_buf", rgba16_unorm),
-            albedo_buffer: Self::make_framebuffer(core, "albedo_buf", rgba8_unorm),
-            emission_buffer: Self::make_framebuffer(core, "emission_buf", rgba8_unorm),
-            fog_color_buffer: Self::make_framebuffer(core, "fog_color_buf", rgba8_unorm),
+            lighting_pong_buffer: Self::make_framebuffer(
+                core.clone(),
+                "lighting_pong_buf",
+                rgba16_unorm,
+            ),
+            albedo_buffer: Self::make_framebuffer(core.clone(), "albedo_buf", rgba8_unorm),
+            emission_buffer: Self::make_framebuffer(core.clone(), "emission_buf", rgba8_unorm),
+            fog_color_buffer: Self::make_framebuffer(core.clone(), "fog_color_buf", rgba8_unorm),
 
             blue_noise: {
                 let mut tex = SampledImage::create(
-                    core,
+                    core.clone(),
                     "blue_noise",
                     vk::ImageType::TYPE_2D,
                     vk::Extent3D {
@@ -607,7 +550,7 @@ impl RenderData {
                     },
                     vk::Format::R8G8B8A8_UNORM,
                 );
-                tex.load_from_png(core, include_bytes!("blue_noise_512.png"));
+                tex.load_from_png(include_bytes!("blue_noise_512.png"));
                 tex
             },
 
@@ -634,19 +577,20 @@ impl RenderData {
                 _padding8: 0,
                 _padding9: 0,
             },
-            raytrace_uniform_data_buffer: ObjectBuffer::create(
-                core,
+            raytrace_uniform_data_buffer: Buffer::create(
+                core.clone(),
                 "raytrace_uniform_data",
+                1,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
             ),
         }
     }
 
-    fn initialize(&mut self, core: &Core) {
-        self.chunk_map_buffer.fill(core, &UNLOADED_CHUNK_INDEX);
-        self.region_map_buffer.fill(core, &UNLOADED_CHUNK_INDEX);
-        let commands = cmd::create_buffer(core, "change_layouts");
-        cmd::begin(core, commands);
+    fn initialize(&mut self) {
+        self.chunk_map_buffer.fill(&UNLOADED_CHUNK_INDEX);
+        self.region_map_buffer.fill(&UNLOADED_CHUNK_INDEX);
+        let commands = CommandBuffer::create_single(self.core.clone());
+        commands.begin_one_time_submit();
         let generic_layout_images = [
             &self.albedo_buffer,
             &self.block_data_atlas,
@@ -662,44 +606,15 @@ impl RenderData {
             &self.old_normal_buffer,
             &self.region_map,
         ];
-        for img in generic_layout_images.iter() {
-            cmd::transition_layout(
-                core,
-                commands,
-                img.image,
+        for image in generic_layout_images.iter() {
+            commands.transition_layout(
+                *image,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
             );
         }
-        cmd::end(core, commands);
-        cmd::execute_and_destroy(core, commands);
-    }
-
-    fn destroy(&mut self, core: &Core) {
-        for upload_buffer in &mut self.upload_buffers {
-            upload_buffer.destroy(core);
-        }
-        self.block_data_atlas.destroy(core);
-
-        self.chunk_map.destroy(core);
-        self.chunk_map_buffer.destroy(core);
-        self.region_map.destroy(core);
-        self.region_map_buffer.destroy(core);
-
-        self.lighting_buffer.destroy(core);
-        self.depth_buffer.destroy(core);
-        self.normal_buffer.destroy(core);
-        self.old_lighting_buffer.destroy(core);
-        self.old_depth_buffer.destroy(core);
-        self.old_normal_buffer.destroy(core);
-
-        self.lighting_pong_buffer.destroy(core);
-        self.albedo_buffer.destroy(core);
-        self.emission_buffer.destroy(core);
-        self.fog_color_buffer.destroy(core);
-
-        self.blue_noise.destroy(core);
-        self.raytrace_uniform_data_buffer.destroy(core);
+        commands.end();
+        commands.blocking_execute_and_destroy();
     }
 }
 
@@ -716,7 +631,7 @@ create_descriptor_collection_struct! {
 
 #[rustfmt::skip] // It keeps trying to spread my beautiful descriptors over 3 lines :(
 fn generate_denoise_ds_prototypes(
-    _core: &Core,
+    _core: Rc<Core>,
     render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
     vec![
@@ -739,7 +654,7 @@ fn generate_denoise_ds_prototypes(
 
 #[rustfmt::skip]
 fn generate_finalize_ds_prototypes(
-    _core: &Core,
+    _core: Rc<Core>,
     render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
     vec![vec![
@@ -755,7 +670,7 @@ fn generate_finalize_ds_prototypes(
 
 #[rustfmt::skip]
 fn generate_raytrace_ds_prototypes(
-    _core: &Core,
+    _core: Rc<Core>,
     render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
     vec![vec![
@@ -780,10 +695,10 @@ fn generate_raytrace_ds_prototypes(
 }
 
 fn generate_swapchain_ds_prototypes(
-    core: &Core,
+    core: Rc<Core>,
     _render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
-    let views = &core.swapchain_info.swapchain_image_views;
+    let views = &core.swapchain.swapchain_image_views;
     views
         .iter()
         .map(|image_view| {
@@ -795,7 +710,11 @@ fn generate_swapchain_ds_prototypes(
         .collect()
 }
 
-fn create_shader_module(core: &Core, shader_source: *const u8, length: usize) -> vk::ShaderModule {
+fn create_shader_module(
+    core: Rc<Core>,
+    shader_source: *const u8,
+    length: usize,
+) -> vk::ShaderModule {
     let shader_module_create_info = vk::ShaderModuleCreateInfo {
         code_size: length,
         p_code: shader_source as *const u32,
@@ -809,14 +728,15 @@ fn create_shader_module(core: &Core, shader_source: *const u8, length: usize) ->
 }
 
 fn create_compute_shader_stage(
-    core: &Core,
+    core: Rc<Core>,
     name: &str,
     shader_source: &[u8],
     entry_point: &str,
     descriptor_set_layouts: &[vk::DescriptorSetLayout],
     push_constant_ranges: &[vk::PushConstantRange],
 ) -> Stage {
-    let shader_module = create_shader_module(core, shader_source.as_ptr(), shader_source.len());
+    let shader_module =
+        create_shader_module(core.clone(), shader_source.as_ptr(), shader_source.len());
     let entry_point_cstring = CString::new(entry_point).unwrap();
     let vk_stage = vk::PipelineShaderStageCreateInfo {
         module: shader_module,
@@ -855,12 +775,13 @@ fn create_compute_shader_stage(
         core.device.destroy_shader_module(shader_module, None);
     }
     Stage {
+        core,
         vk_pipeline: pipeline,
         pipeline_layout,
     }
 }
 
-fn create_denoise_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
+fn create_denoise_stage(core: Rc<Core>, dc: &DescriptorCollection) -> Stage {
     let shader_source = include_bytes!("../../shaders/spirv/bilateral_denoise.comp.spirv");
     create_compute_shader_stage(
         core,
@@ -876,7 +797,7 @@ fn create_denoise_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
     )
 }
 
-fn create_finalize_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
+fn create_finalize_stage(core: Rc<Core>, dc: &DescriptorCollection) -> Stage {
     let shader_source = include_bytes!("../../shaders/spirv/finalize.comp.spirv");
     create_compute_shader_stage(
         core,
@@ -888,7 +809,7 @@ fn create_finalize_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
     )
 }
 
-fn create_raytrace_stage(core: &Core, dc: &DescriptorCollection) -> Stage {
+fn create_raytrace_stage(core: Rc<Core>, dc: &DescriptorCollection) -> Stage {
     let shader_source = include_bytes!("../../shaders/spirv/raytrace.comp.spirv");
     create_compute_shader_stage(
         core,

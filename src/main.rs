@@ -22,7 +22,7 @@ fn main() {
                     ..
                 } => match (virtual_keycode, state) {
                     (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
-                        *control_flow = ControlFlow::Exit
+                        *control_flow = ControlFlow::Exit;
                     }
                     _ => {}
                 },
@@ -39,5 +39,5 @@ fn main() {
             vulkan_app.draw_frame();
         }
         _ => (),
-    })
+    });
 }

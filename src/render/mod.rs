@@ -2,8 +2,9 @@ use winit::event_loop::EventLoop;
 
 use crate::game::Game;
 
-pub(self) mod commands;
+pub(self) mod command_buffer;
 pub mod constants;
+pub(self) mod core_builder;
 pub(self) mod core;
 pub(self) mod debug;
 pub(self) mod descriptors;
@@ -14,6 +15,7 @@ pub(self) mod util;
 
 use self::core::Core;
 use pipeline::Pipeline;
+use std::rc::Rc;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
@@ -38,17 +40,15 @@ impl Camera {
 
 
 pub struct VulkanApp {
-    core: Core,
     pipeline: Pipeline,
     game: Game,
 }
 
 impl VulkanApp {
     pub fn new(event_loop: &EventLoop<()>) -> VulkanApp {
-        let core = Core::new(event_loop);
-        let pipeline = Pipeline::new(&core);
+        let core = Rc::new(Core::new(event_loop));
+        let pipeline = Pipeline::new(core.clone());
         VulkanApp { 
-            core, 
             pipeline,
             game: Game::new(),
         }
@@ -63,15 +63,6 @@ impl VulkanApp {
     }
 
     pub fn draw_frame(&mut self) {
-        self.pipeline.draw_frame(&self.core, &mut self.game);
-    }
-}
-
-impl Drop for VulkanApp {
-    fn drop(&mut self) {
-        unsafe {
-            self.pipeline.destroy(&self.core);
-            self.core.destroy();
-        }
+        self.pipeline.draw_frame(&mut self.game);
     }
 }
