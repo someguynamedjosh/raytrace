@@ -18,6 +18,7 @@ pub(self) mod util;
 // Positive Z is up
 // Heading starts at Positive X and goes clockwise (towards Positive Y).
 // Pitch starts at zero and positive pitch looks up at Positive Z.
+#[derive(Debug)]
 pub struct Camera {
     pub origin: cgmath::Vector3<f32>,
     pub heading: cgmath::Rad<f32>,

@@ -13,7 +13,8 @@ fn main() {
     let event_loop = EventLoop::new();
     let (_core, mut pipeline) = render::create_instance(&event_loop, &game);
     let mut frame_timer = Instant::now();
-    let mut performance_buffer = util::RingBufferAverage::new(16);
+    let mut frame_time_accumulator: u128 = 0;
+    let mut elapsed_frames: u32 = 0;
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => match event {
             WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -35,18 +36,32 @@ fn main() {
                     _ => {}
                 },
             },
-            WindowEvent::CursorMoved { position, .. } => {
-                game.on_mouse_move(position.x, position.y)
-            }
+            WindowEvent::CursorMoved { position, .. } => game.on_mouse_move(position.x, position.y),
             _ => {}
         },
         Event::MainEventsCleared => {
-            let millis = frame_timer.elapsed().as_millis();
+            let micros = frame_timer.elapsed().as_micros();
             frame_timer = Instant::now();
+            elapsed_frames += 1;
+            // Give the engine some time to "warm up", like getting memory in cache etc.
+            if elapsed_frames > 10 {
+                frame_time_accumulator += micros;
+            }
 
-            performance_buffer.push_sample(millis);
-            println!("Average frame time: {}ms", performance_buffer.average());
-            game.tick((millis as f64 / 1000.0) as f32);
+            if frame_time_accumulator > 10 * 1000 * 1000 {
+                println!(
+                    "Final result: {} frames in {}us",
+                    elapsed_frames - 10,
+                    frame_time_accumulator
+                );
+                println!(
+                    "Time per frame: {}us",
+                    frame_time_accumulator / (elapsed_frames as u128 - 10)
+                );
+                *control_flow = ControlFlow::Exit;
+            }
+
+            game.tick(0.0);
             pipeline.draw_frame(&mut game);
             game.borrow_controls_mut().tick();
         }
