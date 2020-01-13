@@ -9,9 +9,9 @@ mod util;
 mod world;
 
 fn main() {
-    let event_loop = EventLoop::new();
-    let (_core, mut pipeline) = render::create_instance(&event_loop);
     let mut game = game::Game::new();
+    let event_loop = EventLoop::new();
+    let (_core, mut pipeline) = render::create_instance(&event_loop, &game);
     let mut frame_timer = Instant::now();
     let mut performance_buffer = util::RingBufferAverage::new(16);
     event_loop.run(move |event, _, control_flow| match event {

@@ -53,7 +53,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(core: Rc<Core>) -> Pipeline {
+    pub fn new(core: Rc<Core>, game: &Game) -> Pipeline {
         let frame_available_semaphore = core.create_semaphore("frame_available");
         let frame_complete_semaphore = core.create_semaphore("frame_complete");
         let frame_complete_fence = core.create_fence(true, "frame_complete");
@@ -65,7 +65,7 @@ impl Pipeline {
         let y_shader_groups = swapchain_extent.height / SHADER_GROUP_SIZE;
 
         let mut render_data = RenderData::create(core.clone());
-        render_data.initialize();
+        render_data.initialize(game);
         let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
 
         let denoise_stage = create_denoise_stage(core.clone(), &descriptor_collection);
@@ -100,16 +100,6 @@ impl Pipeline {
             buffer.set_debug_name(&format!("primary_command_buffer_{}", index));
 
             buffer.begin();
-            buffer.transition_and_copy_buffer_to_image(
-                &self.render_data.chunk_map_buffer,
-                &self.render_data.chunk_map,
-                &self.render_data.chunk_map,
-            );
-            buffer.transition_and_copy_buffer_to_image(
-                &self.render_data.region_map_buffer,
-                &self.render_data.region_map,
-                &self.render_data.region_map,
-            );
 
             let layout = self.raytrace_stage.pipeline_layout;
             let set = self.descriptor_collection.raytrace.variants[0];
@@ -130,16 +120,6 @@ impl Pipeline {
             buffer.bind_pipeline(self.finalize_stage.vk_pipeline);
             buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
 
-            buffer.transition_and_copy_image_to_buffer(
-                &self.render_data.chunk_map,
-                &self.render_data.chunk_map,
-                &self.render_data.chunk_map_buffer,
-            );
-            buffer.transition_and_copy_image_to_buffer(
-                &self.render_data.region_map,
-                &self.render_data.region_map,
-                &self.render_data.region_map_buffer,
-            );
             buffer.transition_layout(
                 &swapchain_image,
                 vk::ImageLayout::GENERAL,
@@ -206,54 +186,6 @@ impl Pipeline {
         buffer_content[0] = uniform_data.clone();
         drop(buffer_content);
 
-        self.process_feedback(game);
-        if self.render_data.upload_destinations.len() > 0 {
-            println!(
-                "Uploading {} chunks.",
-                self.render_data.upload_destinations.len()
-            );
-            let commands = CommandBuffer::create_single(self.core.clone());
-            commands.set_debug_name("chunk_upload_commands");
-            commands.begin_one_time_submit();
-            commands.transition_layout(
-                &self.render_data.block_data_atlas,
-                vk::ImageLayout::GENERAL,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            );
-            let upload_buffer_iter = self.render_data.upload_buffers.iter();
-            let destination_iter = self.render_data.upload_destinations.iter();
-            for (upload_buffer, destination) in upload_buffer_iter.zip(destination_iter) {
-                let (cx, cy, cz) = (
-                    *destination as u32 % ATLAS_CHUNK_WIDTH,
-                    *destination as u32 / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH,
-                    *destination as u32 / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH,
-                );
-                commands.copy_buffer_to_image_offset(
-                    upload_buffer,
-                    &self.render_data.block_data_atlas,
-                    &vk::Extent3D {
-                        width: CHUNK_BLOCK_WIDTH,
-                        height: CHUNK_BLOCK_WIDTH,
-                        depth: CHUNK_BLOCK_WIDTH,
-                    },
-                    vk::Offset3D {
-                        x: (cx * CHUNK_BLOCK_WIDTH) as i32,
-                        y: (cy * CHUNK_BLOCK_WIDTH) as i32,
-                        z: (cz * CHUNK_BLOCK_WIDTH) as i32,
-                    },
-                );
-            }
-            commands.transition_layout(
-                &self.render_data.block_data_atlas,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                vk::ImageLayout::GENERAL,
-            );
-            commands.end();
-            // TODO: A more efficient wait method.
-            commands.blocking_execute_and_destroy();
-            self.render_data.upload_destinations.clear();
-        }
-
         // Do this after we set the buffer so that it will only affect the next frame.
         let uniform_data = &mut self.render_data.raytrace_uniform_data;
         uniform_data.old_origin = uniform_data.origin;
@@ -295,58 +227,6 @@ impl Pipeline {
                 .swapchain_loader
                 .queue_present(self.core.present_queue, &present_info)
                 .expect("Failed to present swapchain image.");
-        }
-    }
-
-    fn process_feedback(&mut self, game: &mut Game) {
-        let mut chunk_map_data = self.render_data.chunk_map_buffer.bind_all();
-        let mut region_map_data = self.render_data.region_map_buffer.bind_all();
-        let mut current_buffer = 0;
-        for region_index in 0..ROOT_REGION_VOLUME {
-            let region_content = region_map_data[region_index as usize];
-            if region_content != REQUEST_LOAD_CHUNK_INDEX {
-                continue;
-            }
-            let region_coord = util::index_to_coord_3d(region_index, ROOT_REGION_WIDTH);
-            let possible_region = game.borrow_world_mut().borrow_region(region_coord);
-            let region_data = if let Some(data) = possible_region {
-                data
-            } else {
-                region_map_data[region_index as usize] = EMPTY_CHUNK_INDEX;
-                continue;
-            };
-            region_map_data[region_index as usize] = 1;
-            let chunk_coord = util::scale_coord_3d(&region_coord, REGION_CHUNK_WIDTH);
-            // The index of the first chunk in the region.
-            let region_offset = util::coord_to_index_3d(&chunk_coord, ROOT_CHUNK_WIDTH);
-            for local_coord in util::coord_iter_3d(REGION_CHUNK_WIDTH) {
-                let global_index =
-                    util::coord_to_index_3d(&local_coord, ROOT_CHUNK_WIDTH) + region_offset;
-                if chunk_map_data[global_index as usize] != REQUEST_LOAD_CHUNK_INDEX {
-                    continue;
-                }
-                let local_index = util::coord_to_index_3d(&local_coord, REGION_CHUNK_WIDTH);
-                let chunk_data = if let Some(data) = &region_data.chunks[local_index as usize] {
-                    data
-                } else {
-                    chunk_map_data[global_index as usize] = EMPTY_CHUNK_INDEX;
-                    continue;
-                };
-
-                chunk_map_data[global_index as usize] = self.render_data.chunk_upload_index;
-                self.render_data
-                    .upload_destinations
-                    .push(self.render_data.chunk_upload_index);
-                self.render_data.chunk_upload_index += 1;
-                let mut upload_buffer = self.render_data.upload_buffers[current_buffer].bind_all();
-                for block_index in 0..CHUNK_BLOCK_VOLUME as usize {
-                    upload_buffer[block_index] = chunk_data.block_data[block_index];
-                }
-                current_buffer += 1;
-                if current_buffer == NUM_UPLOAD_BUFFERS {
-                    return;
-                }
-            }
         }
     }
 }
@@ -407,15 +287,7 @@ struct DenoisePushData {
 struct RenderData {
     core: Rc<Core>,
 
-    upload_buffers: Vec<Buffer<u16>>,
-    upload_destinations: Vec<u16>,
-    chunk_upload_index: u16,
-    block_data_atlas: StorageImage,
-
-    chunk_map: StorageImage,
-    chunk_map_buffer: Buffer<u16>,
-    region_map: StorageImage,
-    region_map_buffer: Buffer<u16>,
+    world: SampledImage,
 
     lighting_buffer: StorageImage,
     depth_buffer: StorageImage,
@@ -460,72 +332,18 @@ impl RenderData {
         RenderData {
             core: core.clone(),
 
-            upload_buffers: (0..NUM_UPLOAD_BUFFERS)
-                .map(|index| {
-                    Buffer::create(
-                        core.clone(),
-                        &format!("upload_buffer_{}", index),
-                        CHUNK_BLOCK_VOLUME as u64,
-                        vk::BufferUsageFlags::TRANSFER_SRC,
-                    )
-                })
-                .collect(),
-            upload_destinations: vec![],
-            chunk_upload_index: 0,
-            block_data_atlas: StorageImage::create(
+            world: SampledImage::create_mipped(
                 core.clone(),
-                "block_data_atlas",
+                "world",
                 vk::ImageType::TYPE_3D,
                 vk::Extent3D {
-                    width: ATLAS_BLOCK_WIDTH,
-                    height: ATLAS_BLOCK_WIDTH,
-                    depth: ATLAS_BLOCK_WIDTH,
+                    width: ROOT_BLOCK_WIDTH,
+                    height: ROOT_BLOCK_WIDTH,
+                    depth: ROOT_BLOCK_WIDTH,
                 },
                 vk::Format::R16_UINT,
-                vk::ImageUsageFlags::TRANSFER_SRC
-                    | vk::ImageUsageFlags::TRANSFER_DST
-                    | vk::ImageUsageFlags::STORAGE,
-            ),
-
-            chunk_map: StorageImage::create(
-                core.clone(),
-                "chunk_map",
-                vk::ImageType::TYPE_3D,
-                vk::Extent3D {
-                    width: ROOT_CHUNK_WIDTH,
-                    height: ROOT_CHUNK_WIDTH,
-                    depth: ROOT_CHUNK_WIDTH,
-                },
-                vk::Format::R16_UINT,
-                vk::ImageUsageFlags::TRANSFER_SRC
-                    | vk::ImageUsageFlags::TRANSFER_DST
-                    | vk::ImageUsageFlags::STORAGE,
-            ),
-            chunk_map_buffer: Buffer::create(
-                core.clone(),
-                "chunk_map_buffer",
-                ROOT_CHUNK_VOLUME as u64,
-                vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
-            ),
-            region_map: StorageImage::create(
-                core.clone(),
-                "region_map",
-                vk::ImageType::TYPE_3D,
-                vk::Extent3D {
-                    width: ROOT_REGION_WIDTH,
-                    height: ROOT_REGION_WIDTH,
-                    depth: ROOT_REGION_WIDTH,
-                },
-                vk::Format::R16_UINT,
-                vk::ImageUsageFlags::TRANSFER_SRC
-                    | vk::ImageUsageFlags::TRANSFER_DST
-                    | vk::ImageUsageFlags::STORAGE,
-            ),
-            region_map_buffer: Buffer::create(
-                core.clone(),
-                "region_map_buffer",
-                ROOT_REGION_VOLUME as u64,
-                vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+                10,
             ),
 
             lighting_buffer: Self::make_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
@@ -559,6 +377,7 @@ impl RenderData {
                         depth: 1,
                     },
                     vk::Format::R8G8B8A8_UNORM,
+                    vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
                 );
                 tex.load_from_png(include_bytes!("blue_noise_512.png"));
                 tex
@@ -596,15 +415,73 @@ impl RenderData {
         }
     }
 
-    fn initialize(&mut self) {
-        self.chunk_map_buffer.fill(&UNLOADED_CHUNK_INDEX);
-        self.region_map_buffer.fill(&UNLOADED_CHUNK_INDEX);
-        let commands = CommandBuffer::create_single(self.core.clone());
+    fn make_lod_upload_buffer(&mut self, lod_level: u32, content: &[u16]) -> Buffer<u16> {
+        let scale = (2u64).pow(lod_level).pow(3);
+        let size = ROOT_BLOCK_VOLUME as u64 / scale;
+        let mut buffer = Buffer::create(
+            self.core.clone(),
+            "lod0",
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        );
+        let mut bound_content = buffer.bind_all();
+        for index in 0..size as usize {
+            bound_content[index] = content[index];
+        }
+        drop(bound_content);
+        println!("Created upload buffer for LOD{}", lod_level);
+        buffer
+    }
+
+    fn upload_lod(&self, command_buf: &mut CommandBuffer, data_buf: &Buffer<u16>, lod_level: u32) {
+        let scale = (2u32).pow(lod_level);
+        let dimension = ROOT_BLOCK_WIDTH / scale;
+        let extent = vk::Extent3D {
+            width: dimension,
+            height: dimension,
+            depth: dimension,
+        };
+        command_buf.copy_buffer_to_image_mip(data_buf, &self.world, &extent, lod_level);
+    }
+
+    fn initialize(&mut self, game: &Game) {
+        let world = game.borrow_world();
+        let lod0_buf = self.make_lod_upload_buffer(0, &world.content_lod0);
+        let lod1_buf = self.make_lod_upload_buffer(1, &world.content_lod1);
+        let lod2_buf = self.make_lod_upload_buffer(2, &world.content_lod2);
+        let lod3_buf = self.make_lod_upload_buffer(3, &world.content_lod3);
+        let lod4_buf = self.make_lod_upload_buffer(4, &world.content_lod4);
+        let lod5_buf = self.make_lod_upload_buffer(5, &world.content_lod5);
+        let lod6_buf = self.make_lod_upload_buffer(6, &world.content_lod6);
+        let lod7_buf = self.make_lod_upload_buffer(7, &world.content_lod7);
+        let lod8_buf = self.make_lod_upload_buffer(8, &world.content_lod8);
+        let lod9_buf = self.make_lod_upload_buffer(9, &world.content_lod9);
+        let mut commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
+        commands.transition_layout_mipped(
+            &self.world,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            10,
+        );
+        self.upload_lod(&mut commands, &lod0_buf, 0);
+        self.upload_lod(&mut commands, &lod1_buf, 1);
+        self.upload_lod(&mut commands, &lod2_buf, 2);
+        self.upload_lod(&mut commands, &lod3_buf, 3);
+        self.upload_lod(&mut commands, &lod4_buf, 4);
+        self.upload_lod(&mut commands, &lod5_buf, 5);
+        self.upload_lod(&mut commands, &lod6_buf, 6);
+        self.upload_lod(&mut commands, &lod7_buf, 7);
+        self.upload_lod(&mut commands, &lod8_buf, 8);
+        self.upload_lod(&mut commands, &lod9_buf, 9);
+        commands.transition_layout_mipped(
+            &self.world,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::GENERAL,
+            10,
+        );
         let generic_layout_images = [
             &self.albedo_buffer,
-            &self.block_data_atlas,
-            &self.chunk_map,
             &self.depth_buffer,
             &self.emission_buffer,
             &self.fog_color_buffer,
@@ -614,7 +491,6 @@ impl RenderData {
             &self.old_depth_buffer,
             &self.old_lighting_buffer,
             &self.old_normal_buffer,
-            &self.region_map,
         ];
         for image in generic_layout_images.iter() {
             commands.transition_layout(
@@ -625,6 +501,16 @@ impl RenderData {
         }
         commands.end();
         commands.blocking_execute_and_destroy();
+        drop(lod0_buf);
+        drop(lod1_buf);
+        drop(lod2_buf);
+        drop(lod3_buf);
+        drop(lod4_buf);
+        drop(lod5_buf);
+        drop(lod6_buf);
+        drop(lod7_buf);
+        drop(lod8_buf);
+        drop(lod9_buf);
     }
 }
 
@@ -684,9 +570,7 @@ fn generate_raytrace_ds_prototypes(
     render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
     vec![vec![
-        render_data.block_data_atlas.create_dp(vk::ImageLayout::GENERAL),
-        render_data.chunk_map.create_dp(vk::ImageLayout::GENERAL),
-        render_data.region_map.create_dp(vk::ImageLayout::GENERAL),
+        render_data.world.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.albedo_buffer.create_dp(vk::ImageLayout::GENERAL),
@@ -798,7 +682,7 @@ fn create_denoise_stage(core: Rc<Core>, dc: &DescriptorCollection) -> Stage {
         "raytrace",
         shader_source,
         "main",
-        &[dc.raytrace.layout],
+        &[dc.denoise.layout],
         &[vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::COMPUTE,
             offset: 0,

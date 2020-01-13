@@ -164,12 +164,24 @@ impl StorageImage {
         format: vk::Format,
         usage: vk::ImageUsageFlags,
     ) -> Self {
+        Self::create_mipped(core, name, typ, extent, format, usage, 1)
+    }
+
+    pub fn create_mipped(
+        core: Rc<Core>,
+        name: &str,
+        typ: vk::ImageType,
+        extent: vk::Extent3D,
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        mip_levels: u32,
+    ) -> Self {
         let create_info = vk::ImageCreateInfo {
             image_type: typ,
             extent,
             format,
             samples: vk::SampleCountFlags::TYPE_1,
-            mip_levels: 1,
+            mip_levels,
             array_layers: 1,
             usage,
             tiling: vk::ImageTiling::OPTIMAL,
@@ -216,7 +228,7 @@ impl StorageImage {
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
-                level_count: 1,
+                level_count: mip_levels,
                 base_array_layer: 0,
                 layer_count: 1,
             },
@@ -269,16 +281,28 @@ impl SampledImage {
         typ: vk::ImageType,
         extent: vk::Extent3D,
         format: vk::Format,
+        usage: vk::ImageUsageFlags,
+    ) -> Self {
+        Self::create_mipped(core, name, typ, extent, format, usage, 1)
+    }
+
+    pub fn create_mipped(
+        core: Rc<Core>,
+        name: &str,
+        typ: vk::ImageType,
+        extent: vk::Extent3D,
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        mip_levels: u32
     ) -> Self {
         let create_info = vk::ImageCreateInfo {
             image_type: typ,
             extent,
             format,
             samples: vk::SampleCountFlags::TYPE_1,
-            mip_levels: 1,
+            mip_levels,
             array_layers: 1,
-            // TODO: Better usage.
-            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            usage,
             tiling: vk::ImageTiling::OPTIMAL,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             ..Default::default()
@@ -323,7 +347,7 @@ impl SampledImage {
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
-                level_count: 1,
+                level_count: mip_levels,
                 base_array_layer: 0,
                 layer_count: 1,
             },
@@ -342,9 +366,12 @@ impl SampledImage {
             address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
             address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
             address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-            border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
-            unnormalized_coordinates: vk::TRUE, // Make coords in the range 0-(width) instead of 0-1
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+            unnormalized_coordinates: if mip_levels == 1 { vk::TRUE } else { vk::FALSE },
             compare_enable: vk::FALSE,
+            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+            min_lod: 0.0,
+            max_lod: if mip_levels == 1 { 0.0 } else { mip_levels as f32 },
             ..Default::default()
         };
         let sampler = unsafe {

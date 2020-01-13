@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use super::core::Core;
 
+#[derive(Debug)]
 pub enum DescriptorPrototype {
     StorageImage(vk::ImageView, vk::ImageLayout),
     CombinedImageSampler(vk::ImageView, vk::ImageLayout, vk::Sampler),

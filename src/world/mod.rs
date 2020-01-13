@@ -1,8 +1,7 @@
 pub mod base;
-pub use base::{Chunk, Region, World};
+pub use base::{World};
 pub(self) mod functions;
-mod generator;
 
 pub fn make_world() -> World {
-    World::new(Box::new(generator::generate))
+    World::new()
 }

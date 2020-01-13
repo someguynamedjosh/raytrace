@@ -160,6 +160,15 @@ impl CommandBuffer {
         from: vk::ImageLayout,
         to: vk::ImageLayout,
     ) {
+        self.transition_layout_mipped(image, from, to, 1)
+    }
+    pub fn transition_layout_mipped(
+        &self,
+        image: &impl ImageWrapper,
+        from: vk::ImageLayout,
+        to: vk::ImageLayout,
+        mip_level_count: u32,
+    ) {
         let image_barrier = vk::ImageMemoryBarrier {
             old_layout: from,
             new_layout: to,
@@ -169,7 +178,7 @@ impl CommandBuffer {
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
-                level_count: 1,
+                level_count: mip_level_count,
                 base_array_layer: 0,
                 layer_count: 1,
             },
@@ -187,12 +196,21 @@ impl CommandBuffer {
             );
         }
     }
-
     pub fn copy_buffer_to_image(
         &self,
         data_buffer: &impl BufferWrapper,
         image: &impl ImageWrapper,
         extent: &impl ExtentWrapper,
+    ) {
+        self.copy_buffer_to_image_mip(data_buffer, image, extent, 0);
+    }
+
+    pub fn copy_buffer_to_image_mip(
+        &self,
+        data_buffer: &impl BufferWrapper,
+        image: &impl ImageWrapper,
+        extent: &impl ExtentWrapper,
+        mip_level: u32,
     ) {
         let copy_info = vk::BufferImageCopy {
             buffer_offset: 0,
@@ -201,7 +219,7 @@ impl CommandBuffer {
 
             image_subresource: vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0,
+                mip_level,
                 base_array_layer: 0,
                 layer_count: 1,
             },

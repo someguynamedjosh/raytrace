@@ -2,23 +2,21 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, r16ui) uniform uimage3D block_data_atlas;
-layout(set = 0, binding = 1, r16ui) uniform uimage3D chunk_map;
-layout(set = 0, binding = 2, r16ui) uniform uimage3D region_map;
+layout(set = 0, binding = 0) uniform usampler3D world;
 
-layout(set = 0, binding = 3, rgba16) uniform writeonly image2D lighting_buffer;
-layout(set = 0, binding = 4, rgba8) uniform writeonly image2D albedo_buffer;
-layout(set = 0, binding = 5, rgba8) uniform writeonly image2D emission_buffer;
-layout(set = 0, binding = 6, rgba8) uniform writeonly image2D fog_color_buffer;
-layout(set = 0, binding = 7, r8ui) uniform writeonly uimage2D normal_buffer;
-layout(set = 0, binding = 8, r16ui) uniform writeonly uimage2D depth_buffer;
+layout(set = 0, binding = 1, rgba16) uniform writeonly image2D lighting_buffer;
+layout(set = 0, binding = 2, rgba8) uniform writeonly image2D albedo_buffer;
+layout(set = 0, binding = 3, rgba8) uniform writeonly image2D emission_buffer;
+layout(set = 0, binding = 4, rgba8) uniform writeonly image2D fog_color_buffer;
+layout(set = 0, binding = 5, r8ui) uniform writeonly uimage2D normal_buffer;
+layout(set = 0, binding = 6, r16ui) uniform writeonly uimage2D depth_buffer;
 
-layout(set = 0, binding = 9, rgba16) uniform readonly image2D old_lighting_buffer;
-layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
-layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
+layout(set = 0, binding = 7, rgba16) uniform readonly image2D old_lighting_buffer;
+layout(set = 0, binding = 8, r16ui) uniform readonly uimage2D old_depth_buffer;
+layout(set = 0, binding = 9, r8ui) uniform readonly uimage2D old_normal_buffer;
 
-layout(set = 0, binding = 12) uniform sampler2D blue_noise;
-layout(set = 0, binding = 13) uniform UniformData {
+layout(set = 0, binding = 10) uniform sampler2D blue_noise;
+layout(set = 0, binding = 11) uniform UniformData {
     float sun_angle;
     uint seed;
     vec3 origin, forward, up, right;
@@ -85,7 +83,7 @@ ivec3 offset_region_coord, offset_chunk_coord;
     block_coord.AXIS += step.AXIS; \
     total_step = next_block_distance.AXIS; \
     if (block_coord.AXIS == chunk_exit_planes.AXIS) { break; } \
-    result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
+    result.value = textureLod(world, vec3(block_coord) / vec3(ROOT_BLOCK_WIDTH), 0.0).r; \
     if (result.value != 0) { \
         result.normal = int(NORMAL_##AXIS) + (step.AXIS + 1) / 2;\
         break; \
@@ -120,8 +118,9 @@ ivec3 offset_region_coord, offset_chunk_coord;
         chunk_exit_planes.z = -1; \
     } \
     next_block_distance += vec3(total_step); \
-    block_coord %= ivec3(CHUNK_BLOCK_WIDTH); \
-    result.value = imageLoad(block_data_atlas, block_coord + atlas_offset * ivec3(CHUNK_BLOCK_WIDTH)).r; \
+    ivec3 chunk_offset = block_coord - block_coord % ivec3(CHUNK_BLOCK_WIDTH); \
+    chunk_exit_planes += chunk_offset; \
+    result.value = textureLod(world, vec3(block_coord) / vec3(ROOT_BLOCK_WIDTH), 0.0).r; \
     if (result.value == 0) { for (int i = 0; i < 128; i++) { \
         if (next_block_distance.x < next_block_distance.y) { \
             if (next_block_distance.x < next_block_distance.z) { \
@@ -147,20 +146,8 @@ GENERATE_FUNCTIONS(perform_chunk_trace, PERFORM_CHUNK_TRACE)
     total_step = next_chunk_distance.AXIS; \
     if (chunk_coord.AXIS == region_exit_planes.AXIS) { break; } \
     offset_chunk_coord = (chunk_coord + uniform_data.region_offset * ivec3(REGION_CHUNK_WIDTH)) % ivec3(ROOT_CHUNK_WIDTH); \
-    chunk_index = imageLoad(chunk_map, offset_chunk_coord).r; \
-    if (chunk_index == UNLOADED_CHUNK_INDEX) { \
-        imageStore(region_map, offset_region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
-        imageStore(chunk_map, offset_chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
-        result.value = UNLOADED_CHUNK_INDEX; \
-        break; \
-    } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) { \
-        imageStore(region_map, offset_region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
-        result.value = UNLOADED_CHUNK_INDEX; \
-        break; \
-    } else if (chunk_index != EMPTY_CHUNK_INDEX) { \
-        atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
-        atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
-        atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
+    chunk_index = textureLod(world, vec3(offset_chunk_coord) / vec3(ROOT_CHUNK_WIDTH), 3.0).r; \
+    if (chunk_index > 0) { \
         perform_chunk_trace_##AXIS (); \
     } \
     if (result.value != 0) { break; } \
@@ -198,36 +185,25 @@ GENERATE_FUNCTIONS(perform_chunk_trace, PERFORM_CHUNK_TRACE)
     next_chunk_distance += vec3(total_step); \
     \
     offset_chunk_coord = (chunk_coord + uniform_data.region_offset * ivec3(REGION_CHUNK_WIDTH)) % ivec3(ROOT_CHUNK_WIDTH); \
-    chunk_index = imageLoad(chunk_map, offset_chunk_coord).r; \
-    if (chunk_index == UNLOADED_CHUNK_INDEX) { \
-        imageStore(chunk_map, offset_chunk_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
-        imageStore(region_map, offset_region_coord, ivec4(REQUEST_LOAD_CHUNK_INDEX)); \
-        result.value = UNLOADED_CHUNK_INDEX; \
-    } else if (chunk_index == REQUEST_LOAD_CHUNK_INDEX) { \
-        result.value = UNLOADED_CHUNK_INDEX; \
-    } else { \
-        if (chunk_index != EMPTY_CHUNK_INDEX) { \
-            atlas_offset.x = int(chunk_index % ATLAS_CHUNK_WIDTH); \
-            atlas_offset.y = int(chunk_index / ATLAS_CHUNK_WIDTH % ATLAS_CHUNK_WIDTH); \
-            atlas_offset.z = int(chunk_index / ATLAS_CHUNK_WIDTH / ATLAS_CHUNK_WIDTH); \
-            perform_chunk_trace_##AXIS (); \
-        } \
-        if (result.value == 0) { for (int i = 0; i < 128; i++) { \
-            if (next_chunk_distance.x < next_chunk_distance.y) { \
-                if (next_chunk_distance.x < next_chunk_distance.z) { \
-                    PERFORM_CHUNK_STEP(x); \
-                } else { \
-                    PERFORM_CHUNK_STEP(z); \
-                } \
+    chunk_index = textureLod(world, vec3(offset_chunk_coord) / vec3(ROOT_CHUNK_WIDTH), 3.0).r; \
+    if (chunk_index > 0) { \
+        perform_chunk_trace_##AXIS (); \
+    } \
+    if (result.value == 0) { for (int i = 0; i < 128; i++) { \
+        if (next_chunk_distance.x < next_chunk_distance.y) { \
+            if (next_chunk_distance.x < next_chunk_distance.z) { \
+                PERFORM_CHUNK_STEP(x); \
             } else { \
-                if (next_chunk_distance.y < next_chunk_distance.z) { \
-                    PERFORM_CHUNK_STEP(y); \
-                } else { \
-                    PERFORM_CHUNK_STEP(z); \
-                } \
+                PERFORM_CHUNK_STEP(z); \
             } \
-        } } \
-    }
+        } else { \
+            if (next_chunk_distance.y < next_chunk_distance.z) { \
+                PERFORM_CHUNK_STEP(y); \
+            } else { \
+                PERFORM_CHUNK_STEP(z); \
+            } \
+        } \
+    } } \
 
 GENERATE_FUNCTIONS(perform_region_trace, PERFORM_REGION_TRACE)
 
@@ -236,8 +212,8 @@ GENERATE_FUNCTIONS(perform_region_trace, PERFORM_REGION_TRACE)
     total_step = next_region_distance.AXIS; \
     if (region_coord.AXIS < 0 || region_coord.AXIS == ROOT_REGION_WIDTH) { break; } \
     offset_region_coord = (region_coord + uniform_data.region_offset) % ivec3(ROOT_REGION_WIDTH); \
-    region_content = imageLoad(region_map, offset_region_coord).r; \
-    if (region_content != EMPTY_CHUNK_INDEX) { \
+    region_content = textureLod(world, vec3(offset_region_coord) / vec3(ROOT_REGION_WIDTH), 6.0).r; \
+    if (region_content > 0) { \
         perform_region_trace_##AXIS (); \
     } \
     if (result.value != 0) { break; } \
@@ -283,8 +259,8 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
 
     result.value = 0;
     offset_region_coord = (region_coord + uniform_data.region_offset) % ivec3(ROOT_REGION_WIDTH); \
-    region_content = imageLoad(region_map, offset_region_coord).r;
-    if (region_content != EMPTY_CHUNK_INDEX) {
+    region_content = textureLod(world, vec3(offset_region_coord) / vec3(ROOT_REGION_WIDTH), 6.0).r;
+    if (region_content > 0) {
         do { perform_region_trace_x(); } while (false);
     }
     if (result.value == 0) { for (int i = 0; i < 128; i++) {

@@ -1,99 +1,126 @@
+use super::functions;
 use crate::render::constants::*;
-use array_macro::array;
-use std::collections::HashMap;
+use crate::util;
+use rand::prelude::*;
 
-pub struct Chunk {
-    pub block_data: [u16; CHUNK_BLOCK_VOLUME as usize],
-}
-
-impl Chunk {
-    fn new() -> Chunk {
-        Chunk {
-            block_data: [0; CHUNK_BLOCK_VOLUME as usize],
-        }
-    }
-}
-
-pub struct Region {
-    pub chunks: [Option<Box<Chunk>>; REGION_CHUNK_VOLUME as usize],
-}
-
-impl Region {
-    fn new() -> Region {
-        Region {
-            chunks: array![None; (REGION_CHUNK_VOLUME as usize)],
-        }
-    }
-
-    pub fn set_block(&mut self, coord: (u32, u32, u32), value: u16) {
-        debug_assert!(
-            coord.0 < REGION_BLOCK_WIDTH,
-            "X must be in region boundaries."
-        );
-        debug_assert!(
-            coord.1 < REGION_BLOCK_WIDTH,
-            "Y must be in region boundaries."
-        );
-        debug_assert!(
-            coord.2 < REGION_BLOCK_WIDTH,
-            "Z must be in region boundaries."
-        );
-
-        let chunk_coord = (
-            coord.0 / CHUNK_BLOCK_WIDTH,
-            coord.1 / CHUNK_BLOCK_WIDTH,
-            coord.2 / CHUNK_BLOCK_WIDTH,
-        );
-        let chunk_index = (chunk_coord.2 * REGION_CHUNK_WIDTH + chunk_coord.1) * REGION_CHUNK_WIDTH
-            + chunk_coord.0;
-
-        let block_coord = (
-            coord.0 % CHUNK_BLOCK_WIDTH,
-            coord.1 % CHUNK_BLOCK_WIDTH,
-            coord.2 % CHUNK_BLOCK_WIDTH,
-        );
-        let block_index = (block_coord.2 * CHUNK_BLOCK_WIDTH + block_coord.1) * CHUNK_BLOCK_WIDTH 
-            + block_coord.0;
-
-        if let Some(chunk) = &mut self.chunks[chunk_index as usize] {
-            chunk.block_data[block_index as usize] = value;
-        } else {
-            let mut new_chunk = Chunk::new();
-            new_chunk.block_data[block_index as usize] = value;
-            self.chunks[chunk_index as usize] = Some(Box::new(new_chunk));
-        }
-    }
-}
-
-pub type RegionGenerator = dyn FnMut(&mut Region, (u32, u32, u32)) -> bool;
+/*
+0:512
+1:256
+2:128
+3:64
+4:32
+5:16
+6:8
+7:4
+8:2
+9:1
+*/
 
 pub struct World {
-    regions: HashMap<(u32, u32, u32), Option<Box<Region>>>,
-    generator: Box<RegionGenerator>,
+    pub content_lod0: Vec<u16>,
+    pub content_lod1: Vec<u16>,
+    pub content_lod2: Vec<u16>,
+    pub content_lod3: Vec<u16>,
+    pub content_lod4: Vec<u16>,
+    pub content_lod5: Vec<u16>,
+    pub content_lod6: Vec<u16>,
+    pub content_lod7: Vec<u16>,
+    pub content_lod8: Vec<u16>,
+    pub content_lod9: Vec<u16>,
 }
 
 impl World {
-    pub fn new(generator: Box<RegionGenerator>) -> World {
-        World {
-            regions: HashMap::new(),
-            generator,
-        }
+    pub fn new() -> World {
+        let mut world = World {
+            content_lod0: vec![0; ROOT_BLOCK_VOLUME as usize],
+            content_lod1: vec![0; ROOT_BLOCK_VOLUME as usize / 8],
+            content_lod2: vec![0; ROOT_BLOCK_VOLUME as usize / 64],
+            content_lod3: vec![0; ROOT_BLOCK_VOLUME as usize / 512],
+            content_lod4: vec![0; ROOT_BLOCK_VOLUME as usize / 4096],
+            content_lod5: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 8],
+            content_lod6: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 64],
+            content_lod7: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 512],
+            content_lod8: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 4096],
+            content_lod9: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 4096 / 8],
+        };
+        world.generate();
+        world
     }
 
-    pub fn borrow_region(&mut self, coord: (u32, u32, u32)) -> Option<&Box<Region>> {
-        if !self.regions.contains_key(&coord) {
-            let mut new_region = Region::new();
-            let not_empty = (self.generator)(&mut new_region, coord.clone());
-            if not_empty {
-                self.regions
-                    .insert(coord.clone(), Some(Box::new(new_region)));
+    #[inline]
+    fn set_block(&mut self, x: u32, y: u32, z: u32, value: u16) {
+        let index = util::coord_to_index_3d(&(x, y, z), ROOT_BLOCK_WIDTH) as usize;
+        let was_empty = self.content_lod0[index] == 0;
+        self.content_lod0[index] = value;
+        if !was_empty || value == 0 {
+            return; // Don't set any of the lower-res LODs.
+        }
+        let scale = 2;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod1[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 4;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod2[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 8;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod3[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 16;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod4[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 32;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod5[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 64;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod6[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 128;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod7[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 256;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod8[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        let scale = 512;
+        let coord = (x / scale, y / scale, z / scale);
+        self.content_lod9[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+    }
+
+    fn generate(&mut self) {
+        let mountain_noise = functions::MountainNoise::new();
+        let mut random = rand::thread_rng();
+        let height =
+            |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as u32;
+        let material = |random: &mut ThreadRng, height| {
+            if height < 12 {
+                1
+            } else if height < 30 {
+                let threshold = height - 12;
+                if random.next_u32() % (30 - 12) < threshold as u32 {
+                    4
+                } else {
+                    1
+                }
+            } else if height < 35 {
+                4
+            } else if height < 60 {
+                let threshold = height - 35;
+                if random.next_u32() % (60 - 35) < threshold as u32 {
+                    5
+                } else {
+                    4
+                }
             } else {
-                self.regions.insert(coord.clone(), None);
+                5
+            }
+        };
+
+        for (x, y) in util::coord_iter_2d(ROOT_BLOCK_WIDTH) {
+            if x == 0 {
+                println!("Generating {} of {}", y, ROOT_BLOCK_WIDTH);
+            }
+            let height = height(x, y);
+            for z in 0..height {
+                self.set_block(x, y, z, material(&mut random, z));
             }
         }
-        self.regions
-            .get(&coord)
-            .expect("Region should have been generated previously in this function.")
-            .as_ref()
     }
 }
