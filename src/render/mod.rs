@@ -1,6 +1,6 @@
-use winit::event_loop::EventLoop;
+use std::rc::Rc;
 
-use crate::game::Game;
+use winit::event_loop::EventLoop;
 
 pub(self) mod command_buffer;
 pub mod constants;
@@ -12,10 +12,6 @@ pub(self) mod pipeline;
 pub(self) mod platform_specific;
 pub(self) mod structures;
 pub(self) mod util;
-
-use self::core::Core;
-use pipeline::Pipeline;
-use std::rc::Rc;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
@@ -38,31 +34,11 @@ impl Camera {
     }
 }
 
+pub use self::core::Core;
+pub use self::pipeline::Pipeline;
 
-pub struct VulkanApp {
-    pipeline: Pipeline,
-    game: Game,
-}
-
-impl VulkanApp {
-    pub fn new(event_loop: &EventLoop<()>) -> VulkanApp {
-        let core = Rc::new(Core::new(event_loop));
-        let pipeline = Pipeline::new(core.clone());
-        VulkanApp { 
-            pipeline,
-            game: Game::new(),
-        }
-    }
-
-    pub fn on_mouse_move(&mut self, x: f64, y: f64) {
-        self.game.on_mouse_move(x, y);
-    }
-
-    pub fn tick(&mut self, dt: f32) {
-        self.game.tick(dt as f32)
-    }
-
-    pub fn draw_frame(&mut self) {
-        self.pipeline.draw_frame(&mut self.game);
-    }
+pub fn create_instance(event_loop: &EventLoop<()>) -> (Rc<Core>, Pipeline) {
+    let core = Rc::new(Core::new(event_loop));
+    let pipeline = Pipeline::new(core.clone());
+    (core, pipeline)
 }

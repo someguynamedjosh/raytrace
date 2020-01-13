@@ -5,13 +5,15 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 mod game;
 mod render;
-mod world;
 mod util;
+mod world;
 
 fn main() {
     let event_loop = EventLoop::new();
-    let mut vulkan_app = render::VulkanApp::new(&event_loop);
+    let (_core, mut pipeline) = render::create_instance(&event_loop);
+    let mut game = game::Game::new();
     let mut frame_timer = Instant::now();
+    let mut performance_buffer = util::RingBufferAverage::new(16);
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => match event {
             WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -24,19 +26,29 @@ fn main() {
                     (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
                         *control_flow = ControlFlow::Exit;
                     }
+                    (Some(code), ElementState::Pressed) => {
+                        game.borrow_controls_mut().on_pressed(code);
+                    }
+                    (Some(code), ElementState::Released) => {
+                        game.borrow_controls_mut().on_released(code);
+                    }
                     _ => {}
                 },
             },
             WindowEvent::CursorMoved { position, .. } => {
-                vulkan_app.on_mouse_move(position.x, -position.y)
+                game.on_mouse_move(position.x, position.y)
             }
             _ => {}
         },
         Event::MainEventsCleared => {
-            let delta_time = frame_timer.elapsed().as_millis() as f64 / 1000.0;
+            let millis = frame_timer.elapsed().as_millis();
             frame_timer = Instant::now();
-            vulkan_app.tick(delta_time as f32);
-            vulkan_app.draw_frame();
+
+            performance_buffer.push_sample(millis);
+            println!("Average frame time: {}ms", performance_buffer.average());
+            game.tick((millis as f64 / 1000.0) as f32);
+            pipeline.draw_frame(&mut game);
+            game.borrow_controls_mut().tick();
         }
         _ => (),
     });

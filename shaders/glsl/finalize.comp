@@ -46,5 +46,8 @@ void main() {
     vec4 blue_noise_value = texture(blue_noise, noise_position);
     final_color += blue_noise_value.rgb / 128.0; // Blue noise dithering.
 
-    imageStore(final_output, pixel, vec4(final_color, 1.0));
+    int output_height = imageSize(final_output).y;
+    // The window coordinate system is upside-down relative to the world's coordinate system.
+    ivec2 translated_pixel = ivec2(pixel.x, output_height - pixel.y - 1);
+    imageStore(final_output, translated_pixel, vec4(final_color, 1.0));
 }
