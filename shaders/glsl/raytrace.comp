@@ -58,6 +58,84 @@ const uint NORMAL_z = 4;
 
 const float PI = 3.1415926535897932384626433832795;
 
+#define LOD_9 ivec2(512, 9)
+#define LOD_8 ivec2(256, 8)
+#define LOD_7 ivec2(128, 7)
+#define LOD_6 ivec2(64, 6)
+#define LOD_5 ivec2(32, 5)
+#define LOD_4 ivec2(16, 4)
+#define LOD_3 ivec2(8, 3)
+#define LOD_2 ivec2(4, 2)
+#define LOD_1 ivec2(2, 1)
+#define LOD_0 ivec2(1, 0)
+
+ivec2[512] lod_transitions = ivec2[512](
+    LOD_9, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_6, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_7, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_6, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_8, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_6, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_7, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_6, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_5, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_4, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0,
+    LOD_3, LOD_0, LOD_1, LOD_0, LOD_2, LOD_0, LOD_1, LOD_0
+);
+
 struct HitResult {
     uint value;
     float distance;
@@ -78,6 +156,8 @@ ivec3 normals;
 vec3 muls;
 vec3 length_to_next_voxel;
 int limit;
+// x is divisor, y is lookup value.
+ivec2 lod_constants;
 HitResult trace_ray(vec3 origin, vec3 direction) {
     direction = normalize(direction);
 
@@ -96,35 +176,96 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.y > 0 ? -1 : 1,
         direction.z > 0 ? -1 : 1
     );
-    length_to_next_voxel;
+    lod_constants = ivec2(1, 0);
 
     limit = 2048;
-    // For some reason, using a non-infinite loop boosts performance.
+    // For some reason, using a non-infinite loop boosts performance even though
+    // the limit of the loop is never reached.
     for (; result.value == 0 && limit > 0; limit--) {
         // Things that don't increase performance: 
         // - pre-multiplying result.position 
         // - scaling result.position to have 1.0 be the end coordinate of the world.
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
-        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(1.0))) * length_per_axis;
+        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(lod_constants.x))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.x;
                 result.normal = normals.x;
+                lod_constants = max(lod_constants, lod_transitions[int(result.position.x)]);
             } else {
                 result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
+                lod_constants = max(lod_constants, lod_transitions[int(result.position.z)]);
             }
         } else {
             if (length_to_next_voxel.y < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.y;
                 result.normal = normals.y;
+                lod_constants = max(lod_constants, lod_transitions[int(result.position.y)]);
             } else {
                 result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
+                lod_constants = max(lod_constants, lod_transitions[int(result.position.z)]);
             }
         }
-        result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
+        switch (lod_constants.y) {
+            case 9:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 1.0).r;
+            if (result.value == 0) break;
+            case 8:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 8.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_8;
+                break;
+            }
+            case 7:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 7.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_7;
+                break;
+            }
+            case 6:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 6.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_6;
+                break;
+            }
+            case 5:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 5.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_5;
+                break;
+            }
+            case 4:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 4.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_4;
+                break;
+            }
+            case 3:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 3.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_3;
+                break;
+            }
+            case 2:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 2.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_2;
+                break;
+            }
+            case 1:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 1.0).r;
+            if (result.value == 0) {
+                lod_constants = LOD_1;
+                break;
+            }
+            case 0:
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
+            lod_constants = ivec2(1, 0);
+            break;
+        }
     }
 
     if (result.value == 1) {

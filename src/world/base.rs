@@ -57,31 +57,31 @@ impl World {
         }
         let scale = 2;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod1[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod1[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 4;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod2[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod2[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 8;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod3[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod3[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 16;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod4[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod4[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 32;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod5[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod5[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 64;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod6[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod6[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 128;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod7[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod7[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 256;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod8[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod8[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
         let scale = 512;
         let coord = (x / scale, y / scale, z / scale);
-        self.content_lod9[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 1;
+        self.content_lod9[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
     }
 
     fn generate(&mut self) {
