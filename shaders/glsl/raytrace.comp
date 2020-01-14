@@ -1,5 +1,9 @@
 #version 450
 
+// If defined, a limiter will be applied to terminate any ray trace that takes too long. The pixel
+// the ray trace occured for will be highlighted in pink.
+// #define REPORT_ERROR
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform usampler3D world;
@@ -63,70 +67,71 @@ struct HitResult {
 
 vec4 noise_value;
 vec2 noise_offset;
-bool error = false;
 
+#ifdef REPORT_ERROR
+bool error = false;
+#endif
+
+HitResult result;
+vec3 length_per_axis;
+ivec3 normals;
+vec3 muls;
+vec3 length_to_next_voxel;
+int limit;
 HitResult trace_ray(vec3 origin, vec3 direction) {
     direction = normalize(direction);
 
-    HitResult result;
+    result;
     result.value = 0;
-    vec3 current_position = origin;
+    result.position = origin;
     // How much to travel along the ray to move 1 unit in a particular axis.
-    vec3 length_per_axis = vec3(1.0) / vec3(abs(direction));
-    ivec3 normals = ivec3(
+    length_per_axis = vec3(1) / vec3(abs(direction));
+    normals = ivec3(
         direction.x > 0 ? NORMAL_x + 1 : NORMAL_x,
         direction.y > 0 ? NORMAL_y + 1 : NORMAL_y,
         direction.z > 0 ? NORMAL_z + 1 : NORMAL_z
     );
-    vec3 adds = vec3(
-        direction.x > 0 ? 1.001 : 0.001,
-        direction.y > 0 ? 1.001 : 0.001,
-        direction.z > 0 ? 1.001 : 0.001
+    muls = vec3(
+        direction.x > 0 ? -1 : 1,
+        direction.y > 0 ? -1 : 1,
+        direction.z > 0 ? -1 : 1
     );
-    vec3 muls = vec3(
-        direction.x > 0 ? -1.0 : 1.0,
-        direction.y > 0 ? -1.0 : 1.0,
-        direction.z > 0 ? -1.0 : 1.0
-    );
+    length_to_next_voxel;
 
-    int limiter = 8192;
-    while (result.value == 0 && limiter > 0) {
-        vec3 length_to_next_voxel = (adds + muls * mod(current_position, vec3(1.0))) * length_per_axis;
+    limit = 2048;
+    // For some reason, using a non-infinite loop boosts performance.
+    for (; result.value == 0 && limit > 0; limit--) {
+        // Things that don't increase performance: 
+        // - pre-multiplying result.position 
+        // - scaling result.position to have 1.0 be the end coordinate of the world.
+        // - only setting the result normal if a new value gets hit.
+        // - distributing the addition of the offset in any way.
+        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(1.0))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
-                current_position += direction * length_to_next_voxel.x;
+                result.position += direction * length_to_next_voxel.x;
                 result.normal = normals.x;
-                if (current_position.x > ROOT_BLOCK_WIDTH || current_position.x < 0.0) break;
             } else {
-                current_position += direction * length_to_next_voxel.z;
+                result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
-                if (current_position.z > ROOT_BLOCK_WIDTH || current_position.z < 0.0) break;
             }
         } else {
             if (length_to_next_voxel.y < length_to_next_voxel.z) { 
-                current_position += direction * length_to_next_voxel.y;
+                result.position += direction * length_to_next_voxel.y;
                 result.normal = normals.y;
-                if (current_position.y > ROOT_BLOCK_WIDTH || current_position.y < 0.0) break;
             } else {
-                current_position += direction * length_to_next_voxel.z;
+                result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
-                if (current_position.z > ROOT_BLOCK_WIDTH || current_position.z < 0.0) break;
             }
         }
-        result.value = textureLod(world, current_position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
-        limiter--;
-    }
-    if (limiter == 0) {
-        error = true;
+        result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
     }
 
-
-    if (result.value == UNLOADED_CHUNK_INDEX) {
+    if (result.value == 1) {
         result.value = 0;
     }
 
-    result.distance = length(origin - current_position);
-    result.position = current_position;
+    result.distance = length(origin - result.position);
 
     if (result.normal == NORMAL_x) {
         result.position += vec3(0.002, 0, 0);
@@ -148,46 +153,8 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
 HitResult trace_sun(HitResult from, vec3 direction) {
     return trace_ray(from.position, normalize(direction + vec3(noise_value.rg, 0) * 0.05));
 }
-// A single iteration of Bob Jenkins' One-At-A-Time hashing algorithm.
-uint hash( uint x ) {
-    x += uniform_data.seed;
-    x += ( x << 10u );
-    x ^= ( x >>  6u );
-    x += ( x <<  3u );
-    x ^= ( x >> 11u );
-    x += ( x << 15u );
-    return x;
-}
-
-// Compound versions of the hashing algorithm I whipped together.
-uint hash( uvec2 v ) { return hash( v.x ^ hash(v.y)                         ); }
-uint hash( uvec3 v ) { return hash( v.x ^ hash(v.y) ^ hash(v.z)             ); }
-uint hash( uvec4 v ) { return hash( v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w) ); }
-
-// Construct a float with half-open range [0:1] using low 23 bits.
-// All zeroes yields 0.0, all ones yields the next smallest representable value below 1.0.
-float floatConstruct( uint m ) {
-    const uint ieeeMantissa = 0x007FFFFFu; // binary32 mantissa bitmask
-    const uint ieeeOne      = 0x3F800000u; // 1.0 in IEEE binary32
-
-    m &= ieeeMantissa;                     // Keep only mantissa bits (fractional part)
-    m |= ieeeOne;                          // Add fractional part to 1.0
-
-    float  f = uintBitsToFloat( m );       // Range [1:2]
-    return f - 1.0;                        // Range [0:1]
-}
-
-// Pseudo-random value in half-open range [0:1].
-float random( float x ) { return floatConstruct(hash(floatBitsToUint(x))); }
-float random( vec2  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
-float random( vec3  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
-float random( vec4  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
 
 HitResult trace_diffuse(HitResult from) {
-    float r1 = random(from.position);
-    float r2 = random(from.position + vec3(1.3, 1.4, 1.5));
-    // float theta1 = PI * 2.0 * r1;
-    // float theta2 = acos(1.0 - 2.0 * r2);
     float theta1 = PI * 2.0 * noise_value.r;
     float theta2 = acos(1.0 - 2.0 * noise_value.g);
     // Random point on sphere.
@@ -217,20 +184,22 @@ vec3 get_material_albedo(uint material) {
         case 0:
         return vec3(1, 0, 1);
         case 1:
-        return vec3(0.3098, 0.8667, 0.4784);
+        return vec3(1, 0, 1);
         case 2:
-        return vec3(0.4, 0.3, 0.2);
+        return vec3(0.3098, 0.8667, 0.4784);
         case 3:
-        return vec3(0.4);
+        return vec3(0.4, 0.3, 0.2);
         case 4:
-        return vec3(0.4863, 0.2118, 0.1725);
+        return vec3(0.4);
         case 5:
-        return vec3(0.8667, 0.9137, 0.9059);
+        return vec3(0.4863, 0.2118, 0.1725);
         case 6:
-        return vec3(0.9, 0.7, 0.2);
+        return vec3(0.8667, 0.9137, 0.9059);
         case 7:
-        return vec3(0.8, 0.2, 0.7);
+        return vec3(0.9, 0.7, 0.2);
         case 8:
+        return vec3(0.8, 0.2, 0.7);
+        case 9:
         return vec3(0.2, 0.2, 0.2);
     }
 }
@@ -242,9 +211,9 @@ vec3 get_material_emission(uint material) {
         case 1:
         return vec3(0);
         case 2:
-        return vec3(2.5, 1.2, 0.6);
-        case 3:
         return vec3(0);
+        case 3:
+        return vec3(2.5, 1.2, 0.6);
         case 4:
         return vec3(0);
         case 5:
@@ -254,6 +223,8 @@ vec3 get_material_emission(uint material) {
         case 7:
         return vec3(0);
         case 8:
+        return vec3(0);
+        case 9:
         return vec3(0);
     }
 }
@@ -412,12 +383,25 @@ void main() {
     imageStore(
         emission_buffer,
         ivec2(gl_GlobalInvocationID.xy),
-        error ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(0.0)
-        //primary.value == 0 ? vec4(0.0) : vec4(get_material_emission(primary.value) / 4.0, 1.0)
+        primary.value == 0 ? vec4(0.0) : vec4(get_material_emission(primary.value) / 4.0, 1.0)
     );
     imageStore(
       fog_color_buffer,
       ivec2(gl_GlobalInvocationID.xy), 
       vec4(skylight, 1.0)
     );
+    #ifdef REPORT_ERROR
+    if (error) {
+        imageStore(
+            fog_color_buffer,
+            ivec2(gl_GlobalInvocationID.xy), 
+            vec4(1, 0, 1, 1)
+        );
+        imageStore(
+            depth_buffer,
+            ivec2(gl_GlobalInvocationID.xy),
+            uvec4(256 * 254)
+        );
+    }
+    #endif
 }

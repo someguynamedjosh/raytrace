@@ -363,10 +363,11 @@ impl SampledImage {
         let sampler_create_info = vk::SamplerCreateInfo {
             mag_filter: vk::Filter::NEAREST,
             min_filter: vk::Filter::NEAREST,
+            // TODO: Allow customization.
             address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
             address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
             address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+            border_color: vk::BorderColor::INT_OPAQUE_WHITE,
             unnormalized_coordinates: if mip_levels == 1 { vk::TRUE } else { vk::FALSE },
             compare_enable: vk::FALSE,
             mipmap_mode: vk::SamplerMipmapMode::NEAREST,

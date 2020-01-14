@@ -91,25 +91,25 @@ impl World {
             |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as u32;
         let material = |random: &mut ThreadRng, height| {
             if height < 12 {
-                1
+                2
             } else if height < 30 {
                 let threshold = height - 12;
                 if random.next_u32() % (30 - 12) < threshold as u32 {
-                    4
+                    5
                 } else {
-                    1
+                    2
                 }
             } else if height < 35 {
-                4
+                5
             } else if height < 60 {
                 let threshold = height - 35;
                 if random.next_u32() % (60 - 35) < threshold as u32 {
-                    5
+                    6
                 } else {
-                    4
+                    5
                 }
             } else {
-                5
+                6
             }
         };
 
