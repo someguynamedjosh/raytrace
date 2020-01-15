@@ -15,7 +15,9 @@ use super::core::Core;
 #[macro_use]
 use crate::create_descriptor_collection_struct;
 use super::descriptors::DescriptorPrototype;
-use super::structures::{Buffer, SampledImage, StorageImage};
+use super::structures::{
+    Buffer, DataDestination, ImageOptions, SampledImage, SamplerOptions, StorageImage,
+};
 
 struct Stage {
     core: Rc<Core>,
@@ -310,18 +312,18 @@ struct RenderData {
 impl RenderData {
     fn make_framebuffer(core: Rc<Core>, name: &str, format: vk::Format) -> StorageImage {
         let dimensions = core.swapchain.swapchain_extent;
-        StorageImage::create(
-            core,
-            name,
-            vk::ImageType::TYPE_2D,
-            vk::Extent3D {
+        let options = ImageOptions {
+            typ: vk::ImageType::TYPE_2D,
+            extent: vk::Extent3D {
                 width: dimensions.width,
                 height: dimensions.height,
                 depth: 1,
             },
             format,
-            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::STORAGE,
-        )
+            usage: vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::STORAGE,
+            ..Default::default()
+        };
+        StorageImage::create(core, name, &options)
     }
 
     fn create(core: Rc<Core>) -> RenderData {
@@ -332,19 +334,29 @@ impl RenderData {
         RenderData {
             core: core.clone(),
 
-            world: SampledImage::create_mipped(
-                core.clone(),
-                "world",
-                vk::ImageType::TYPE_3D,
-                vk::Extent3D {
-                    width: ROOT_BLOCK_WIDTH,
-                    height: ROOT_BLOCK_WIDTH,
-                    depth: ROOT_BLOCK_WIDTH,
-                },
-                vk::Format::R16_UINT,
-                vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-                10,
-            ),
+            world: {
+                let image_options = ImageOptions {
+                    typ: vk::ImageType::TYPE_3D,
+                    extent: vk::Extent3D {
+                        width: ROOT_BLOCK_WIDTH,
+                        height: ROOT_BLOCK_WIDTH,
+                        depth: ROOT_BLOCK_WIDTH,
+                    },
+                    format: vk::Format::R16_UINT,
+                    usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+                    mip_levels: 10,
+                    ..Default::default()
+                };
+                let sampler_options = SamplerOptions {
+                    min_filter: vk::Filter::NEAREST,
+                    mag_filter: vk::Filter::NEAREST,
+                    address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                    border_color: vk::BorderColor::INT_OPAQUE_WHITE,
+                    unnormalized_coordinates: false,
+                    mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+                };
+                SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
+            },
 
             lighting_buffer: Self::make_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
             depth_buffer: Self::make_framebuffer(core.clone(), "depth_buf", r16_uint),
@@ -367,19 +379,31 @@ impl RenderData {
             fog_color_buffer: Self::make_framebuffer(core.clone(), "fog_color_buf", rgba8_unorm),
 
             blue_noise: {
-                let mut tex = SampledImage::create(
-                    core.clone(),
-                    "blue_noise",
-                    vk::ImageType::TYPE_2D,
-                    vk::Extent3D {
+                let image_options = ImageOptions {
+                    typ: vk::ImageType::TYPE_2D,
+                    extent: vk::Extent3D {
                         width: BLUE_NOISE_WIDTH,
                         height: BLUE_NOISE_HEIGHT,
                         depth: 1,
                     },
-                    vk::Format::R8G8B8A8_UNORM,
-                    vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                    usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+                    ..Default::default()
+                };
+                let sampler_options = SamplerOptions {
+                    min_filter: vk::Filter::NEAREST,
+                    mag_filter: vk::Filter::NEAREST,
+                    address_mode: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                    unnormalized_coordinates: true,
+                    ..Default::default()
+                };
+                let tex = SampledImage::create(
+                    core.clone(),
+                    "blue_noise",
+                    &image_options,
+                    &sampler_options,
                 );
-                tex.load_from_png(include_bytes!("blue_noise_512.png"));
+                tex.load_from_png_rgba8(include_bytes!("blue_noise_512.png"));
                 tex
             },
 
@@ -499,6 +523,11 @@ impl RenderData {
                 vk::ImageLayout::GENERAL,
             );
         }
+        commands.transition_layout(
+            &self.blue_noise,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
         commands.end();
         commands.blocking_execute_and_destroy();
         drop(lod0_buf);
