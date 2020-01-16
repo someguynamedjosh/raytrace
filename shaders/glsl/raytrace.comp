@@ -60,8 +60,6 @@ const uint NORMAL_z = 4;
 
 const float PI = 3.1415926535897932384626433832795;
 
-uint[10] lod_divisors = uint[10](0, 1, 2, 4, 8, 16, 32, 64, 128, 256);
-
 #define LOD_9 uvec2(512, 9)
 #define LOD_8 uvec2(256, 8)
 #define LOD_7 uvec2(128, 7)
@@ -89,6 +87,7 @@ bool error = false;
 
 HitResult result;
 vec3 length_per_axis;
+vec3 lookup_offset, lookup_offsets;
 ivec3 normals;
 vec3 muls;
 vec3 length_to_next_voxel;
@@ -109,8 +108,13 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.y > 0 ? -1 : 1,
         direction.z > 0 ? -1 : 1
     );
+    lookup_offsets = vec3(
+        direction.x > 0 ? 0.2 : -0.2,
+        direction.y > 0 ? 0.2 : -0.2,
+        direction.z > 0 ? 0.2 : -0.2
+    );
     current_lod = texture(minefield, result.position).r;
-    lod_divisor = lod_divisors[current_lod];
+    lod_divisor = (1 << current_lod) / 2;
 
     limit = 2048;
     // For some reason, using a non-infinite loop boosts performance even though
@@ -120,26 +124,30 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         // - pre-multiplying result.position 
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
-        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
+        length_to_next_voxel = (mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
-                result.position += direction * length_to_next_voxel.x;
+                result.position += direction * (length_to_next_voxel.x + 0.001);
                 result.normal = normals.x;
+                lookup_offset = vec3(lookup_offsets.x, 0.0, 0.0);
             } else {
-                result.position += direction * length_to_next_voxel.z;
+                result.position += direction * (length_to_next_voxel.z + 0.001);
                 result.normal = normals.z;
+                lookup_offset = vec3(0.0, 0.0, lookup_offsets.z);
             }
         } else {
             if (length_to_next_voxel.y < length_to_next_voxel.z) { 
-                result.position += direction * length_to_next_voxel.y;
+                result.position += direction * (length_to_next_voxel.y + 0.001);
                 result.normal = normals.y;
+                lookup_offset = vec3(0.0, lookup_offsets.y, 0.0);
             } else {
-                result.position += direction * length_to_next_voxel.z;
+                result.position += direction * (length_to_next_voxel.z + 0.001);
                 result.normal = normals.z;
+                lookup_offset = vec3(0.0, 0.0, lookup_offsets.z);
             }
         }
-        current_lod = texture(minefield, result.position).r;
-        lod_divisor = lod_divisors[current_lod];
+        current_lod = texture(minefield, result.position + lookup_offset).r;
+        lod_divisor = (1 << current_lod) / 2;
     }
 
     result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
