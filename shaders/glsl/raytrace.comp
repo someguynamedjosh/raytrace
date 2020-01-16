@@ -7,21 +7,22 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform usampler3D world;
-layout(set = 0, binding = 1, rg16ui) uniform uimage1D lod_transitions;
+layout(set = 0, binding = 1) uniform usampler3D minefield;
+layout(set = 0, binding = 2, rg16ui) uniform uimage1D lod_transitions;
 
-layout(set = 0, binding = 2, rgba16) uniform writeonly image2D lighting_buffer;
-layout(set = 0, binding = 3, rgba8) uniform writeonly image2D albedo_buffer;
-layout(set = 0, binding = 4, rgba8) uniform writeonly image2D emission_buffer;
-layout(set = 0, binding = 5, rgba8) uniform writeonly image2D fog_color_buffer;
-layout(set = 0, binding = 6, r8ui) uniform writeonly uimage2D normal_buffer;
-layout(set = 0, binding = 7, r16ui) uniform writeonly uimage2D depth_buffer;
+layout(set = 0, binding = 3, rgba16) uniform writeonly image2D lighting_buffer;
+layout(set = 0, binding = 4, rgba8) uniform writeonly image2D albedo_buffer;
+layout(set = 0, binding = 5, rgba8) uniform writeonly image2D emission_buffer;
+layout(set = 0, binding = 6, rgba8) uniform writeonly image2D fog_color_buffer;
+layout(set = 0, binding = 7, r8ui) uniform writeonly uimage2D normal_buffer;
+layout(set = 0, binding = 8, r16ui) uniform writeonly uimage2D depth_buffer;
 
-layout(set = 0, binding = 8, rgba16) uniform readonly image2D old_lighting_buffer;
-layout(set = 0, binding = 9, r16ui) uniform readonly uimage2D old_depth_buffer;
-layout(set = 0, binding = 10, r8ui) uniform readonly uimage2D old_normal_buffer;
+layout(set = 0, binding = 9, rgba16) uniform readonly image2D old_lighting_buffer;
+layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
+layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
 
-layout(set = 0, binding = 11) uniform sampler2D blue_noise;
-layout(set = 0, binding = 12) uniform UniformData {
+layout(set = 0, binding = 12) uniform sampler2D blue_noise;
+layout(set = 0, binding = 13) uniform UniformData {
     float sun_angle;
     uint seed;
     vec3 origin, forward, up, right;
@@ -59,6 +60,8 @@ const uint NORMAL_z = 4;
 
 const float PI = 3.1415926535897932384626433832795;
 
+uint[10] lod_divisors = uint[10](0, 1, 2, 4, 8, 16, 32, 64, 128, 256);
+
 #define LOD_9 uvec2(512, 9)
 #define LOD_8 uvec2(256, 8)
 #define LOD_7 uvec2(128, 7)
@@ -89,14 +92,10 @@ vec3 length_per_axis;
 ivec3 normals;
 vec3 muls;
 vec3 length_to_next_voxel;
-int limit, axis_coordinate;
-// x is divisor, y is lookup value.
-uvec2 lod_constants;
+uint current_lod, lod_divisor, limit;
 HitResult trace_ray(vec3 origin, vec3 direction) {
     direction = normalize(direction);
 
-    result;
-    result.value = 0;
     result.position = origin;
     // How much to travel along the ray to move 1 unit in a particular axis.
     length_per_axis = vec3(1) / vec3(abs(direction));
@@ -110,72 +109,40 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.y > 0 ? -1 : 1,
         direction.z > 0 ? -1 : 1
     );
-    lod_constants = uvec2(1, 0);
+    current_lod = texture(minefield, result.position).r;
+    lod_divisor = lod_divisors[current_lod];
 
     limit = 2048;
     // For some reason, using a non-infinite loop boosts performance even though
     // the limit of the loop is never reached.
-    for (; result.value == 0 && limit > 0; limit--) {
+    for (; current_lod > 0 && limit > 0; limit--) {
         // Things that don't increase performance: 
         // - pre-multiplying result.position 
-        // - scaling result.position to have 1.0 be the end coordinate of the world.
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
-        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(lod_constants.x))) * length_per_axis;
+        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.x;
                 result.normal = normals.x;
-                axis_coordinate = int(result.position.x);
-                if (direction.x < 0) axis_coordinate = int(ROOT_BLOCK_WIDTH) - axis_coordinate - 1;
             } else {
                 result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
-                axis_coordinate = int(result.position.z);
-                if (direction.z < 0) axis_coordinate = int(ROOT_BLOCK_WIDTH) - axis_coordinate - 1;
             }
         } else {
             if (length_to_next_voxel.y < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.y;
                 result.normal = normals.y;
-                axis_coordinate = int(result.position.y);
-                if (direction.y < 0) axis_coordinate = int(ROOT_BLOCK_WIDTH) - axis_coordinate - 1;
             } else {
                 result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
-                axis_coordinate = int(result.position.z);
-                if (direction.z < 0) axis_coordinate = int(ROOT_BLOCK_WIDTH) - axis_coordinate - 1;
             }
         }
-        lod_constants = max(lod_constants, imageLoad(lod_transitions, axis_coordinate).rg);
-        #define LOD_CASE(LEVEL) \
-            case LEVEL: \
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), float(LEVEL)).r; \
-            lod_constants = LOD_##LEVEL; \
-            if (result.value == 0) break;
-        switch (lod_constants.y) {
-            case 9:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 9.0).r;
-            if (result.value == 0) break;
-            LOD_CASE(8)
-            LOD_CASE(7)
-            LOD_CASE(6)
-            LOD_CASE(5)
-            LOD_CASE(4)
-            LOD_CASE(3)
-            LOD_CASE(2)
-            LOD_CASE(1)
-            case 0:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
-            lod_constants = uvec2(1, 0);
-            break;
-        }
+        current_lod = texture(minefield, result.position).r;
+        lod_divisor = lod_divisors[current_lod];
     }
 
-    if (result.value == 1) {
-        result.value = 0;
-    }
-
+    result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
     result.distance = length(origin - result.position);
 
     if (result.normal == NORMAL_x) {

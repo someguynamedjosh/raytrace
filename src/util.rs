@@ -54,6 +54,10 @@ pub fn scale_coord_3d(coord: &(u32, u32, u32), scale: u32) -> (u32, u32, u32) {
     (coord.0 * scale, coord.1 * scale, coord.2 * scale)
 }
 
+pub fn shrink_coord_3d(coord: &(u32, u32, u32), divisor: u32) -> (u32, u32, u32) {
+    (coord.0 / divisor, coord.1 / divisor, coord.2 / divisor)
+}
+
 pub fn coord_iter_3d(size: u32) -> impl Iterator<Item = (u32, u32, u32)> {
     let coord_iter = 0..size;
     let coord_iter = coord_iter.flat_map(move |z| (0..size).map(move |y| (y, z)));
@@ -79,7 +83,10 @@ where
         for _ in 0..capacity {
             vec.push(Default::default());
         }
-        Self { elements: vec, current_index: 0 }
+        Self {
+            elements: vec,
+            current_index: 0,
+        }
     }
 
     pub fn average(&self) -> ElementType {

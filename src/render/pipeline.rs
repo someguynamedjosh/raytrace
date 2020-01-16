@@ -290,6 +290,7 @@ struct RenderData {
     core: Rc<Core>,
 
     world: SampledImage,
+    minefield: SampledImage,
     lod_transitions: StorageImage,
 
     lighting_buffer: StorageImage,
@@ -344,11 +345,34 @@ impl RenderData {
             min_filter: vk::Filter::NEAREST,
             mag_filter: vk::Filter::NEAREST,
             address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-            border_color: vk::BorderColor::INT_OPAQUE_WHITE,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
             unnormalized_coordinates: false,
             mipmap_mode: vk::SamplerMipmapMode::NEAREST,
         };
         SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
+    }
+
+    fn create_minefield(core: Rc<Core>) -> SampledImage {
+        let image_options = ImageOptions {
+            typ: vk::ImageType::TYPE_3D,
+            extent: vk::Extent3D {
+                width: ROOT_BLOCK_WIDTH,
+                height: ROOT_BLOCK_WIDTH,
+                depth: ROOT_BLOCK_WIDTH,
+            },
+            format: vk::Format::R8_UINT,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            ..Default::default()
+        };
+        let sampler_options = SamplerOptions {
+            min_filter: vk::Filter::NEAREST,
+            mag_filter: vk::Filter::NEAREST,
+            address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+            unnormalized_coordinates: true,
+            ..Default::default()
+        };
+        SampledImage::create(core.clone(), "minefield", &image_options, &sampler_options)
     }
 
     fn create_lod_transitions(core: Rc<Core>) -> StorageImage {
@@ -447,6 +471,7 @@ impl RenderData {
             core: core.clone(),
 
             world: Self::create_world(core.clone()),
+            minefield: Self::create_minefield(core.clone()),
             lod_transitions: Self::create_lod_transitions(core.clone()),
 
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
@@ -510,6 +535,24 @@ impl RenderData {
         command_buf.copy_buffer_to_image_mip(data_buf, &self.world, &extent, lod_level);
     }
 
+    fn make_minefield_data(&self, game: &Game) -> Buffer<u8> {
+        let world = game.borrow_world();
+        let mut buffer = Buffer::create(
+            self.core.clone(),
+            "minefield_data",
+            ROOT_BLOCK_VOLUME as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        );
+        let mut bound_content = buffer.bind_all();
+        for index in 0..ROOT_BLOCK_VOLUME {
+            let (x, y, z) = util::index_to_coord_3d(index, ROOT_BLOCK_WIDTH);
+            bound_content[index as usize] = world.min_lod_at_coord(x, y, z);
+        }
+        drop(bound_content);
+        println!("Created upload buffer for minefield.");
+        buffer
+    }
+
     fn initialize(&mut self, game: &Game) {
         let world = game.borrow_world();
         let lod0_buf = self.make_lod_upload_buffer(0, &world.content_lod0);
@@ -522,6 +565,7 @@ impl RenderData {
         let lod7_buf = self.make_lod_upload_buffer(7, &world.content_lod7);
         let lod8_buf = self.make_lod_upload_buffer(8, &world.content_lod8);
         let lod9_buf = self.make_lod_upload_buffer(9, &world.content_lod9);
+        let minefield = self.make_minefield_data(game);
         let mut commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
         commands.transition_layout_mipped(
@@ -545,6 +589,17 @@ impl RenderData {
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::GENERAL,
             10,
+        );
+        commands.transition_layout(
+            &self.minefield,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        commands.copy_buffer_to_image(&minefield, &self.minefield, &self.minefield);
+        commands.transition_layout(
+            &self.minefield,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::GENERAL,
         );
         let generic_layout_images = [
             &self.albedo_buffer,
@@ -647,6 +702,7 @@ fn generate_raytrace_ds_prototypes(
 ) -> Vec<Vec<DescriptorPrototype>> {
     vec![vec![
         render_data.world.create_dp(vk::ImageLayout::GENERAL),
+        render_data.minefield.create_dp(vk::ImageLayout::GENERAL),
         render_data.lod_transitions.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),

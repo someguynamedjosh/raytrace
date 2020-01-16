@@ -47,6 +47,55 @@ impl World {
         world
     }
 
+    pub fn min_lod_at_coord(&self, x: u32, y: u32, z: u32) -> u8 {
+        let coord = (x, y, z);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH) as usize;
+        if self.content_lod0[index] > 0 {
+            return 0;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 2) as usize;
+        if self.content_lod1[index] > 0 {
+            return 1;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 4) as usize;
+        if self.content_lod2[index] > 0 {
+            return 2;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 8) as usize;
+        if self.content_lod3[index] > 0 {
+            return 3;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 16) as usize;
+        if self.content_lod4[index] > 0 {
+            return 4;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 32) as usize;
+        if self.content_lod5[index] > 0 {
+            return 5;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 64) as usize;
+        if self.content_lod6[index] > 0 {
+            return 6;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 128) as usize;
+        if self.content_lod7[index] > 0 {
+            return 7;
+        }
+        let coord = util::shrink_coord_3d(&coord, 2);
+        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 256) as usize;
+        if self.content_lod8[index] > 0 {
+            return 8;
+        }
+        9
+    }
+
     #[inline]
     fn set_block(&mut self, x: u32, y: u32, z: u32, value: u16) {
         let index = util::coord_to_index_3d(&(x, y, z), ROOT_BLOCK_WIDTH) as usize;
