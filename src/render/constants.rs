@@ -6,8 +6,8 @@ pub const ENGINE_VERSION: u32 = vk_make_version!(1, 0, 0);
 pub const API_VERSION: u32 = vk_make_version!(1, 0, 92);
 
 pub const WINDOW_TITLE: &str = "Hello world";
-pub const WINDOW_WIDTH: u32 = 512;
-pub const WINDOW_HEIGHT: u32 = 512;
+pub const WINDOW_WIDTH: u32 = 1024;
+pub const WINDOW_HEIGHT: u32 = 1024;
 pub const ENABLE_DEBUG: bool = cfg!(debug_assertions);
 pub const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_KHRONOS_validation"];
 pub const DEVICE_EXTENSIONS: &[&str] = &["VK_KHR_swapchain"];

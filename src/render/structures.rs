@@ -348,7 +348,7 @@ pub struct StorageImage {
     pub extent: vk::Extent3D,
     memory: vk::DeviceMemory,
 }
-derive_wrappers!(StorageImage, [core, image, image_view]);
+derive_wrappers!(StorageImage, [core, image, image_view, extent]);
 
 impl StorageImage {
     pub fn create(core: Rc<Core>, name: &str, options: &ImageOptions) -> Self {

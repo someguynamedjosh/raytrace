@@ -290,6 +290,7 @@ struct RenderData {
     core: Rc<Core>,
 
     world: SampledImage,
+    lod_transitions: StorageImage,
 
     lighting_buffer: StorageImage,
     depth_buffer: StorageImage,
@@ -310,7 +311,7 @@ struct RenderData {
 }
 
 impl RenderData {
-    fn make_framebuffer(core: Rc<Core>, name: &str, format: vk::Format) -> StorageImage {
+    fn create_framebuffer(core: Rc<Core>, name: &str, format: vk::Format) -> StorageImage {
         let dimensions = core.swapchain.swapchain_extent;
         let options = ImageOptions {
             typ: vk::ImageType::TYPE_2D,
@@ -326,6 +327,117 @@ impl RenderData {
         StorageImage::create(core, name, &options)
     }
 
+    fn create_world(core: Rc<Core>) -> SampledImage {
+        let image_options = ImageOptions {
+            typ: vk::ImageType::TYPE_3D,
+            extent: vk::Extent3D {
+                width: ROOT_BLOCK_WIDTH,
+                height: ROOT_BLOCK_WIDTH,
+                depth: ROOT_BLOCK_WIDTH,
+            },
+            format: vk::Format::R16_UINT,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            mip_levels: 10,
+            ..Default::default()
+        };
+        let sampler_options = SamplerOptions {
+            min_filter: vk::Filter::NEAREST,
+            mag_filter: vk::Filter::NEAREST,
+            address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            border_color: vk::BorderColor::INT_OPAQUE_WHITE,
+            unnormalized_coordinates: false,
+            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+        };
+        SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
+    }
+
+    fn create_lod_transitions(core: Rc<Core>) -> StorageImage {
+        let image_options = ImageOptions {
+            typ: vk::ImageType::TYPE_1D,
+            extent: vk::Extent3D {
+                width: ROOT_BLOCK_WIDTH,
+                height: 1,
+                depth: 1,
+            },
+            format: vk::Format::R16G16_UINT,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
+            ..Default::default()
+        };
+        let image = StorageImage::create(core, "lod_transitions", &image_options);
+        let lod_divisors: [u16; 10] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
+        let mut image_data = [0u16; ROOT_BLOCK_WIDTH as usize * 2];
+        for coordinate in 0..ROOT_BLOCK_WIDTH as u16 {
+            let pixel_index = (coordinate * 2) as usize;
+            // Contain the highest LOD region which has been entered at each coordinate.
+            // For example, if the world were only 8 blocks cubed the LODs would look like this:
+            // 3, 0, 1, 0, 2, 0, 1, 0
+            // The pattern can be found by checking at each element if the index is divisible by
+            // 8, then 4, then 2, then 1, picking whichever LOD comes first.
+            let mut highest_lod = 0;
+            for lod in (1..10).rev() {
+                if coordinate % lod_divisors[lod] == 0 {
+                    highest_lod = lod;
+                    break;
+                }
+            }
+            image_data[pixel_index] = lod_divisors[highest_lod]; // Red channel
+            image_data[pixel_index + 1] = highest_lod as u16; // Green channel
+        }
+        image.load_from_slice(&image_data);
+        image
+    }
+
+    fn create_blue_noise(core: Rc<Core>) -> SampledImage {
+        let image_options = ImageOptions {
+            typ: vk::ImageType::TYPE_2D,
+            extent: vk::Extent3D {
+                width: BLUE_NOISE_WIDTH,
+                height: BLUE_NOISE_HEIGHT,
+                depth: 1,
+            },
+            format: vk::Format::R8G8B8A8_UNORM,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            ..Default::default()
+        };
+        let sampler_options = SamplerOptions {
+            min_filter: vk::Filter::NEAREST,
+            mag_filter: vk::Filter::NEAREST,
+            address_mode: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            unnormalized_coordinates: true,
+            ..Default::default()
+        };
+        let tex =
+            SampledImage::create(core.clone(), "blue_noise", &image_options, &sampler_options);
+        tex.load_from_png_rgba8(include_bytes!("blue_noise_512.png"));
+        tex
+    }
+
+    fn create_raytrace_uniform_data() -> RaytraceUniformData {
+        RaytraceUniformData {
+            sun_angle: 0.0,
+            seed: 0,
+            origin: [0.0, 0.0, 0.0].into(),
+            forward: [0.0, 0.0, 0.0].into(),
+            up: [0.0, 0.0, 0.0].into(),
+            right: [0.0, 0.0, 0.0].into(),
+            old_origin: [0.0, 0.0, 0.0].into(),
+            old_transform_c0: [0.0, 0.0, 0.0].into(),
+            old_transform_c1: [0.0, 0.0, 0.0].into(),
+            old_transform_c2: [0.0, 0.0, 0.0].into(),
+            region_offset: [0, 0, 0].into(),
+            _padding0: 0,
+            _padding1: 0,
+            _padding2: 0,
+            _padding3: 0,
+            _padding4: 0,
+            _padding5: 0,
+            _padding6: 0,
+            _padding7: 0,
+            _padding8: 0,
+            _padding9: 0,
+        }
+    }
+
     fn create(core: Rc<Core>) -> RenderData {
         let rgba16_unorm = vk::Format::R16G16B16A16_UNORM;
         let rgba8_unorm = vk::Format::R8G8B8A8_UNORM;
@@ -334,102 +446,32 @@ impl RenderData {
         RenderData {
             core: core.clone(),
 
-            world: {
-                let image_options = ImageOptions {
-                    typ: vk::ImageType::TYPE_3D,
-                    extent: vk::Extent3D {
-                        width: ROOT_BLOCK_WIDTH,
-                        height: ROOT_BLOCK_WIDTH,
-                        depth: ROOT_BLOCK_WIDTH,
-                    },
-                    format: vk::Format::R16_UINT,
-                    usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-                    mip_levels: 10,
-                    ..Default::default()
-                };
-                let sampler_options = SamplerOptions {
-                    min_filter: vk::Filter::NEAREST,
-                    mag_filter: vk::Filter::NEAREST,
-                    address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-                    border_color: vk::BorderColor::INT_OPAQUE_WHITE,
-                    unnormalized_coordinates: false,
-                    mipmap_mode: vk::SamplerMipmapMode::NEAREST,
-                };
-                SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
-            },
+            world: Self::create_world(core.clone()),
+            lod_transitions: Self::create_lod_transitions(core.clone()),
 
-            lighting_buffer: Self::make_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
-            depth_buffer: Self::make_framebuffer(core.clone(), "depth_buf", r16_uint),
-            normal_buffer: Self::make_framebuffer(core.clone(), "normal_buf", r8_uint),
-            old_lighting_buffer: Self::make_framebuffer(
+            lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
+            depth_buffer: Self::create_framebuffer(core.clone(), "depth_buf", r16_uint),
+            normal_buffer: Self::create_framebuffer(core.clone(), "normal_buf", r8_uint),
+            old_lighting_buffer: Self::create_framebuffer(
                 core.clone(),
                 "old_lighting_buf",
                 rgba16_unorm,
             ),
-            old_depth_buffer: Self::make_framebuffer(core.clone(), "old_depth_buf", r16_uint),
-            old_normal_buffer: Self::make_framebuffer(core.clone(), "old_normal_buf", r8_uint),
+            old_depth_buffer: Self::create_framebuffer(core.clone(), "old_depth_buf", r16_uint),
+            old_normal_buffer: Self::create_framebuffer(core.clone(), "old_normal_buf", r8_uint),
 
-            lighting_pong_buffer: Self::make_framebuffer(
+            lighting_pong_buffer: Self::create_framebuffer(
                 core.clone(),
                 "lighting_pong_buf",
                 rgba16_unorm,
             ),
-            albedo_buffer: Self::make_framebuffer(core.clone(), "albedo_buf", rgba8_unorm),
-            emission_buffer: Self::make_framebuffer(core.clone(), "emission_buf", rgba8_unorm),
-            fog_color_buffer: Self::make_framebuffer(core.clone(), "fog_color_buf", rgba8_unorm),
+            albedo_buffer: Self::create_framebuffer(core.clone(), "albedo_buf", rgba8_unorm),
+            emission_buffer: Self::create_framebuffer(core.clone(), "emission_buf", rgba8_unorm),
+            fog_color_buffer: Self::create_framebuffer(core.clone(), "fog_color_buf", rgba8_unorm),
 
-            blue_noise: {
-                let image_options = ImageOptions {
-                    typ: vk::ImageType::TYPE_2D,
-                    extent: vk::Extent3D {
-                        width: BLUE_NOISE_WIDTH,
-                        height: BLUE_NOISE_HEIGHT,
-                        depth: 1,
-                    },
-                    format: vk::Format::R8G8B8A8_UNORM,
-                    usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-                    ..Default::default()
-                };
-                let sampler_options = SamplerOptions {
-                    min_filter: vk::Filter::NEAREST,
-                    mag_filter: vk::Filter::NEAREST,
-                    address_mode: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                    unnormalized_coordinates: true,
-                    ..Default::default()
-                };
-                let tex = SampledImage::create(
-                    core.clone(),
-                    "blue_noise",
-                    &image_options,
-                    &sampler_options,
-                );
-                tex.load_from_png_rgba8(include_bytes!("blue_noise_512.png"));
-                tex
-            },
+            blue_noise: Self::create_blue_noise(core.clone()),
 
-            raytrace_uniform_data: RaytraceUniformData {
-                sun_angle: 0.0,
-                seed: 0,
-                origin: [0.0, 0.0, 0.0].into(),
-                forward: [0.0, 0.0, 0.0].into(),
-                up: [0.0, 0.0, 0.0].into(),
-                right: [0.0, 0.0, 0.0].into(),
-                old_origin: [0.0, 0.0, 0.0].into(),
-                old_transform_c0: [0.0, 0.0, 0.0].into(),
-                old_transform_c1: [0.0, 0.0, 0.0].into(),
-                old_transform_c2: [0.0, 0.0, 0.0].into(),
-                region_offset: [0, 0, 0].into(),
-                _padding0: 0,
-                _padding1: 0,
-                _padding2: 0,
-                _padding3: 0,
-                _padding4: 0,
-                _padding5: 0,
-                _padding6: 0,
-                _padding7: 0,
-                _padding8: 0,
-                _padding9: 0,
-            },
+            raytrace_uniform_data: Self::create_raytrace_uniform_data(),
             raytrace_uniform_data_buffer: Buffer::create(
                 core.clone(),
                 "raytrace_uniform_data",
@@ -524,6 +566,11 @@ impl RenderData {
             );
         }
         commands.transition_layout(
+            &self.lod_transitions,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::GENERAL,
+        );
+        commands.transition_layout(
             &self.blue_noise,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -600,6 +647,7 @@ fn generate_raytrace_ds_prototypes(
 ) -> Vec<Vec<DescriptorPrototype>> {
     vec![vec![
         render_data.world.create_dp(vk::ImageLayout::GENERAL),
+        render_data.lod_transitions.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.albedo_buffer.create_dp(vk::ImageLayout::GENERAL),
