@@ -64,7 +64,7 @@ impl Pipeline {
 
         let swapchain_extent = core.swapchain.swapchain_extent;
         let x_shader_groups = swapchain_extent.width / SHADER_GROUP_SIZE;
-        let y_shader_groups = swapchain_extent.height / SHADER_GROUP_SIZE;
+        let y_shader_groups = swapchain_extent.height / SHADER_GROUP_SIZE + 1;
 
         let mut render_data = RenderData::create(core.clone());
         render_data.initialize(game);
@@ -291,7 +291,6 @@ struct RenderData {
 
     world: SampledImage,
     minefield: SampledImage,
-    lod_transitions: StorageImage,
 
     lighting_buffer: StorageImage,
     depth_buffer: StorageImage,
@@ -375,42 +374,6 @@ impl RenderData {
         SampledImage::create(core.clone(), "minefield", &image_options, &sampler_options)
     }
 
-    fn create_lod_transitions(core: Rc<Core>) -> StorageImage {
-        let image_options = ImageOptions {
-            typ: vk::ImageType::TYPE_1D,
-            extent: vk::Extent3D {
-                width: ROOT_BLOCK_WIDTH,
-                height: 1,
-                depth: 1,
-            },
-            format: vk::Format::R16G16_UINT,
-            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
-            ..Default::default()
-        };
-        let image = StorageImage::create(core, "lod_transitions", &image_options);
-        let lod_divisors: [u16; 10] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
-        let mut image_data = [0u16; ROOT_BLOCK_WIDTH as usize * 2];
-        for coordinate in 0..ROOT_BLOCK_WIDTH as u16 {
-            let pixel_index = (coordinate * 2) as usize;
-            // Contain the highest LOD region which has been entered at each coordinate.
-            // For example, if the world were only 8 blocks cubed the LODs would look like this:
-            // 3, 0, 1, 0, 2, 0, 1, 0
-            // The pattern can be found by checking at each element if the index is divisible by
-            // 8, then 4, then 2, then 1, picking whichever LOD comes first.
-            let mut highest_lod = 0;
-            for lod in (1..8).rev() {
-                if coordinate % lod_divisors[lod] == 0 {
-                    highest_lod = lod;
-                    break;
-                }
-            }
-            image_data[pixel_index] = lod_divisors[highest_lod]; // Red channel
-            image_data[pixel_index + 1] = highest_lod as u16; // Green channel
-        }
-        image.load_from_slice(&image_data);
-        image
-    }
-
     fn create_blue_noise(core: Rc<Core>) -> SampledImage {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_2D,
@@ -472,7 +435,6 @@ impl RenderData {
 
             world: Self::create_world(core.clone()),
             minefield: Self::create_minefield(core.clone()),
-            lod_transitions: Self::create_lod_transitions(core.clone()),
 
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
             depth_buffer: Self::create_framebuffer(core.clone(), "depth_buf", r16_uint),
@@ -621,11 +583,6 @@ impl RenderData {
             );
         }
         commands.transition_layout(
-            &self.lod_transitions,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::GENERAL,
-        );
-        commands.transition_layout(
             &self.blue_noise,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -703,7 +660,6 @@ fn generate_raytrace_ds_prototypes(
     vec![vec![
         render_data.world.create_dp(vk::ImageLayout::GENERAL),
         render_data.minefield.create_dp(vk::ImageLayout::GENERAL),
-        render_data.lod_transitions.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.albedo_buffer.create_dp(vk::ImageLayout::GENERAL),

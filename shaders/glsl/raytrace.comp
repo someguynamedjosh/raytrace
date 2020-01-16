@@ -8,21 +8,20 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform usampler3D world;
 layout(set = 0, binding = 1) uniform usampler3D minefield;
-layout(set = 0, binding = 2, rg16ui) uniform uimage1D lod_transitions;
 
-layout(set = 0, binding = 3, rgba16) uniform writeonly image2D lighting_buffer;
-layout(set = 0, binding = 4, rgba8) uniform writeonly image2D albedo_buffer;
-layout(set = 0, binding = 5, rgba8) uniform writeonly image2D emission_buffer;
-layout(set = 0, binding = 6, rgba8) uniform writeonly image2D fog_color_buffer;
-layout(set = 0, binding = 7, r8ui) uniform writeonly uimage2D normal_buffer;
-layout(set = 0, binding = 8, r16ui) uniform writeonly uimage2D depth_buffer;
+layout(set = 0, binding = 2, rgba16) uniform writeonly image2D lighting_buffer;
+layout(set = 0, binding = 3, rgba8) uniform writeonly image2D albedo_buffer;
+layout(set = 0, binding = 4, rgba8) uniform writeonly image2D emission_buffer;
+layout(set = 0, binding = 5, rgba8) uniform writeonly image2D fog_color_buffer;
+layout(set = 0, binding = 6, r8ui) uniform writeonly uimage2D normal_buffer;
+layout(set = 0, binding = 7, r16ui) uniform writeonly uimage2D depth_buffer;
 
-layout(set = 0, binding = 9, rgba16) uniform readonly image2D old_lighting_buffer;
-layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
-layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
+layout(set = 0, binding = 8, rgba16) uniform readonly image2D old_lighting_buffer;
+layout(set = 0, binding = 9, r16ui) uniform readonly uimage2D old_depth_buffer;
+layout(set = 0, binding = 10, r8ui) uniform readonly uimage2D old_normal_buffer;
 
-layout(set = 0, binding = 12) uniform sampler2D blue_noise;
-layout(set = 0, binding = 13) uniform UniformData {
+layout(set = 0, binding = 11) uniform sampler2D blue_noise;
+layout(set = 0, binding = 12) uniform UniformData {
     float sun_angle;
     uint seed;
     vec3 origin, forward, up, right;
@@ -58,18 +57,14 @@ const uint NORMAL_x = 0;
 const uint NORMAL_y = 2;
 const uint NORMAL_z = 4;
 
-const float PI = 3.1415926535897932384626433832795;
+// Gap between each pixel that a particular thread group computes.
+// E.G. if a 4x4 group uses a spread value of 2, it will compute the first, third, fifth,
+// and seventh pixels relative to its start location. The thread group directly to the right of it
+// will compute the second, fourth, sixth, and eighth. The next thread group to the right will
+// start on the ninth pixel, and so on.
+const uint PIXEL_SPREAD = 16;
 
-#define LOD_9 uvec2(512, 9)
-#define LOD_8 uvec2(256, 8)
-#define LOD_7 uvec2(128, 7)
-#define LOD_6 uvec2(64, 6)
-#define LOD_5 uvec2(32, 5)
-#define LOD_4 uvec2(16, 4)
-#define LOD_3 uvec2(8, 3)
-#define LOD_2 uvec2(4, 2)
-#define LOD_1 uvec2(2, 1)
-#define LOD_0 uvec2(1, 0)
+const float PI = 3.1415926535897932384626433832795;
 
 struct HitResult {
     uint value;
@@ -85,38 +80,33 @@ vec2 noise_offset;
 bool error = false;
 #endif
 
-HitResult result;
-vec3 length_per_axis;
-vec3 lookup_offset, lookup_offsets;
-ivec3 normals;
-vec3 muls;
-vec3 length_to_next_voxel;
-uint current_lod, lod_divisor, limit;
 HitResult trace_ray(vec3 origin, vec3 direction) {
     direction = normalize(direction);
-
+    HitResult result;
     result.position = origin;
+
     // How much to travel along the ray to move 1 unit in a particular axis.
-    length_per_axis = vec3(1) / vec3(abs(direction));
-    normals = ivec3(
+    vec3 length_per_axis = vec3(1) / vec3(abs(direction));
+    ivec3 normals = ivec3(
         direction.x > 0 ? NORMAL_x + 1 : NORMAL_x,
         direction.y > 0 ? NORMAL_y + 1 : NORMAL_y,
         direction.z > 0 ? NORMAL_z + 1 : NORMAL_z
     );
-    muls = vec3(
+    vec3 muls = vec3(
         direction.x > 0 ? -1 : 1,
         direction.y > 0 ? -1 : 1,
         direction.z > 0 ? -1 : 1
     );
-    lookup_offsets = vec3(
+    vec3 lookup_offsets = vec3(
         direction.x > 0 ? 0.2 : -0.2,
         direction.y > 0 ? 0.2 : -0.2,
         direction.z > 0 ? 0.2 : -0.2
     );
-    current_lod = texture(minefield, result.position).r;
-    lod_divisor = (1 << current_lod) / 2;
+    uint current_lod = texture(minefield, result.position).r;
+    uint lod_divisor = (1 << current_lod) / 2;
 
-    limit = 2048;
+    uint limit = 2048;
+    vec3 length_to_next_voxel, lookup_offset;
     // For some reason, using a non-infinite loop boosts performance even though
     // the limit of the loop is never reached.
     for (; current_lod > 0 && limit > 0; limit--) {
@@ -124,24 +114,24 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         // - pre-multiplying result.position 
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
-        length_to_next_voxel = (mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
+        length_to_next_voxel = (mod(result.position * muls, vec3(lod_divisor))) * length_per_axis + vec3(0.001);
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
-                result.position += direction * (length_to_next_voxel.x + 0.001);
+                result.position += direction * length_to_next_voxel.x;
                 result.normal = normals.x;
                 lookup_offset = vec3(lookup_offsets.x, 0.0, 0.0);
             } else {
-                result.position += direction * (length_to_next_voxel.z + 0.001);
+                result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
                 lookup_offset = vec3(0.0, 0.0, lookup_offsets.z);
             }
         } else {
             if (length_to_next_voxel.y < length_to_next_voxel.z) { 
-                result.position += direction * (length_to_next_voxel.y + 0.001);
+                result.position += direction * length_to_next_voxel.y;
                 result.normal = normals.y;
                 lookup_offset = vec3(0.0, lookup_offsets.y, 0.0);
             } else {
-                result.position += direction * (length_to_next_voxel.z + 0.001);
+                result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
                 lookup_offset = vec3(0.0, 0.0, lookup_offsets.z);
             }
@@ -295,7 +285,12 @@ vec2 encode_screen_space_normal(uint normal, vec3 right, vec3 up) {
 }
 
 void main() {
-    vec2 screen_pos = gl_GlobalInvocationID.xy / vec2(imageSize(lighting_buffer));
+    ivec2 pixel = ivec2(gl_WorkGroupID.xy - gl_WorkGroupID.xy % ivec2(PIXEL_SPREAD));
+    pixel *= ivec2(gl_WorkGroupSize.xy);
+    pixel += ivec2(gl_WorkGroupID.xy) % ivec2(PIXEL_SPREAD);
+    pixel += ivec2(gl_LocalInvocationID.xy * PIXEL_SPREAD);
+
+    vec2 screen_pos = pixel / vec2(imageSize(lighting_buffer));
     screen_pos = screen_pos * 2 - vec2(1);
     vec2 lookup_pos = vec2(
         (uniform_data.seed % NOISE_SIZE),
@@ -303,7 +298,7 @@ void main() {
     );
     noise_offset.x = texture(blue_noise, lookup_pos).r * 255.0;
     noise_offset.y = texture(blue_noise, lookup_pos).g * 255.0;
-    noise_offset += gl_GlobalInvocationID.xy;
+    noise_offset += gl_WorkGroupID.xy;
 
     vec3 ray_start = uniform_data.origin;
     vec3 ray_direction = normalize(
@@ -382,44 +377,44 @@ void main() {
 
     imageStore(
       lighting_buffer,
-      ivec2(gl_GlobalInvocationID.xy), 
+      pixel,
       vec4(pixel_value) / 4.0
     );
     imageStore(
         depth_buffer,
-        ivec2(gl_GlobalInvocationID.xy),
+        pixel,
         uvec4(length(uniform_data.origin - primary.position) * 64)
     );
     imageStore(
         normal_buffer,
-        ivec2(gl_GlobalInvocationID.xy),
+        pixel,
         uvec4(primary.value == 0 ? 16 : primary.normal)
     );
     imageStore(
         albedo_buffer,
-        ivec2(gl_GlobalInvocationID.xy),
+        pixel,
         primary.value == 0 ? vec4(1.0) : vec4(get_material_albedo(primary.value), 1.0)
     );
     imageStore(
         emission_buffer,
-        ivec2(gl_GlobalInvocationID.xy),
+        pixel,
         primary.value == 0 ? vec4(0.0) : vec4(get_material_emission(primary.value) / 4.0, 1.0)
     );
     imageStore(
       fog_color_buffer,
-      ivec2(gl_GlobalInvocationID.xy), 
+      pixel,
       vec4(skylight, 1.0)
     );
     #ifdef REPORT_ERROR
     if (error) {
         imageStore(
             fog_color_buffer,
-            ivec2(gl_GlobalInvocationID.xy), 
+            pixel,
             vec4(1, 0, 1, 1)
         );
         imageStore(
             depth_buffer,
-            ivec2(gl_GlobalInvocationID.xy),
+            pixel,
             uvec4(256 * 254)
         );
     }
