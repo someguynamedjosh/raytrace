@@ -374,7 +374,7 @@ impl RenderData {
             // The pattern can be found by checking at each element if the index is divisible by
             // 8, then 4, then 2, then 1, picking whichever LOD comes first.
             let mut highest_lod = 0;
-            for lod in (1..10).rev() {
+            for lod in (1..8).rev() {
                 if coordinate % lod_divisors[lod] == 0 {
                     highest_lod = lod;
                     break;

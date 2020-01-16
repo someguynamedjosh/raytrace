@@ -148,58 +148,23 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
             }
         }
         lod_constants = max(lod_constants, imageLoad(lod_transitions, axis_coordinate).rg);
+        #define LOD_CASE(LEVEL) \
+            case LEVEL: \
+            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), float(LEVEL)).r; \
+            lod_constants = LOD_##LEVEL; \
+            if (result.value == 0) break;
         switch (lod_constants.y) {
             case 9:
             result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 9.0).r;
             if (result.value == 0) break;
-            case 8:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 8.0).r;
-            lod_constants = LOD_8;
-            if (result.value == 0) {
-                break;
-            }
-            case 7:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 7.0).r;
-            lod_constants = LOD_7;
-            if (result.value == 0) {
-                break;
-            }
-            case 6:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 6.0).r;
-            lod_constants = LOD_6;
-            if (result.value == 0) {
-                break;
-            }
-            case 5:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 5.0).r;
-            lod_constants = LOD_5;
-            if (result.value == 0) {
-                break;
-            }
-            case 4:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 4.0).r;
-            lod_constants = LOD_4;
-            if (result.value == 0) {
-                break;
-            }
-            case 3:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 3.0).r;
-            lod_constants = LOD_3;
-            if (result.value == 0) {
-                break;
-            }
-            case 2:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 2.0).r;
-            lod_constants = LOD_2;
-            if (result.value == 0) {
-                break;
-            }
-            case 1:
-            result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 1.0).r;
-            lod_constants = LOD_1;
-            if (result.value == 0) {
-                break;
-            }
+            LOD_CASE(8)
+            LOD_CASE(7)
+            LOD_CASE(6)
+            LOD_CASE(5)
+            LOD_CASE(4)
+            LOD_CASE(3)
+            LOD_CASE(2)
+            LOD_CASE(1)
             case 0:
             result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
             lod_constants = uvec2(1, 0);
