@@ -298,7 +298,7 @@ void main() {
     );
     noise_offset.x = texture(blue_noise, lookup_pos).r * 255.0;
     noise_offset.y = texture(blue_noise, lookup_pos).g * 255.0;
-    noise_offset += gl_WorkGroupID.xy;
+    noise_offset += gl_WorkGroupID.xy * gl_WorkGroupSize.xy;
 
     vec3 ray_start = uniform_data.origin;
     vec3 ray_direction = normalize(
