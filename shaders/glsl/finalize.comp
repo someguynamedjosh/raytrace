@@ -42,7 +42,7 @@ void main() {
     final_color.b = filmic_curve(final_color.b);
 
     vec2 noise_position = gl_GlobalInvocationID.xy;
-    noise_position /= vec2(NOISE_SIZE);
+    noise_position = mod(noise_position, vec2(NOISE_SIZE));
     vec4 blue_noise_value = texture(blue_noise, noise_position);
     final_color += blue_noise_value.rgb / 128.0; // Blue noise dithering.
 

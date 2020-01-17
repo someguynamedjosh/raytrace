@@ -127,6 +127,27 @@ impl Pipeline {
                 vk::ImageLayout::GENERAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
+
+            buffer.copy_image_to_image(
+                &self.render_data.lighting_buffer,
+                &self.render_data.lighting_buffer,
+                &self.render_data.old_lighting_buffer,
+            );
+            buffer.copy_image_to_image(
+                &self.render_data.normal_buffer,
+                &self.render_data.normal_buffer,
+                &self.render_data.old_normal_buffer,
+            );
+            buffer.copy_image_to_image(
+                &self.render_data.depth_buffer,
+                &self.render_data.depth_buffer,
+                &self.render_data.old_depth_buffer,
+            );
+            buffer.copy_image_to_image(
+                &self.render_data.history_buffer,
+                &self.render_data.history_buffer,
+                &self.render_data.old_history_buffer,
+            );
             buffer.end();
         }
     }
@@ -295,9 +316,11 @@ struct RenderData {
     lighting_buffer: StorageImage,
     depth_buffer: StorageImage,
     normal_buffer: StorageImage,
+    history_buffer: StorageImage,
     old_lighting_buffer: StorageImage,
     old_depth_buffer: StorageImage,
     old_normal_buffer: StorageImage,
+    old_history_buffer: StorageImage,
 
     lighting_pong_buffer: StorageImage,
     albedo_buffer: StorageImage,
@@ -439,6 +462,7 @@ impl RenderData {
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
             depth_buffer: Self::create_framebuffer(core.clone(), "depth_buf", r16_uint),
             normal_buffer: Self::create_framebuffer(core.clone(), "normal_buf", r8_uint),
+            history_buffer: Self::create_framebuffer(core.clone(), "history_buf", r8_uint),
             old_lighting_buffer: Self::create_framebuffer(
                 core.clone(),
                 "old_lighting_buf",
@@ -446,6 +470,7 @@ impl RenderData {
             ),
             old_depth_buffer: Self::create_framebuffer(core.clone(), "old_depth_buf", r16_uint),
             old_normal_buffer: Self::create_framebuffer(core.clone(), "old_normal_buf", r8_uint),
+            old_history_buffer: Self::create_framebuffer(core.clone(), "old_history_buf", r8_uint),
 
             lighting_pong_buffer: Self::create_framebuffer(
                 core.clone(),
@@ -568,10 +593,12 @@ impl RenderData {
             &self.depth_buffer,
             &self.emission_buffer,
             &self.fog_color_buffer,
+            &self.history_buffer,
             &self.lighting_buffer,
             &self.lighting_pong_buffer,
             &self.normal_buffer,
             &self.old_depth_buffer,
+            &self.old_history_buffer,
             &self.old_lighting_buffer,
             &self.old_normal_buffer,
         ];
@@ -661,16 +688,19 @@ fn generate_raytrace_ds_prototypes(
         render_data.world.create_dp(vk::ImageLayout::GENERAL),
         render_data.minefield.create_dp(vk::ImageLayout::GENERAL),
         //
-        render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.albedo_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.emission_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.fog_color_buffer.create_dp(vk::ImageLayout::GENERAL),
+        //
+        render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.history_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.old_lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.old_normal_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.old_depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.old_history_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         render_data.raytrace_uniform_data_buffer.create_dp(),

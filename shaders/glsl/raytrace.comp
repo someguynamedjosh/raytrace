@@ -9,19 +9,22 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform usampler3D world;
 layout(set = 0, binding = 1) uniform usampler3D minefield;
 
-layout(set = 0, binding = 2, rgba16) uniform writeonly image2D lighting_buffer;
-layout(set = 0, binding = 3, rgba8) uniform writeonly image2D albedo_buffer;
-layout(set = 0, binding = 4, rgba8) uniform writeonly image2D emission_buffer;
-layout(set = 0, binding = 5, rgba8) uniform writeonly image2D fog_color_buffer;
-layout(set = 0, binding = 6, r8ui) uniform writeonly uimage2D normal_buffer;
-layout(set = 0, binding = 7, r16ui) uniform writeonly uimage2D depth_buffer;
+layout(set = 0, binding = 2, rgba8) uniform writeonly image2D albedo_buffer;
+layout(set = 0, binding = 3, rgba8) uniform writeonly image2D emission_buffer;
+layout(set = 0, binding = 4, rgba8) uniform writeonly image2D fog_color_buffer;
 
-layout(set = 0, binding = 8, rgba16) uniform readonly image2D old_lighting_buffer;
-layout(set = 0, binding = 9, r16ui) uniform readonly uimage2D old_depth_buffer;
-layout(set = 0, binding = 10, r8ui) uniform readonly uimage2D old_normal_buffer;
+layout(set = 0, binding = 5, rgba16) uniform writeonly image2D lighting_buffer;
+layout(set = 0, binding = 6, r16ui) uniform writeonly uimage2D depth_buffer;
+layout(set = 0, binding = 7, r8ui) uniform writeonly uimage2D normal_buffer;
+layout(set = 0, binding = 8, r8ui) uniform writeonly uimage2D history_buffer;
 
-layout(set = 0, binding = 11) uniform sampler2D blue_noise;
-layout(set = 0, binding = 12) uniform UniformData {
+layout(set = 0, binding = 9, rgba16) uniform readonly image2D old_lighting_buffer;
+layout(set = 0, binding = 10, r16ui) uniform readonly uimage2D old_depth_buffer;
+layout(set = 0, binding = 11, r8ui) uniform readonly uimage2D old_normal_buffer;
+layout(set = 0, binding = 12, r8ui) uniform readonly uimage2D old_history_buffer;
+
+layout(set = 0, binding = 13) uniform sampler2D blue_noise;
+layout(set = 0, binding = 14) uniform UniformData {
     float sun_angle;
     uint seed;
     vec3 origin, forward, up, right;
@@ -63,6 +66,10 @@ const uint NORMAL_z = 4;
 // will compute the second, fourth, sixth, and eighth. The next thread group to the right will
 // start on the ninth pixel, and so on.
 const uint PIXEL_SPREAD = 16;
+// Lighting values are divided by this before being added to the lighting buffer. This gives
+// room for HDR and accumulation of multiple samples.
+const float LIGHTING_SCALE = 16.0;
+const uint MAX_SAMPLES = 8;
 
 const float PI = 3.1415926535897932384626433832795;
 
@@ -114,7 +121,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         // - pre-multiplying result.position 
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
-        length_to_next_voxel = (mod(result.position * muls, vec3(lod_divisor))) * length_per_axis + vec3(0.001);
+        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.x;
@@ -342,6 +349,7 @@ void main() {
     }
 
     vec4 pixel_value = vec4(light, 1.0 / 126.0);
+    uint history = 1;
 
     vec3 old_camera_pos = primary.position - uniform_data.old_origin;
     mat3 old_screen_space_transform = mat3(
@@ -364,21 +372,18 @@ void main() {
         uint old_depth = imageLoad(old_depth_buffer, old_screen_pixel_pos).r;
         uint depth_difference = (old_depth > expected_depth ? old_depth - expected_depth : expected_depth - old_depth);
         uint old_normal = imageLoad(old_normal_buffer, old_screen_pixel_pos).r;
-        if (depth_difference < 32 && old_normal == primary.normal) {
-            vec4 old_pixel = imageLoad(old_lighting_buffer, old_screen_pixel_pos) * 4.0;
-            float new_weight = old_pixel.a;
-            if (new_weight < 0.1) {
-                new_weight += 1.0 / 126.0;
-            }
-            float old_weight = (new_weight - 1.0 / 126.0) / new_weight;
-            pixel_value = vec4(old_pixel.rgb * old_weight + pixel_value.xyz * (1.0 - old_weight), new_weight);
+        uint old_history = imageLoad(old_history_buffer, old_screen_pixel_pos).r;
+        if (depth_difference < 32 && old_normal == primary.normal && old_history < MAX_SAMPLES) {
+            vec4 old_pixel = imageLoad(old_lighting_buffer, old_screen_pixel_pos) * LIGHTING_SCALE;
+            pixel_value += old_pixel;
+            history += old_history;
         }
     }
 
     imageStore(
       lighting_buffer,
       pixel,
-      vec4(pixel_value) / 4.0
+      vec4(pixel_value) / LIGHTING_SCALE
     );
     imageStore(
         depth_buffer,
@@ -391,6 +396,11 @@ void main() {
         uvec4(primary.value == 0 ? 16 : primary.normal)
     );
     imageStore(
+        history_buffer,
+        pixel,
+        uvec4(history)
+    );
+    imageStore(
         albedo_buffer,
         pixel,
         primary.value == 0 ? vec4(1.0) : vec4(get_material_albedo(primary.value), 1.0)
@@ -401,9 +411,9 @@ void main() {
         primary.value == 0 ? vec4(0.0) : vec4(get_material_emission(primary.value) / 4.0, 1.0)
     );
     imageStore(
-      fog_color_buffer,
-      pixel,
-      vec4(skylight, 1.0)
+        fog_color_buffer,
+        pixel,
+        vec4(skylight, 1.0)
     );
     #ifdef REPORT_ERROR
     if (error) {
