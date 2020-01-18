@@ -14,17 +14,19 @@ layout(set = 0, binding = 3, rgba8) uniform writeonly image2D emission_buffer;
 layout(set = 0, binding = 4, rgba8) uniform writeonly image2D fog_color_buffer;
 
 layout(set = 0, binding = 5, rgba16) uniform writeonly image2D lighting_buffer;
-layout(set = 0, binding = 6, r8ui) uniform writeonly uimage2D normal_buffer;
-layout(set = 0, binding = 7, r16ui) uniform writeonly uimage2D depth_buffer;
-layout(set = 0, binding = 8, r8ui) uniform writeonly uimage2D history_buffer;
+layout(set = 0, binding = 6, rgba16) uniform writeonly image2D completed_buffer;
+layout(set = 0, binding = 7, r8ui) uniform writeonly uimage2D normal_buffer;
+layout(set = 0, binding = 8, r16ui) uniform writeonly uimage2D depth_buffer;
+layout(set = 0, binding = 9, r8ui) uniform writeonly uimage2D history_buffer;
 
-layout(set = 0, binding = 9) uniform sampler2D old_lighting_buffer;
-layout(set = 0, binding = 10) uniform usampler2D old_normal_buffer;
-layout(set = 0, binding = 11) uniform usampler2D old_depth_buffer;
-layout(set = 0, binding = 12) uniform usampler2D old_history_buffer;
+layout(set = 0, binding = 10) uniform sampler2D old_lighting_buffer;
+layout(set = 0, binding = 11) uniform sampler2D old_completed_buffer;
+layout(set = 0, binding = 12) uniform usampler2D old_normal_buffer;
+layout(set = 0, binding = 13) uniform usampler2D old_depth_buffer;
+layout(set = 0, binding = 14) uniform usampler2D old_history_buffer;
 
-layout(set = 0, binding = 13) uniform sampler2D blue_noise;
-layout(set = 0, binding = 14) uniform UniformData {
+layout(set = 0, binding = 15) uniform sampler2D blue_noise;
+layout(set = 0, binding = 16) uniform UniformData {
     float sun_angle;
     uint seed;
     vec3 origin, forward, up, right;
@@ -348,7 +350,7 @@ void main() {
         }
     }
 
-    vec4 pixel_value = vec4(light, 1.0 / 126.0);
+    vec4 pixel_value = vec4(light, 1.0);
     uint history = 1;
 
     vec3 old_camera_pos = primary.position - uniform_data.old_origin;
@@ -375,13 +377,20 @@ void main() {
         uint old_history = texture(old_history_buffer, old_screen_pixel_pos).r;
         if (depth_difference < 32 && old_normal == primary.normal) {
             vec4 old_pixel = texture(old_lighting_buffer, old_screen_pixel_pos) * LIGHTING_SCALE;
-            if (old_history < MAX_SAMPLES) {
+            // Triggers if we have a completely sampled pixel ready to transfer into the completed buffer.
+            if (old_history == MAX_SAMPLES || old_history == MAX_SAMPLES * 2) { 
+                history = MAX_SAMPLES + 1; 
+                imageStore(completed_buffer, pixel, old_pixel / LIGHTING_SCALE);
+            } else if (old_history > MAX_SAMPLES) {
+                vec4 old_completed_pixel = texture(old_completed_buffer, old_screen_pixel_pos);
+                imageStore(completed_buffer, pixel, old_completed_pixel);
                 pixel_value += old_pixel;
                 history += old_history;
-            } else {
-                pixel_value = old_pixel;
-                history = old_history;
+            } else if (old_history > 0) {
+                pixel_value += old_pixel;
+                history += old_history;
             }
+            // Don't do anything if there is no history for the pixel.
         }
     }
 
