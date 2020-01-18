@@ -128,6 +128,51 @@ impl Pipeline {
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
 
+            let framebuffers = [
+                &self.render_data.lighting_buffer,
+                &self.render_data.normal_buffer,
+                &self.render_data.depth_buffer,
+                &self.render_data.history_buffer,
+            ];
+            let old_framebuffers = [
+                &self.render_data.old_lighting_buffer,
+                &self.render_data.old_normal_buffer,
+                &self.render_data.old_depth_buffer,
+                &self.render_data.old_history_buffer,
+            ];
+
+            for framebuffer in framebuffers.iter() {
+                buffer.transition_layout(
+                    *framebuffer,
+                    vk::ImageLayout::GENERAL,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                );
+            }
+            for old_framebuffer in old_framebuffers.iter() {
+                buffer.transition_layout(
+                    *old_framebuffer,
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                );
+            }
+            for (source, destination) in framebuffers.iter().zip(old_framebuffers.iter()) {
+                buffer.copy_image_to_image(*source, *source, *destination);
+            }
+            for framebuffer in framebuffers.iter() {
+                buffer.transition_layout(
+                    *framebuffer,
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::GENERAL,
+                );
+            }
+            for old_framebuffer in old_framebuffers.iter() {
+                buffer.transition_layout(
+                    *old_framebuffer,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                );
+            }
+
             buffer.copy_image_to_image(
                 &self.render_data.lighting_buffer,
                 &self.render_data.lighting_buffer,
@@ -317,10 +362,11 @@ struct RenderData {
     depth_buffer: StorageImage,
     normal_buffer: StorageImage,
     history_buffer: StorageImage,
-    old_lighting_buffer: StorageImage,
-    old_depth_buffer: StorageImage,
-    old_normal_buffer: StorageImage,
-    old_history_buffer: StorageImage,
+
+    old_lighting_buffer: SampledImage,
+    old_depth_buffer: SampledImage,
+    old_normal_buffer: SampledImage,
+    old_history_buffer: SampledImage,
 
     lighting_pong_buffer: StorageImage,
     albedo_buffer: StorageImage,
@@ -348,6 +394,29 @@ impl RenderData {
             ..Default::default()
         };
         StorageImage::create(core, name, &options)
+    }
+
+    fn create_old_framebuffer(core: Rc<Core>, name: &str, format: vk::Format) -> SampledImage {
+        let dimensions = core.swapchain.swapchain_extent;
+        let image_options = ImageOptions {
+            typ: vk::ImageType::TYPE_2D,
+            extent: vk::Extent3D {
+                width: dimensions.width,
+                height: dimensions.height,
+                depth: 1,
+            },
+            format,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            ..Default::default()
+        };
+        let sampler_options = SamplerOptions {
+            min_filter: vk::Filter::LINEAR,
+            mag_filter: vk::Filter::LINEAR,
+            address_mode: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            unnormalized_coordinates: true,
+            ..Default::default()
+        };
+        SampledImage::create(core, name, &image_options, &sampler_options)
     }
 
     fn create_world(core: Rc<Core>) -> SampledImage {
@@ -463,14 +532,22 @@ impl RenderData {
             depth_buffer: Self::create_framebuffer(core.clone(), "depth_buf", r16_uint),
             normal_buffer: Self::create_framebuffer(core.clone(), "normal_buf", r8_uint),
             history_buffer: Self::create_framebuffer(core.clone(), "history_buf", r8_uint),
-            old_lighting_buffer: Self::create_framebuffer(
+            old_lighting_buffer: Self::create_old_framebuffer(
                 core.clone(),
                 "old_lighting_buf",
                 rgba16_unorm,
             ),
-            old_depth_buffer: Self::create_framebuffer(core.clone(), "old_depth_buf", r16_uint),
-            old_normal_buffer: Self::create_framebuffer(core.clone(), "old_normal_buf", r8_uint),
-            old_history_buffer: Self::create_framebuffer(core.clone(), "old_history_buf", r8_uint),
+            old_depth_buffer: Self::create_old_framebuffer(core.clone(), "old_depth_buf", r16_uint),
+            old_normal_buffer: Self::create_old_framebuffer(
+                core.clone(),
+                "old_normal_buf",
+                r8_uint,
+            ),
+            old_history_buffer: Self::create_old_framebuffer(
+                core.clone(),
+                "old_history_buf",
+                r8_uint,
+            ),
 
             lighting_pong_buffer: Self::create_framebuffer(
                 core.clone(),
@@ -597,6 +674,16 @@ impl RenderData {
             &self.lighting_buffer,
             &self.lighting_pong_buffer,
             &self.normal_buffer,
+        ];
+        for image in generic_layout_images.iter() {
+            commands.transition_layout(
+                *image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::GENERAL,
+            );
+        }
+        // These have to be done seperately since they are a different kind of struct.
+        let generic_layout_images = [
             &self.old_depth_buffer,
             &self.old_history_buffer,
             &self.old_lighting_buffer,
@@ -674,6 +761,7 @@ fn generate_finalize_ds_prototypes(
         render_data.emission_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.fog_color_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.history_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
     ]]
@@ -697,10 +785,10 @@ fn generate_raytrace_ds_prototypes(
         render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.history_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
-        render_data.old_lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
-        render_data.old_normal_buffer.create_dp(vk::ImageLayout::GENERAL),
-        render_data.old_depth_buffer.create_dp(vk::ImageLayout::GENERAL),
-        render_data.old_history_buffer.create_dp(vk::ImageLayout::GENERAL),
+        render_data.old_lighting_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+        render_data.old_normal_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+        render_data.old_depth_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+        render_data.old_history_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         //
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         render_data.raytrace_uniform_data_buffer.create_dp(),
