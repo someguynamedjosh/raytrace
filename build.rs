@@ -10,6 +10,8 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=shaders/glsl/*");
+    // the spirv folder is ignored by git, so it may be missing when cloning the repo.
+    fs::create_dir_all("shaders/spirv/").expect("Failed to create folder shaders/spirv/");
 
     let mut required_compiles = vec![];
     let mut total_shaders = 0;
