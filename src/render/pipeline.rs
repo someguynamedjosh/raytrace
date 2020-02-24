@@ -118,18 +118,21 @@ impl Pipeline {
             let layout = self.denoise_stage.pipeline_layout;
             let ping_set = self.descriptor_collection.denoise.variants[0];
             let pong_set = self.descriptor_collection.denoise.variants[1];
-            buffer.bind_descriptor_set(layout, 0, ping_set);
             buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
-            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
-            buffer.bind_descriptor_set(layout, 0, pong_set);
-            buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
-            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
-            buffer.bind_descriptor_set(layout, 0, ping_set);
-            buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
-            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
-            buffer.bind_descriptor_set(layout, 0, pong_set);
-            buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
-            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
+
+            for (index, size) in [1, 2, 4, 8, 8, 16].iter().enumerate() {
+                buffer.bind_descriptor_set(
+                    layout,
+                    0,
+                    if index % 2 == 0 { ping_set } else { pong_set },
+                );
+                buffer.push_constants(
+                    layout,
+                    vk::ShaderStageFlags::COMPUTE,
+                    &DenoisePushData { size: *size },
+                );
+                buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
+            }
 
             let layout = self.finalize_stage.pipeline_layout;
             let set = self.descriptor_collection.finalize.variants[0];
@@ -340,29 +343,6 @@ impl RenderData {
             ..Default::default()
         };
         StorageImage::create(core, name, &options)
-    }
-
-    fn create_old_framebuffer(core: Rc<Core>, name: &str, format: vk::Format) -> SampledImage {
-        let dimensions = core.swapchain.swapchain_extent;
-        let image_options = ImageOptions {
-            typ: vk::ImageType::TYPE_2D,
-            extent: vk::Extent3D {
-                width: dimensions.width,
-                height: dimensions.height,
-                depth: 1,
-            },
-            format,
-            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            ..Default::default()
-        };
-        let sampler_options = SamplerOptions {
-            min_filter: vk::Filter::LINEAR,
-            mag_filter: vk::Filter::LINEAR,
-            address_mode: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            unnormalized_coordinates: true,
-            ..Default::default()
-        };
-        SampledImage::create(core, name, &image_options, &sampler_options)
     }
 
     fn create_world(core: Rc<Core>) -> SampledImage {
@@ -641,8 +621,8 @@ fn generate_denoise_ds_prototypes(
     vec![
         vec![
             render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
-            render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
             render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
+            render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
             //
             render_data.lighting_pong_buffer.create_dp(vk::ImageLayout::GENERAL),
         ],

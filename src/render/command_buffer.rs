@@ -142,6 +142,26 @@ impl CommandBuffer {
         }
     }
 
+    pub fn push_constants<T: Sized>(
+        &self,
+        pipeline_layout: vk::PipelineLayout,
+        stage_flags: vk::ShaderStageFlags,
+        value: &T,
+    ) {
+        let val_ptr: *const T = value;
+        let bytes_ptr = val_ptr as *const u8;
+        unsafe {
+            let bytes_slice = std::slice::from_raw_parts(bytes_ptr, std::mem::size_of::<T>());
+            self.core.device.cmd_push_constants(
+                self.command_buffer,
+                pipeline_layout,
+                stage_flags,
+                0,
+                bytes_slice,
+            );
+        }
+    }
+
     pub fn dispatch(&self, group_count_x: u32, group_count_y: u32, group_count_z: u32) {
         unsafe {
             self.core.device.cmd_dispatch(
