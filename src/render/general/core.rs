@@ -10,10 +10,10 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
 
-use super::constants::*;
 use super::debug;
 use super::platform_specific;
-use super::util;
+use crate::render::constants::*;
+use crate::render::util;
 
 pub struct Core {
     pub entry: ash::Entry,

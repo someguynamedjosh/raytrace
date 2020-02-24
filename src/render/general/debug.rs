@@ -6,7 +6,7 @@ use colored::*;
 use std::ffi::{c_void, CStr, CString};
 use std::ptr;
 
-use super::constants::*;
+use crate::render::constants::*;
 
 fn name_of_type(typ: vk::ObjectType) -> &'static str {
     match typ {

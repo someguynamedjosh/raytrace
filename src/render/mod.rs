@@ -2,15 +2,9 @@ use std::rc::Rc;
 
 use winit::event_loop::EventLoop;
 
-pub(self) mod command_buffer;
 pub mod constants;
-pub(self) mod core_builder;
-pub(self) mod core;
-pub(self) mod debug;
-pub(self) mod descriptors;
+pub(self) mod general;
 pub(self) mod pipeline;
-pub(self) mod platform_specific;
-pub(self) mod structures;
 pub(self) mod util;
 
 // Positive Y (angle PI / 2) is forward
@@ -35,7 +29,7 @@ impl Camera {
     }
 }
 
-pub use self::core::Core;
+pub use self::general::core::Core;
 pub use self::pipeline::Pipeline;
 
 pub fn create_instance(event_loop: &EventLoop<()>, game: &crate::game::Game) -> (Rc<Core>, Pipeline) {

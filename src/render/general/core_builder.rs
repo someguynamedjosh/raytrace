@@ -10,11 +10,11 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
 
-use super::constants::*;
 use super::core::{Core, QueueFamilyIndices, SwapChainInfo};
 use super::debug;
 use super::platform_specific;
-use super::util;
+use crate::render::constants::*;
+use crate::render::util;
 
 impl Core {
     pub fn new(event_loop: &EventLoop<()>) -> Core {
@@ -210,7 +210,7 @@ pub fn pick_physical_device(
         if is_suitable {
             unsafe {
                 let device_properties = instance.get_physical_device_properties(**physical_device);
-                let device_name = super::util::convert_raw_cstring(&device_properties.device_name);
+                let device_name = util::convert_raw_cstring(&device_properties.device_name);
                 println!("Using GPU: {}", device_name);
             }
         }
