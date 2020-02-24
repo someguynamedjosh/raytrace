@@ -1,5 +1,4 @@
 use std::time::Instant;
-
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -35,9 +34,7 @@ fn main() {
                     _ => {}
                 },
             },
-            WindowEvent::CursorMoved { position, .. } => {
-                game.on_mouse_move(position.x, position.y)
-            }
+            WindowEvent::CursorMoved { position, .. } => game.on_mouse_move(position.x, position.y),
             _ => {}
         },
         Event::MainEventsCleared => {

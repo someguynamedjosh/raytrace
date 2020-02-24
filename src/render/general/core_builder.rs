@@ -3,18 +3,18 @@ use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
 use ash::vk;
-use winit::event_loop::EventLoop;
-use winit::window::WindowBuilder;
-
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
+use winit::event_loop::EventLoop;
+use winit::window::WindowBuilder;
+
+use crate::render::constants::*;
+use crate::render::util;
 
 use super::core::{Core, QueueFamilyIndices, SwapChainInfo};
 use super::debug;
 use super::platform_specific;
-use crate::render::constants::*;
-use crate::render::util;
 
 impl Core {
     pub fn new(event_loop: &EventLoop<()>) -> Core {

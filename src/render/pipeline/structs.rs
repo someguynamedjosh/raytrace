@@ -1,4 +1,4 @@
-use cgmath::{Vector3};
+use cgmath::Vector3;
 
 #[repr(C)]
 #[derive(Clone, Debug)]

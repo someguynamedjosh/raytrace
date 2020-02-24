@@ -1,10 +1,9 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
-
 use std::rc::Rc;
 
 use super::core::Core;
-use super::structures::{BufferWrapper, ExtentWrapper, ImageWrapper, SamplerWrapper};
+use super::structures::{BufferWrapper, ExtentWrapper, ImageWrapper};
 
 pub struct CommandBuffer {
     core: Rc<Core>,

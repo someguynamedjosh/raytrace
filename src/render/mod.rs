@@ -1,11 +1,13 @@
 use std::rc::Rc;
-
 use winit::event_loop::EventLoop;
 
 pub mod constants;
 pub(self) mod general;
 pub(self) mod pipeline;
 pub(self) mod util;
+
+pub use general::core::Core;
+pub use pipeline::Pipeline;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right
@@ -29,10 +31,10 @@ impl Camera {
     }
 }
 
-pub use self::general::core::Core;
-pub use self::pipeline::Pipeline;
-
-pub fn create_instance(event_loop: &EventLoop<()>, game: &crate::game::Game) -> (Rc<Core>, Pipeline) {
+pub fn create_instance(
+    event_loop: &EventLoop<()>,
+    game: &crate::game::Game,
+) -> (Rc<Core>, Pipeline) {
     let core = Rc::new(Core::new(event_loop));
     let pipeline = Pipeline::new(core.clone(), game);
     (core, pipeline)

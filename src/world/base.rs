@@ -1,7 +1,9 @@
-use super::functions;
+use rand::prelude::*;
+
 use crate::render::constants::*;
 use crate::util;
-use rand::prelude::*;
+
+use super::functions;
 
 /*
 0:512

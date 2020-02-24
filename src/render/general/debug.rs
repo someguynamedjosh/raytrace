@@ -1,8 +1,6 @@
 use ash::extensions::ext::DebugUtils;
 use ash::vk::{self, Handle};
-
 use colored::*;
-
 use std::ffi::{c_void, CStr, CString};
 use std::ptr;
 
@@ -73,25 +71,26 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     let message_cstring = CStr::from_ptr((*p_callback_data).p_message).to_owned();
     let message = message_cstring.to_string_lossy().to_owned();
 
-    let mut formatted_error = if message_type.contains(vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION) {
-        if message.contains("The Vulkan spec states:") {
-            let vulkan_spec_quote_start = message
-                .find("The Vulkan spec states:")
-                .expect("Malformed validation message: {}");
-            let spec_url_start = message
-                .find("https://")
-                .expect("Malformed validation message.");
-            let error_text = &message[0..vulkan_spec_quote_start];
-            let error_text = error_text.replace(": ", ":\n > ");
-            let doc_quote = &message[vulkan_spec_quote_start..(spec_url_start - 2)];
-            let url = &message[spec_url_start..(message.len() - 2)];
-            format!(" > {}\nEXPLANATION:\n{}\n{}", error_text, doc_quote, url)
+    let mut formatted_error =
+        if message_type.contains(vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION) {
+            if message.contains("The Vulkan spec states:") {
+                let vulkan_spec_quote_start = message
+                    .find("The Vulkan spec states:")
+                    .expect("Malformed validation message: {}");
+                let spec_url_start = message
+                    .find("https://")
+                    .expect("Malformed validation message.");
+                let error_text = &message[0..vulkan_spec_quote_start];
+                let error_text = error_text.replace(": ", ":\n > ");
+                let doc_quote = &message[vulkan_spec_quote_start..(spec_url_start - 2)];
+                let url = &message[spec_url_start..(message.len() - 2)];
+                format!(" > {}\nEXPLANATION:\n{}\n{}", error_text, doc_quote, url)
+            } else {
+                message.into()
+            }
         } else {
             message.into()
-        }
-    } else {
-        message.into()
-    };
+        };
 
     let header = format!("[Debug]{}{}", severity, types);
     let header = if message_severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {

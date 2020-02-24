@@ -1,4 +1,4 @@
-use noise::{OpenSimplex, Worley, NoiseFn};
+use noise::{NoiseFn, OpenSimplex, Worley};
 
 pub struct MountainNoise {
     simplex: OpenSimplex,
@@ -11,12 +11,12 @@ fn clip(value: f64) -> f64 {
 
 // Converts a value from range oldMin-oldMax to range 0-1
 fn map_from_range(value: f64, old_min: f64, old_max: f64) -> f64 {
-  clip((value - old_min) / (old_max - old_min))
+    clip((value - old_min) / (old_max - old_min))
 }
 
 // Converts a vale from range 0-1 to range min-max
 fn map_to_range(value: f64, min: f64, max: f64) -> f64 {
-  clip(value * (max - min) + min)
+    clip(value * (max - min) + min)
 }
 
 impl MountainNoise {
@@ -28,7 +28,7 @@ impl MountainNoise {
         let worley = worley.set_displacement(0.0);
         MountainNoise {
             simplex: OpenSimplex::new(),
-            worley
+            worley,
         }
     }
 

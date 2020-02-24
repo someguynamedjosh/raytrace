@@ -1,8 +1,6 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
-
 use image::GenericImageView;
-
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;

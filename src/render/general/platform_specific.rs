@@ -1,3 +1,5 @@
+use ash::extensions::ext::DebugUtils;
+use ash::extensions::khr::Surface;
 use ash::version::{EntryV1_0, InstanceV1_0};
 use ash::vk;
 
@@ -7,9 +9,6 @@ use ash::extensions::khr::Win32Surface;
 use ash::extensions::khr::XlibSurface;
 #[cfg(target_os = "macos")]
 use ash::extensions::mvk::MacOSSurface;
-
-use ash::extensions::ext::DebugUtils;
-use ash::extensions::khr::Surface;
 
 #[cfg(target_os = "macos")]
 use cocoa::appkit::{NSView, NSWindow};

@@ -1,19 +1,12 @@
 use ash::extensions::{ext::DebugUtils, khr::Surface};
 use ash::version::DeviceV1_0;
-use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
 use ash::vk::{self, Handle};
-use winit::event_loop::EventLoop;
-use winit::window::{Window, WindowBuilder};
+use winit::window::Window;
 
-use std::ffi::CString;
-use std::os::raw::{c_char, c_void};
-use std::ptr;
+use crate::render::constants::*;
 
 use super::debug;
-use super::platform_specific;
-use crate::render::constants::*;
-use crate::render::util;
 
 pub struct Core {
     pub entry: ash::Entry,

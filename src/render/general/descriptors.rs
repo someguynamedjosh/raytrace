@@ -1,6 +1,5 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
-
 use std::rc::Rc;
 
 use super::core::Core;
@@ -348,7 +347,7 @@ macro_rules! create_descriptor_collection_struct {
 
         impl $struct_name {
             pub fn create(
-                core: std::rc::Rc<crate::render::general::core::Core>, 
+                core: std::rc::Rc<crate::render::general::core::Core>,
                 aux_data: &$aux_data_type
             ) -> Self {
                 let generators = [$(
