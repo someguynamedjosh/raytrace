@@ -17,16 +17,9 @@ layout(set = 0, binding = 5, rgba16) uniform writeonly image2D lighting_buffer;
 layout(set = 0, binding = 6, rgba16) uniform writeonly image2D completed_buffer;
 layout(set = 0, binding = 7, r8ui) uniform writeonly uimage2D normal_buffer;
 layout(set = 0, binding = 8, r16ui) uniform writeonly uimage2D depth_buffer;
-layout(set = 0, binding = 9, r8ui) uniform writeonly uimage2D history_buffer;
 
-layout(set = 0, binding = 10) uniform sampler2D old_lighting_buffer;
-layout(set = 0, binding = 11) uniform sampler2D old_completed_buffer;
-layout(set = 0, binding = 12) uniform usampler2D old_normal_buffer;
-layout(set = 0, binding = 13) uniform usampler2D old_depth_buffer;
-layout(set = 0, binding = 14) uniform usampler2D old_history_buffer;
-
-layout(set = 0, binding = 15) uniform sampler2D blue_noise;
-layout(set = 0, binding = 16) uniform UniformData {
+layout(set = 0, binding = 9) uniform sampler2D blue_noise;
+layout(set = 0, binding = 10) uniform UniformData {
     float sun_angle;
     uint seed;
     vec3 origin, forward, up, right;
@@ -123,7 +116,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         // - pre-multiplying result.position 
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
-        length_to_next_voxel = (vec3(0.001) + mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
+        length_to_next_voxel = (vec3(0.0001) + mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.x;
@@ -152,18 +145,20 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
     result.distance = length(origin - result.position);
 
+    float offset_amount = 0.001;
+
     if (result.normal == NORMAL_x) {
-        result.position += vec3(0.002, 0, 0);
+        result.position += vec3(offset_amount, 0, 0);
     } else if (result.normal == NORMAL_x + 1) {
-        result.position -= vec3(0.002, 0, 0);
+        result.position -= vec3(offset_amount, 0, 0);
     } else if (result.normal == NORMAL_y) {
-        result.position += vec3(0, 0.002, 0);
+        result.position += vec3(0, offset_amount, 0);
     } else if (result.normal == NORMAL_y + 1) {
-        result.position -= vec3(0, 0.002, 0);
+        result.position -= vec3(0, offset_amount, 0);
     } else if (result.normal == NORMAL_z) {
-        result.position += vec3(0, 0, 0.002);
+        result.position += vec3(0, 0, offset_amount);
     } else if (result.normal == NORMAL_z + 1) {
-        result.position -= vec3(0, 0, 0.002);
+        result.position -= vec3(0, 0, offset_amount);
     }
 
     return result;
@@ -317,9 +312,9 @@ void main() {
     );
 
     float sun_amount = max(cos(uniform_data.sun_angle), 0.0);
-    vec3 skylight = vec3(0.5294, 0.8275, 0.9647) * 1.3 * sun_amount + vec3(0.1059, 0.1529, 0.2588) * (1 - sun_amount);
+    vec3 skylight = vec3(0.5294, 0.8275, 0.9647) * 1.5 * sun_amount + vec3(0.1059, 0.1529, 0.2588) * (1 - sun_amount);
     vec3 sunlight = vec3(1.2059, 1.0784, 0.9137) * sun_amount + vec3(0.9255, 0.3333, 0.1843) * (1 - sun_amount);
-    sunlight *= min(sun_amount * 9.0, 1.0);
+    sunlight *= min(sun_amount * 6.0, 1.0);
     vec3 sunangle = vec3(cos(uniform_data.sun_angle) * 0.5, sin(uniform_data.sun_angle), cos(uniform_data.sun_angle));
     vec3 light = skylight;
     HitResult primary = trace_ray(uniform_data.origin, ray_direction);
@@ -350,54 +345,10 @@ void main() {
         }
     }
 
-    vec4 pixel_value = vec4(light, 1.0);
-    uint history = 1;
-
-    vec3 old_camera_pos = primary.position - uniform_data.old_origin;
-    mat3 old_screen_space_transform = mat3(
-        uniform_data.old_transform_c0, 
-        uniform_data.old_transform_c1, 
-        uniform_data.old_transform_c2
-    );
-    uint expected_depth = uint(length(old_camera_pos) * 64);
-    vec3 old_screen_pos = old_screen_space_transform * old_camera_pos;
-    old_screen_pos.x /= old_screen_pos.z;
-    old_screen_pos.y /= old_screen_pos.z;
-    ivec2 lighting_buffer_size = imageSize(lighting_buffer);
-    vec2 old_screen_pixel_pos = vec2((old_screen_pos.xy + 1.0) * 0.5 * lighting_buffer_size + vec2(0.5));
-    if (
-        old_screen_pixel_pos.x >= 0 && 
-        old_screen_pixel_pos.y >= 0 && 
-        old_screen_pixel_pos.x < lighting_buffer_size.x && 
-        old_screen_pixel_pos.y < lighting_buffer_size.y
-    ) {
-        uint old_depth = texture(old_depth_buffer, old_screen_pixel_pos).r;
-        uint depth_difference = (old_depth > expected_depth ? old_depth - expected_depth : expected_depth - old_depth);
-        uint old_normal = texture(old_normal_buffer, old_screen_pixel_pos).r;
-        uint old_history = texture(old_history_buffer, old_screen_pixel_pos).r;
-        if (depth_difference < 32 && old_normal == primary.normal) {
-            vec4 old_pixel = texture(old_lighting_buffer, old_screen_pixel_pos) * LIGHTING_SCALE;
-            // Triggers if we have a completely sampled pixel ready to transfer into the completed buffer.
-            if (old_history == MAX_SAMPLES || old_history == MAX_SAMPLES * 2) { 
-                history = MAX_SAMPLES + 1; 
-                imageStore(completed_buffer, pixel, old_pixel / LIGHTING_SCALE);
-            } else if (old_history > MAX_SAMPLES) {
-                vec4 old_completed_pixel = texture(old_completed_buffer, old_screen_pixel_pos);
-                imageStore(completed_buffer, pixel, old_completed_pixel);
-                pixel_value += old_pixel;
-                history += old_history;
-            } else if (old_history > 0) {
-                pixel_value += old_pixel;
-                history += old_history;
-            }
-            // Don't do anything if there is no history for the pixel.
-        }
-    }
-
     imageStore(
       lighting_buffer,
       pixel,
-      vec4(pixel_value) / LIGHTING_SCALE
+      vec4(light, 1.0) / LIGHTING_SCALE
     );
     imageStore(
         depth_buffer,
@@ -408,11 +359,6 @@ void main() {
         normal_buffer,
         pixel,
         uvec4(primary.value == 0 ? 16 : primary.normal)
-    );
-    imageStore(
-        history_buffer,
-        pixel,
-        uvec4(history)
     );
     imageStore(
         albedo_buffer,
@@ -427,8 +373,9 @@ void main() {
     imageStore(
         fog_color_buffer,
         pixel,
-        vec4(skylight, 1.0)
+        vec4(skylight / vec3(LIGHTING_SCALE), 1.0)
     );
+
     #ifdef REPORT_ERROR
     if (error) {
         imageStore(

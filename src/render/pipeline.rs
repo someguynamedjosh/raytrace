@@ -114,6 +114,23 @@ impl Pipeline {
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
             );
+
+            let layout = self.denoise_stage.pipeline_layout;
+            let ping_set = self.descriptor_collection.denoise.variants[0];
+            let pong_set = self.descriptor_collection.denoise.variants[1];
+            buffer.bind_descriptor_set(layout, 0, ping_set);
+            buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
+            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
+            buffer.bind_descriptor_set(layout, 0, pong_set);
+            buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
+            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
+            buffer.bind_descriptor_set(layout, 0, ping_set);
+            buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
+            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
+            buffer.bind_descriptor_set(layout, 0, pong_set);
+            buffer.bind_pipeline(self.denoise_stage.vk_pipeline);
+            buffer.dispatch(self.x_shader_groups, self.y_shader_groups, 1);
+
             let layout = self.finalize_stage.pipeline_layout;
             let set = self.descriptor_collection.finalize.variants[0];
             buffer.bind_descriptor_set(layout, 0, set);
@@ -126,74 +143,6 @@ impl Pipeline {
                 &swapchain_image,
                 vk::ImageLayout::GENERAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
-            );
-
-            let framebuffers = [
-                &self.render_data.lighting_buffer,
-                &self.render_data.completed_buffer,
-                &self.render_data.normal_buffer,
-                &self.render_data.depth_buffer,
-                &self.render_data.history_buffer,
-            ];
-            let old_framebuffers = [
-                &self.render_data.old_lighting_buffer,
-                &self.render_data.old_completed_buffer,
-                &self.render_data.old_normal_buffer,
-                &self.render_data.old_depth_buffer,
-                &self.render_data.old_history_buffer,
-            ];
-
-            for framebuffer in framebuffers.iter() {
-                buffer.transition_layout(
-                    *framebuffer,
-                    vk::ImageLayout::GENERAL,
-                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                );
-            }
-            for old_framebuffer in old_framebuffers.iter() {
-                buffer.transition_layout(
-                    *old_framebuffer,
-                    vk::ImageLayout::UNDEFINED,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                );
-            }
-            for (source, destination) in framebuffers.iter().zip(old_framebuffers.iter()) {
-                buffer.copy_image_to_image(*source, *source, *destination);
-            }
-            for framebuffer in framebuffers.iter() {
-                buffer.transition_layout(
-                    *framebuffer,
-                    vk::ImageLayout::UNDEFINED,
-                    vk::ImageLayout::GENERAL,
-                );
-            }
-            for old_framebuffer in old_framebuffers.iter() {
-                buffer.transition_layout(
-                    *old_framebuffer,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                );
-            }
-
-            buffer.copy_image_to_image(
-                &self.render_data.lighting_buffer,
-                &self.render_data.lighting_buffer,
-                &self.render_data.old_lighting_buffer,
-            );
-            buffer.copy_image_to_image(
-                &self.render_data.normal_buffer,
-                &self.render_data.normal_buffer,
-                &self.render_data.old_normal_buffer,
-            );
-            buffer.copy_image_to_image(
-                &self.render_data.depth_buffer,
-                &self.render_data.depth_buffer,
-                &self.render_data.old_depth_buffer,
-            );
-            buffer.copy_image_to_image(
-                &self.render_data.history_buffer,
-                &self.render_data.history_buffer,
-                &self.render_data.old_history_buffer,
             );
             buffer.end();
         }
@@ -364,13 +313,6 @@ struct RenderData {
     completed_buffer: StorageImage,
     depth_buffer: StorageImage,
     normal_buffer: StorageImage,
-    history_buffer: StorageImage,
-
-    old_lighting_buffer: SampledImage,
-    old_completed_buffer: SampledImage,
-    old_depth_buffer: SampledImage,
-    old_normal_buffer: SampledImage,
-    old_history_buffer: SampledImage,
 
     lighting_pong_buffer: StorageImage,
     albedo_buffer: StorageImage,
@@ -536,29 +478,6 @@ impl RenderData {
             completed_buffer: Self::create_framebuffer(core.clone(), "completed_buf", rgba16_unorm),
             depth_buffer: Self::create_framebuffer(core.clone(), "depth_buf", r16_uint),
             normal_buffer: Self::create_framebuffer(core.clone(), "normal_buf", r8_uint),
-            history_buffer: Self::create_framebuffer(core.clone(), "history_buf", r8_uint),
-
-            old_lighting_buffer: Self::create_old_framebuffer(
-                core.clone(),
-                "old_lighting_buf",
-                rgba16_unorm,
-            ),
-            old_completed_buffer: Self::create_old_framebuffer(
-                core.clone(),
-                "old_completed_buf",
-                rgba16_unorm,
-            ),
-            old_depth_buffer: Self::create_old_framebuffer(core.clone(), "old_depth_buf", r16_uint),
-            old_normal_buffer: Self::create_old_framebuffer(
-                core.clone(),
-                "old_normal_buf",
-                r8_uint,
-            ),
-            old_history_buffer: Self::create_old_framebuffer(
-                core.clone(),
-                "old_history_buf",
-                r8_uint,
-            ),
 
             lighting_pong_buffer: Self::create_framebuffer(
                 core.clone(),
@@ -682,7 +601,6 @@ impl RenderData {
             &self.depth_buffer,
             &self.emission_buffer,
             &self.fog_color_buffer,
-            &self.history_buffer,
             &self.lighting_buffer,
             &self.lighting_pong_buffer,
             &self.normal_buffer,
@@ -694,20 +612,6 @@ impl RenderData {
                 vk::ImageLayout::GENERAL,
             );
         }
-        let old_buffers = [
-            &self.old_completed_buffer,
-            &self.old_depth_buffer,
-            &self.old_history_buffer,
-            &self.old_lighting_buffer,
-            &self.old_normal_buffer,
-        ];
-        for image in old_buffers.iter() {
-            commands.transition_layout(
-                *image,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            );
-        }
         commands.transition_layout(
             &self.blue_noise,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -715,16 +619,6 @@ impl RenderData {
         );
         commands.end();
         commands.blocking_execute_and_destroy();
-        drop(lod0_buf);
-        drop(lod1_buf);
-        drop(lod2_buf);
-        drop(lod3_buf);
-        drop(lod4_buf);
-        drop(lod5_buf);
-        drop(lod6_buf);
-        drop(lod7_buf);
-        drop(lod8_buf);
-        drop(lod9_buf);
     }
 }
 
@@ -773,9 +667,7 @@ fn generate_finalize_ds_prototypes(
         render_data.fog_color_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.lighting_buffer.create_dp(vk::ImageLayout::GENERAL),
-        render_data.completed_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
-        render_data.history_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
     ]]
@@ -798,13 +690,7 @@ fn generate_raytrace_ds_prototypes(
         render_data.completed_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
-        render_data.history_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
-        render_data.old_lighting_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
-        render_data.old_completed_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
-        render_data.old_normal_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
-        render_data.old_depth_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
-        render_data.old_history_buffer.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         //
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         render_data.raytrace_uniform_data_buffer.create_dp(),

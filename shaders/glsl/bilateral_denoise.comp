@@ -7,10 +7,6 @@ layout(set = 0, binding = 1, r16ui) uniform uimage2D depth_buffer;
 layout(set = 0, binding = 2, r8ui) uniform uimage2D normal_buffer;
 layout(set = 0, binding = 3, rgba16) uniform writeonly image2D final_output;
 
-layout(push_constant) uniform PushData {
-    int size;
-} push_data;
-
 ivec2 sampleAt(ivec2 offset) {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) + offset;
     if (pixel.x < 0) pixel.x = 0;
@@ -22,7 +18,7 @@ ivec2 sampleAt(ivec2 offset) {
 
 #define SAMPLE(DX, DY, WEIGHT) \
 { \
-    ivec2 pos = sampleAt(ivec2(DX, DY) * push_data.size); \
+    ivec2 pos = sampleAt(ivec2(DX, DY) * /*push_data.size*/ 2); \
     float dist = imageLoad(depth_buffer, pos).r / 256.0; \
     float distance_difference = 4.0 * abs(center_distance - dist); \
     uint normal = imageLoad(normal_buffer, pos).r; \
