@@ -8,6 +8,7 @@ use std::os::raw::{c_char, c_void};
 use std::ptr;
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
+use winit::dpi::PhysicalSize;
 
 use crate::render::constants::*;
 use crate::render::util;
@@ -23,7 +24,7 @@ impl Core {
         let (ext_debug_utils, debug_messenger) = debug::setup_debug_utils(&entry, &instance);
         let window = WindowBuilder::new()
             .with_title(WINDOW_TITLE)
-            .with_inner_size((WINDOW_WIDTH, WINDOW_HEIGHT).into())
+            .with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
             .build(event_loop)
             .expect("Failed to create window.");
         let window = Box::new(window);
