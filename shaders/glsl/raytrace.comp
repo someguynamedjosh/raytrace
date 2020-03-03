@@ -99,11 +99,6 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.y > 0 ? -1 : 1,
         direction.z > 0 ? -1 : 1
     );
-    vec3 lookup_offsets = vec3(
-        direction.x > 0 ? 0.2 : -0.2,
-        direction.y > 0 ? 0.2 : -0.2,
-        direction.z > 0 ? 0.2 : -0.2
-    );
     uint current_lod = texture(minefield, result.position).r;
     uint lod_divisor = (1 << current_lod) / 2;
 
@@ -121,24 +116,20 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.x;
                 result.normal = normals.x;
-                lookup_offset = vec3(lookup_offsets.x, 0.0, 0.0);
             } else {
                 result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
-                lookup_offset = vec3(0.0, 0.0, lookup_offsets.z);
             }
         } else {
             if (length_to_next_voxel.y < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.y;
                 result.normal = normals.y;
-                lookup_offset = vec3(0.0, lookup_offsets.y, 0.0);
             } else {
                 result.position += direction * length_to_next_voxel.z;
                 result.normal = normals.z;
-                lookup_offset = vec3(0.0, 0.0, lookup_offsets.z);
             }
         }
-        current_lod = texture(minefield, result.position + lookup_offset).r;
+        current_lod = texture(minefield, result.position).r;
         lod_divisor = (1 << current_lod) / 2;
     }
 
