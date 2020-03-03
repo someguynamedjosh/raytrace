@@ -1,5 +1,7 @@
 #version 450
 
+#include "GEN_MATERIALS.glsl"
+
 // If defined, a limiter will be applied to terminate any ray trace that takes too long. The pixel
 // the ray trace occured for will be highlighted in pink.
 // #define REPORT_ERROR
@@ -182,56 +184,6 @@ HitResult trace_diffuse(HitResult from) {
         direction -= vec3(0, 0, 1);
     }
     return trace_ray(from.position, normalize(direction));
-}
-
-vec3 get_material_albedo(uint material) {
-    switch (material) {
-        case 0:
-        return vec3(1, 0, 1);
-        case 1:
-        return vec3(1, 0, 1);
-        case 2:
-        return vec3(0.3098, 0.8667, 0.4784);
-        case 3:
-        return vec3(0.4, 0.3, 0.2);
-        case 4:
-        return vec3(0.4);
-        case 5:
-        return vec3(0.4863, 0.2118, 0.1725);
-        case 6:
-        return vec3(0.8667, 0.9137, 0.9059);
-        case 7:
-        return vec3(0.9, 0.7, 0.2);
-        case 8:
-        return vec3(0.8, 0.2, 0.7);
-        case 9:
-        return vec3(0.2, 0.2, 0.2);
-    }
-}
-
-vec3 get_material_emission(uint material) {
-    switch (material) {
-        case 0:
-        return vec3(0);
-        case 1:
-        return vec3(0);
-        case 2:
-        return vec3(0);
-        case 3:
-        return vec3(2.5, 1.2, 0.6);
-        case 4:
-        return vec3(0);
-        case 5:
-        return vec3(0);
-        case 6:
-        return vec3(0);
-        case 7:
-        return vec3(0);
-        case 8:
-        return vec3(0);
-        case 9:
-        return vec3(0);
-    }
 }
 
 vec3 debug_normal(uint normal) {

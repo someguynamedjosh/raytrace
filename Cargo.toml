@@ -28,6 +28,9 @@ objc  = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["windef", "libloaderapi"] }
 
+[build-dependencies]
+csv = "1.1"
+
 [profile.dev]
 opt-level = 2
 overflow-checks = true

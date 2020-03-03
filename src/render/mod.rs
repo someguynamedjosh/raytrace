@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use winit::event_loop::EventLoop;
 
+mod GEN_MATERIALS;
 pub mod constants;
 pub(self) mod general;
 pub(self) mod pipeline;
@@ -8,6 +9,7 @@ pub(self) mod util;
 
 pub use general::core::Core;
 pub use pipeline::Pipeline;
+pub use GEN_MATERIALS::*;
 
 // Positive Y (angle PI / 2) is forward
 // Positive X is to the right

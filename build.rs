@@ -1,13 +1,156 @@
+use std::ffi::OsStr;
 use std::fs::{self, File};
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-fn main() {
+fn get_vulkan_sdk_path() -> String {
     let vulkan_sdk_path =
         std::env::var("VULKAN_SDK").expect("The environment variable $VULKAN_SDK is blank.");
     if vulkan_sdk_path.len() == 0 {
         panic!("The environment variable $VULKAN_SDK is blank.");
     }
+    vulkan_sdk_path
+}
+
+fn gen_material_code() {
+    println!("cargo:rerun-if-changed=misc/*");
+    let material_defs =
+        csv::Reader::from_path("misc/materials.csv").expect("Failed to open misc/materials.csv");
+
+    fn parse_number(from: &str, min: i32, max: i32) -> i32 {
+        let initial: i32 = from
+            .trim()
+            .parse()
+            .expect("Malformed number in materials.csv");
+        if initial < min || initial > max {
+            panic!(
+                "The value {} in materials.csv is outside the range {}-{}.",
+                initial, min, max
+            );
+        }
+        initial
+    }
+
+    fn parse_rgb(r: &str, g: &str, b: &str) -> (i32, i32, i32) {
+        (
+            parse_number(r, 0x00, 0xFF),
+            parse_number(g, 0x00, 0xFF),
+            parse_number(b, 0x00, 0xFF),
+        )
+    }
+
+    #[derive(Debug)]
+    struct Material {
+        index: i32,
+        albedo: (i32, i32, i32),
+        emission: (i32, i32, i32),
+    }
+
+    let mut correct_index = 0;
+    let mut materials = Vec::new();
+    for item in material_defs.into_records() {
+        let item = item.expect("Failed to read materail from materials.csv");
+        if item.len() < 8 {
+            println!(
+                "Material number {} in materials.csv is improperly formatted.",
+                correct_index
+            );
+        }
+        let index = parse_number(&item[0], 0, 0xFFFF);
+        if index != correct_index {
+            println!(
+                "Material number {} is incorrectly labeled as being material number {}.",
+                correct_index, index
+            );
+        }
+        let albedo = parse_rgb(&item[1], &item[2], &item[3]);
+        let emission = {
+            let mul = parse_number(&item[7], 0, 9);
+            let (r, g, b) = parse_rgb(&item[4], &item[5], &item[6]);
+            (r * mul, g * mul, b * mul)
+        };
+        materials.push(Material {
+            index,
+            albedo,
+            emission,
+        });
+        correct_index += 1;
+    }
+
+    let mut glsl_header = File::create("shaders/glsl/GEN_MATERIALS.glsl")
+        .expect("Failed to open shaders/glsl/GEN_MATERIALS.glsl for writing");
+
+    writeln!(glsl_header, "vec3 get_material_albedo(uint material) {{").unwrap();
+    writeln!(glsl_header, "\tswitch(material) {{").unwrap();
+    for material in &materials {
+        writeln!(
+            glsl_header,
+            "\t\tcase {}: return vec3({}, {}, {});",
+            material.index,
+            material.albedo.0 as f32 / 255.0,
+            material.albedo.1 as f32 / 255.0,
+            material.albedo.2 as f32 / 255.0,
+        )
+        .unwrap();
+    }
+    writeln!(glsl_header, "\t}}\n}}\n").unwrap();
+
+    writeln!(glsl_header, "vec3 get_material_emission(uint material) {{").unwrap();
+    writeln!(glsl_header, "\tswitch(material) {{").unwrap();
+    for material in &materials {
+        writeln!(
+            glsl_header,
+            "\t\tcase {}: return vec3({}, {}, {});",
+            material.index,
+            material.emission.0 as f32 / 255.0,
+            material.emission.1 as f32 / 255.0,
+            material.emission.2 as f32 / 255.0,
+        )
+        .unwrap();
+    }
+    writeln!(glsl_header, "\t}}\n}}\n").unwrap();
+
+    let mut rust_materials = File::create("src/render/GEN_MATERIALS.rs")
+        .expect("Failed to open src/render/GEN_MATERIALS.rs for writing");
+    writeln!(
+        rust_materials,
+        r#"pub struct Material {{
+    pub albedo: (f32, f32, f32),
+    pub emission: (f32, f32, f32),
+}}
+"#
+    )
+    .unwrap();
+    writeln!(
+        rust_materials,
+        "pub const materials: [Material; {}] = [",
+        materials.len()
+    )
+    .unwrap();
+    for material in &materials {
+        writeln!(
+            rust_materials,
+            concat!(
+                "\tMaterial {{\n",
+                "\t\talbedo:   ({:.9}, {:.9}, {:.9}),\n",
+                "\t\temission: ({:.9}, {:.9}, {:.9}),\n\t",
+                "}},",
+            ),
+            material.albedo.0 as f32 / 255.0,
+            material.albedo.1 as f32 / 255.0,
+            material.albedo.2 as f32 / 255.0,
+            material.emission.0 as f32 / 255.0,
+            material.emission.1 as f32 / 255.0,
+            material.emission.2 as f32 / 255.0,
+        )
+        .unwrap();
+    }
+    writeln!(rust_materials, "];",).unwrap();
+}
+
+fn compile_shaders() {
+    let vulkan_sdk_path = get_vulkan_sdk_path();
 
     println!("cargo:rerun-if-changed=shaders/glsl/*");
     // the spirv folder is ignored by git, so it may be missing when cloning the repo.
@@ -25,6 +168,16 @@ fn main() {
         }
 
         let file_name = entry.path();
+        // Assume other extensions to be auxiliary / header files.
+        if ![
+            Some(OsStr::new("vert")),
+            Some(OsStr::new("frag")),
+            Some(OsStr::new("comp")),
+        ]
+        .contains(&file_name.extension())
+        {
+            continue;
+        }
         let file_name = file_name.as_path().file_name();
         let file_name = file_name.expect("Failed to get file name for shader source.");
         let file_name = file_name.to_str().unwrap().to_owned();
@@ -83,4 +236,9 @@ fn main() {
             );
         }
     }
+}
+
+fn main() {
+    gen_material_code();
+    compile_shaders();
 }
