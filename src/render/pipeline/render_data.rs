@@ -16,6 +16,7 @@ pub struct RenderData {
     pub core: Rc<Core>,
 
     pub world: SampledImage,
+    pub world_mips: SampledImage,
     pub minefield: SampledImage,
 
     pub lighting_buffer: StorageImage,
@@ -61,7 +62,6 @@ impl RenderData {
             },
             format: vk::Format::R16_UINT,
             usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            mip_levels: 10,
             ..Default::default()
         };
         let sampler_options = SamplerOptions {
@@ -73,6 +73,30 @@ impl RenderData {
             mipmap_mode: vk::SamplerMipmapMode::NEAREST,
         };
         SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
+    }
+
+    fn create_world_mips(core: Rc<Core>) -> SampledImage {
+        let image_options = ImageOptions {
+            typ: vk::ImageType::TYPE_3D,
+            extent: vk::Extent3D {
+                width: ROOT_BLOCK_WIDTH / 2,
+                height: ROOT_BLOCK_WIDTH / 2,
+                depth: ROOT_BLOCK_WIDTH / 2,
+            },
+            format: vk::Format::R32G32_UINT,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            mip_levels: 9,
+            ..Default::default()
+        };
+        let sampler_options = SamplerOptions {
+            min_filter: vk::Filter::NEAREST,
+            mag_filter: vk::Filter::NEAREST,
+            address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+            unnormalized_coordinates: false,
+            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+        };
+        SampledImage::create(core.clone(), "world_mip", &image_options, &sampler_options)
     }
 
     fn create_minefield(core: Rc<Core>) -> SampledImage {
@@ -158,6 +182,7 @@ impl RenderData {
             core: core.clone(),
 
             world: Self::create_world(core.clone()),
+            world_mips: Self::create_world_mips(core.clone()),
             minefield: Self::create_minefield(core.clone()),
 
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
@@ -236,39 +261,28 @@ impl RenderData {
     pub fn initialize(&mut self, game: &Game) {
         let world = game.borrow_world();
         let lod0_buf = self.make_lod_upload_buffer(0, &world.content_lod0);
-        let lod1_buf = self.make_lod_upload_buffer(1, &world.content_lod1);
-        let lod2_buf = self.make_lod_upload_buffer(2, &world.content_lod2);
-        let lod3_buf = self.make_lod_upload_buffer(3, &world.content_lod3);
-        let lod4_buf = self.make_lod_upload_buffer(4, &world.content_lod4);
-        let lod5_buf = self.make_lod_upload_buffer(5, &world.content_lod5);
-        let lod6_buf = self.make_lod_upload_buffer(6, &world.content_lod6);
-        let lod7_buf = self.make_lod_upload_buffer(7, &world.content_lod7);
-        let lod8_buf = self.make_lod_upload_buffer(8, &world.content_lod8);
-        let lod9_buf = self.make_lod_upload_buffer(9, &world.content_lod9);
+        // let lod1_buf = self.make_lod_upload_buffer(1, &world.content_lod1);
+        // let lod2_buf = self.make_lod_upload_buffer(2, &world.content_lod2);
+        // let lod3_buf = self.make_lod_upload_buffer(3, &world.content_lod3);
+        // let lod4_buf = self.make_lod_upload_buffer(4, &world.content_lod4);
+        // let lod5_buf = self.make_lod_upload_buffer(5, &world.content_lod5);
+        // let lod6_buf = self.make_lod_upload_buffer(6, &world.content_lod6);
+        // let lod7_buf = self.make_lod_upload_buffer(7, &world.content_lod7);
+        // let lod8_buf = self.make_lod_upload_buffer(8, &world.content_lod8);
+        // let lod9_buf = self.make_lod_upload_buffer(9, &world.content_lod9);
         let minefield = self.make_minefield_data(game);
-        let mut commands = CommandBuffer::create_single(self.core.clone());
+        let commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
-        commands.transition_layout_mipped(
+        commands.transition_layout(
             &self.world,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            10,
         );
-        self.upload_lod(&mut commands, &lod0_buf, 0);
-        self.upload_lod(&mut commands, &lod1_buf, 1);
-        self.upload_lod(&mut commands, &lod2_buf, 2);
-        self.upload_lod(&mut commands, &lod3_buf, 3);
-        self.upload_lod(&mut commands, &lod4_buf, 4);
-        self.upload_lod(&mut commands, &lod5_buf, 5);
-        self.upload_lod(&mut commands, &lod6_buf, 6);
-        self.upload_lod(&mut commands, &lod7_buf, 7);
-        self.upload_lod(&mut commands, &lod8_buf, 8);
-        self.upload_lod(&mut commands, &lod9_buf, 9);
-        commands.transition_layout_mipped(
+        commands.copy_buffer_to_image(&lod0_buf, &self.world, &self.world);
+        commands.transition_layout(
             &self.world,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::GENERAL,
-            10,
         );
         commands.transition_layout(
             &self.minefield,

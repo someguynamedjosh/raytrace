@@ -115,16 +115,28 @@ fn gen_material_code() {
         .expect("Failed to open src/render/GEN_MATERIALS.rs for writing");
     writeln!(
         rust_materials,
-        r#"pub struct Material {{
+        r#"
+#[derive(Clone)]
+pub struct Material {{
     pub albedo: (f32, f32, f32),
     pub emission: (f32, f32, f32),
 }}
-"#
+
+impl Material {{
+    pub fn black() -> Self {{
+        Self {{
+            albedo: (0.0, 0.0, 0.0),
+            emission: (0.0, 0.0, 0.0),
+        }}
+    }}
+}}
+
+#[rustfmt::skip]"#
     )
     .unwrap();
     writeln!(
         rust_materials,
-        "pub const materials: [Material; {}] = [",
+        "pub const MATERIALS: [Material; {}] = [",
         materials.len()
     )
     .unwrap();

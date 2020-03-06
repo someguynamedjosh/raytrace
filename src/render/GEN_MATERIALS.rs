@@ -1,9 +1,21 @@
+
+#[derive(Clone)]
 pub struct Material {
     pub albedo: (f32, f32, f32),
     pub emission: (f32, f32, f32),
 }
 
-pub const materials: [Material; 7] = [
+impl Material {
+    pub fn black() -> Self {
+        Self {
+            albedo: (0.0, 0.0, 0.0),
+            emission: (0.0, 0.0, 0.0),
+        }
+    }
+}
+
+#[rustfmt::skip]
+pub const MATERIALS: [Material; 7] = [
 	Material {
 		albedo:   (1.000000000, 0.000000000, 1.000000000),
 		emission: (0.000000000, 0.000000000, 0.000000000),
