@@ -222,7 +222,7 @@ impl UnfinishedChunkData {
         } = self;
         let mut minefield = vec![0; CHUNK_VOLUME];
         for index in 0..CHUNK_VOLUME {
-            if lod0[index] == 0 {
+            if lod0[index] > 0 {
                 // Leave the minefield value as zero.
                 continue;
             }
@@ -236,6 +236,7 @@ impl UnfinishedChunkData {
                 if other_lods[lod_index][util::coord_to_index_3d(&coord, lod_stride)] {
                     // LOD1 is at index 0
                     minefield[index] = lod_index as u8 + 1;
+                    break;
                 }
             }
         }
