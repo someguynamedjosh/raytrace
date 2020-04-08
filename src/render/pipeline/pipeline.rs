@@ -33,7 +33,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(core: Rc<Core>, game: &Game) -> Pipeline {
+    pub fn new(core: Rc<Core>, game: &mut Game) -> Pipeline {
         let frame_available_semaphore = core.create_semaphore("frame_available");
         let frame_complete_semaphore = core.create_semaphore("frame_complete");
         let frame_complete_fence = core.create_fence(true, "frame_complete");
@@ -41,8 +41,8 @@ impl Pipeline {
         let command_buffers = CommandBuffer::create_multiple(core.clone(), swapchain_length);
 
         let swapchain_extent = core.swapchain.swapchain_extent;
-        let x_shader_groups = swapchain_extent.width / SHADER_GROUP_SIZE;
-        let y_shader_groups = swapchain_extent.height / SHADER_GROUP_SIZE + 1;
+        let x_shader_groups = swapchain_extent.width / SHADER_GROUP_SIZE as u32;
+        let y_shader_groups = swapchain_extent.height / SHADER_GROUP_SIZE as u32 + 1;
 
         let mut render_data = RenderData::create(core.clone());
         render_data.initialize(game);
@@ -179,7 +179,7 @@ impl Pipeline {
         uniform_data.up = up * 0.4;
         uniform_data.right = right * 0.4;
         // Modulus to prevent overflowing the seed.
-        uniform_data.seed = (uniform_data.seed + 1) % BLUE_NOISE_SIZE;
+        uniform_data.seed = (uniform_data.seed + 1) % BLUE_NOISE_SIZE as u32;
         uniform_data.sun_angle = game.get_sun_angle();
 
         let mut buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all();

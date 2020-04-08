@@ -21,24 +21,24 @@ pub fn compute_triple_euler_vector(heading: Rad<f32>, pitch: Rad<f32>) -> Triple
     TripleEulerVector { forward, up, right }
 }
 
-pub fn index_to_coord_2d(index: u32, stride: u32) -> (u32, u32) {
+pub fn index_to_coord_2d(index: usize, stride: usize) -> (usize, usize) {
     (index % stride, index / stride % stride)
 }
 
-pub fn coord_to_index_2d(coord: &(u32, u32), stride: u32) -> u32 {
+pub fn coord_to_index_2d(coord: &(usize, usize), stride: usize) -> usize {
     coord.1 * stride + coord.0
 }
 
-pub fn scale_coord_2d(coord: &(u32, u32), scale: u32) -> (u32, u32) {
+pub fn scale_coord_2d(coord: &(usize, usize), scale: usize) -> (usize, usize) {
     (coord.0 * scale, coord.1 * scale)
 }
 
-pub fn coord_iter_2d(size: u32) -> impl Iterator<Item = (u32, u32)> {
+pub fn coord_iter_2d(size: usize) -> impl Iterator<Item = (usize, usize)> {
     let coord_iter = 0..size;
     coord_iter.flat_map(move |y| (0..size).map(move |x| (x, y)))
 }
 
-pub fn index_to_coord_3d(index: u32, stride: u32) -> (u32, u32, u32) {
+pub fn index_to_coord_3d(index: usize, stride: usize) -> (usize, usize, usize) {
     (
         index % stride,
         index / stride % stride,
@@ -46,19 +46,19 @@ pub fn index_to_coord_3d(index: u32, stride: u32) -> (u32, u32, u32) {
     )
 }
 
-pub fn coord_to_index_3d(coord: &(u32, u32, u32), stride: u32) -> u32 {
+pub fn coord_to_index_3d(coord: &(usize, usize, usize), stride: usize) -> usize {
     (coord.2 * stride + coord.1) * stride + coord.0
 }
 
-pub fn scale_coord_3d(coord: &(u32, u32, u32), scale: u32) -> (u32, u32, u32) {
+pub fn scale_coord_3d(coord: &(usize, usize, usize), scale: usize) -> (usize, usize, usize) {
     (coord.0 * scale, coord.1 * scale, coord.2 * scale)
 }
 
-pub fn shrink_coord_3d(coord: &(u32, u32, u32), divisor: u32) -> (u32, u32, u32) {
+pub fn shrink_coord_3d(coord: &(usize, usize, usize), divisor: usize) -> (usize, usize, usize) {
     (coord.0 / divisor, coord.1 / divisor, coord.2 / divisor)
 }
 
-pub fn coord_iter_3d(size: u32) -> impl Iterator<Item = (u32, u32, u32)> {
+pub fn coord_iter_3d(size: usize) -> impl Iterator<Item = (usize, usize, usize)> {
     let coord_iter = 0..size;
     let coord_iter = coord_iter.flat_map(move |z| (0..size).map(move |y| (y, z)));
     coord_iter.flat_map(move |yz| (0..size).map(move |x| (x, yz.0, yz.1)))

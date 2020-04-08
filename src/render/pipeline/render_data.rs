@@ -9,6 +9,7 @@ use crate::render::general::structures::{
     Buffer, DataDestination, ImageOptions, SampledImage, SamplerOptions, StorageImage,
 };
 use crate::util;
+use crate::world::{World, CHUNK_SIZE};
 
 use super::structs::RaytraceUniformData;
 
@@ -55,9 +56,9 @@ impl RenderData {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
-                width: ROOT_BLOCK_WIDTH,
-                height: ROOT_BLOCK_WIDTH,
-                depth: ROOT_BLOCK_WIDTH,
+                width: ROOT_BLOCK_WIDTH as u32,
+                height: ROOT_BLOCK_WIDTH as u32,
+                depth: ROOT_BLOCK_WIDTH as u32,
             },
             format: vk::Format::R16_UINT,
             usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -78,9 +79,9 @@ impl RenderData {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
-                width: ROOT_BLOCK_WIDTH,
-                height: ROOT_BLOCK_WIDTH,
-                depth: ROOT_BLOCK_WIDTH,
+                width: ROOT_BLOCK_WIDTH as u32,
+                height: ROOT_BLOCK_WIDTH as u32,
+                depth: ROOT_BLOCK_WIDTH as u32,
             },
             format: vk::Format::R8_UINT,
             usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -101,8 +102,8 @@ impl RenderData {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_2D,
             extent: vk::Extent3D {
-                width: BLUE_NOISE_WIDTH,
-                height: BLUE_NOISE_HEIGHT,
+                width: BLUE_NOISE_WIDTH as u32,
+                height: BLUE_NOISE_HEIGHT as u32,
                 depth: 1,
             },
             format: vk::Format::R8G8B8A8_UNORM,
@@ -185,66 +186,45 @@ impl RenderData {
         }
     }
 
-    fn make_lod_upload_buffer(&mut self, lod_level: u32, content: &[u16]) -> Buffer<u16> {
-        let scale = (2u64).pow(lod_level).pow(3);
-        let size = ROOT_BLOCK_VOLUME as u64 / scale;
-        let mut buffer = Buffer::create(
+    fn make_world_upload_buffers(&mut self, world: &mut World) -> (Buffer<u16>, Buffer<u8>) {
+        let mut blocks_buffer = Buffer::create(
             self.core.clone(),
-            "lod0",
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-        );
-        let mut bound_content = buffer.bind_all();
-        for index in 0..size as usize {
-            bound_content[index] = content[index];
-        }
-        drop(bound_content);
-        println!("Created upload buffer for LOD{}", lod_level);
-        buffer
-    }
-
-    fn upload_lod(&self, command_buf: &mut CommandBuffer, data_buf: &Buffer<u16>, lod_level: u32) {
-        let scale = (2u32).pow(lod_level);
-        let dimension = ROOT_BLOCK_WIDTH / scale;
-        let extent = vk::Extent3D {
-            width: dimension,
-            height: dimension,
-            depth: dimension,
-        };
-        command_buf.copy_buffer_to_image_mip(data_buf, &self.world, &extent, lod_level);
-    }
-
-    fn make_minefield_data(&self, game: &Game) -> Buffer<u8> {
-        let world = game.borrow_world();
-        let mut buffer = Buffer::create(
-            self.core.clone(),
-            "minefield_data",
+            "blocks",
             ROOT_BLOCK_VOLUME as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
         );
-        let mut bound_content = buffer.bind_all();
-        for index in 0..ROOT_BLOCK_VOLUME {
-            let (x, y, z) = util::index_to_coord_3d(index, ROOT_BLOCK_WIDTH);
-            bound_content[index as usize] = world.min_lod_at_coord(x, y, z);
+        let mut minefield_buffer = Buffer::create(
+            self.core.clone(),
+            "minefield",
+            ROOT_BLOCK_VOLUME as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        );
+
+        const ROOT_CHUNK_WIDTH: usize = ROOT_BLOCK_WIDTH / CHUNK_SIZE;
+        let mut blocks_buffer_data = blocks_buffer.bind_all();
+        let mut minefield_buffer_data = minefield_buffer.bind_all();
+        for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
+            let chunk = world.borrow_chunk(&chunk_coord);
+            chunk.copy_blocks(
+                blocks_buffer_data.as_slice_mut(),
+                ROOT_BLOCK_WIDTH,
+                &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
+            );
+            chunk.copy_minefield(
+                minefield_buffer_data.as_slice_mut(),
+                ROOT_BLOCK_WIDTH,
+                &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
+            );
         }
-        drop(bound_content);
-        println!("Created upload buffer for minefield.");
-        buffer
+        drop(blocks_buffer_data);
+        drop(minefield_buffer_data);
+
+        (blocks_buffer, minefield_buffer)
     }
 
-    pub fn initialize(&mut self, game: &Game) {
-        let world = game.borrow_world();
-        let lod0_buf = self.make_lod_upload_buffer(0, &world.content_lod0);
-        // let lod1_buf = self.make_lod_upload_buffer(1, &world.content_lod1);
-        // let lod2_buf = self.make_lod_upload_buffer(2, &world.content_lod2);
-        // let lod3_buf = self.make_lod_upload_buffer(3, &world.content_lod3);
-        // let lod4_buf = self.make_lod_upload_buffer(4, &world.content_lod4);
-        // let lod5_buf = self.make_lod_upload_buffer(5, &world.content_lod5);
-        // let lod6_buf = self.make_lod_upload_buffer(6, &world.content_lod6);
-        // let lod7_buf = self.make_lod_upload_buffer(7, &world.content_lod7);
-        // let lod8_buf = self.make_lod_upload_buffer(8, &world.content_lod8);
-        // let lod9_buf = self.make_lod_upload_buffer(9, &world.content_lod9);
-        let minefield = self.make_minefield_data(game);
+    pub fn initialize(&mut self, game: &mut Game) {
+        let world = game.borrow_world_mut();
+        let (lod0_buf, minefield) = self.make_world_upload_buffers(world);
         let commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
         commands.transition_layout(

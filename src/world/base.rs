@@ -1,10 +1,10 @@
 use rand::prelude::*;
+use std::collections::HashMap;
 
 use crate::render::constants::*;
-use crate::render::{Material, MATERIALS};
 use crate::util;
 
-use super::functions;
+use super::{functions, Chunk};
 
 /*
 0:512
@@ -20,157 +20,21 @@ use super::functions;
 */
 
 pub struct World {
-    pub content_lod0: Vec<u16>,
-    pub content_lod1: Vec<u16>,
-    pub content_lod2: Vec<u16>,
-    pub content_lod3: Vec<u16>,
-    pub content_lod4: Vec<u16>,
-    pub content_lod5: Vec<u16>,
-    pub content_lod6: Vec<u16>,
-    pub content_lod7: Vec<u16>,
-    pub content_lod8: Vec<u16>,
-    pub content_lod9: Vec<u16>,
+    chunks: HashMap<(usize, usize, usize), Chunk>,
 }
 
 impl World {
     pub fn new() -> World {
         let mut world = World {
-            content_lod0: vec![0; ROOT_BLOCK_VOLUME as usize],
-            content_lod1: vec![0; ROOT_BLOCK_VOLUME as usize / 8],
-            content_lod2: vec![0; ROOT_BLOCK_VOLUME as usize / 64],
-            content_lod3: vec![0; ROOT_BLOCK_VOLUME as usize / 512],
-            content_lod4: vec![0; ROOT_BLOCK_VOLUME as usize / 4096],
-            content_lod5: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 8],
-            content_lod6: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 64],
-            content_lod7: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 512],
-            content_lod8: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 4096],
-            content_lod9: vec![0; ROOT_BLOCK_VOLUME as usize / 4096 / 4096 / 8],
+            chunks: HashMap::new(),
         };
-        world.generate();
         world
     }
 
-    pub fn min_lod_at_coord(&self, x: u32, y: u32, z: u32) -> u8 {
-        let coord = (x, y, z);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH) as usize;
-        if self.content_lod0[index] > 0 {
-            return 0;
+    pub fn borrow_chunk(&mut self, chunk_coord: &(usize, usize, usize)) -> &Chunk {
+        if !self.chunks.contains_key(chunk_coord) {
+            self.chunks.insert(chunk_coord.clone(), Chunk::generate(chunk_coord));
         }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 2) as usize;
-        if self.content_lod1[index] > 0 {
-            return 1;
-        }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 4) as usize;
-        if self.content_lod2[index] > 0 {
-            return 2;
-        }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 8) as usize;
-        if self.content_lod3[index] > 0 {
-            return 3;
-        }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 16) as usize;
-        if self.content_lod4[index] > 0 {
-            return 4;
-        }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 32) as usize;
-        if self.content_lod5[index] > 0 {
-            return 5;
-        }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 64) as usize;
-        if self.content_lod6[index] > 0 {
-            return 6;
-        }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 128) as usize;
-        if self.content_lod7[index] > 0 {
-            return 7;
-        }
-        let coord = util::shrink_coord_3d(&coord, 2);
-        let index = util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / 256) as usize;
-        if self.content_lod8[index] > 0 {
-            return 8;
-        }
-        9
-    }
-
-    #[inline]
-    fn set_block(&mut self, x: u32, y: u32, z: u32, value: u16) {
-        let index = util::coord_to_index_3d(&(x, y, z), ROOT_BLOCK_WIDTH) as usize;
-        let was_empty = self.content_lod0[index] == 0;
-        self.content_lod0[index] = value;
-        if !was_empty || value == 0 {
-            return; // Don't set any of the lower-res LODs.
-        }
-        let scale = 2;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod1[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        let scale = 4;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod2[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        let scale = 8;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod3[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        let scale = 16;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod4[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        let scale = 32;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod5[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        let scale = 64;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod6[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        let scale = 128;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod7[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        let scale = 256;
-        let coord = (x / scale, y / scale, z / scale);
-        self.content_lod8[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-        // let scale = 512;
-        // let coord = (x / scale, y / scale, z / scale);
-        // self.content_lod9[util::coord_to_index_3d(&coord, ROOT_BLOCK_WIDTH / scale) as usize] = 2;
-    }
-
-
-    fn generate(&mut self) {
-        let mountain_noise = functions::MountainNoise::new();
-        let mut random = rand::thread_rng();
-        let height =
-            |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as u32;
-        let material = |random: &mut ThreadRng, height| {
-            if height < 12 {
-                2
-            } else if height < 30 {
-                let threshold = height - 12;
-                if random.next_u32() % (30 - 12) < threshold as u32 {
-                    5
-                } else {
-                    2
-                }
-            } else if height < 35 {
-                5
-            } else if height < 60 {
-                let threshold = height - 35;
-                if random.next_u32() % (60 - 35) < threshold as u32 {
-                    6
-                } else {
-                    5
-                }
-            } else {
-                6
-            }
-        };
-
-        for (x, y) in util::coord_iter_2d(ROOT_BLOCK_WIDTH) {
-            let height = height(x, y);
-            for z in 0..height {
-                self.set_block(x, y, z, material(&mut random, z));
-            }
-        }
+        self.chunks.get(chunk_coord).unwrap()
     }
 }

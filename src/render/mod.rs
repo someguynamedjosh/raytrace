@@ -35,7 +35,7 @@ impl Camera {
 
 pub fn create_instance(
     event_loop: &EventLoop<()>,
-    game: &crate::game::Game,
+    game: &mut crate::game::Game,
 ) -> (Rc<Core>, Pipeline) {
     let core = Rc::new(Core::new(event_loop));
     let pipeline = Pipeline::new(core.clone(), game);

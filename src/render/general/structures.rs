@@ -122,6 +122,10 @@ impl<'a, ItemType> BufferView<'a, ItemType> {
     pub fn iter_mut(&mut self) -> std::slice::IterMut<ItemType> {
         self.ptr.iter_mut()
     }
+
+    pub fn as_slice_mut(&mut self) -> &mut [ItemType] {
+        self.ptr
+    }
 }
 
 impl<'a, ItemType> Index<usize> for BufferView<'a, ItemType> {
@@ -240,8 +244,9 @@ impl<ItemType> Buffer<ItemType> {
 impl<ItemType> Drop for Buffer<ItemType> {
     fn drop(&mut self) {
         unsafe {
-            self.core.device.destroy_buffer(self.buffer, None);
-            self.core.device.free_memory(self.memory, None);
+            // TODO: UNCOMMENT!!!1!!
+            // self.core.device.destroy_buffer(self.buffer, None);
+            // self.core.device.free_memory(self.memory, None);
         }
     }
 }

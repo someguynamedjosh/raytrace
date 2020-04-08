@@ -13,13 +13,13 @@ pub const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_KHRONOS_validation"];
 pub const DEVICE_EXTENSIONS: &[&str] = &["VK_KHR_swapchain"];
 
 // Pipeline constants.
-pub const BLUE_NOISE_WIDTH: u32 = 512;
-pub const BLUE_NOISE_HEIGHT: u32 = 512;
-pub const BLUE_NOISE_CHANNELS: u32 = 4;
-pub const BLUE_NOISE_SIZE: u32 = BLUE_NOISE_WIDTH * BLUE_NOISE_HEIGHT * BLUE_NOISE_CHANNELS;
+pub const BLUE_NOISE_WIDTH: usize = 512;
+pub const BLUE_NOISE_HEIGHT: usize = 512;
+pub const BLUE_NOISE_CHANNELS: usize = 4;
+pub const BLUE_NOISE_SIZE: usize = BLUE_NOISE_WIDTH * BLUE_NOISE_HEIGHT * BLUE_NOISE_CHANNELS;
 
-pub const ROOT_BLOCK_WIDTH: u32 = 256;
-pub const ROOT_BLOCK_VOLUME: u32 = ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH;
+pub const ROOT_BLOCK_WIDTH: usize = 256;
+pub const ROOT_BLOCK_VOLUME: usize = ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH;
 
 pub const NUM_UPLOAD_BUFFERS: usize = 32;
-pub const SHADER_GROUP_SIZE: u32 = 8; // Each compute shader works on 8x8 groups.
+pub const SHADER_GROUP_SIZE: usize = 8; // Each compute shader works on 8x8 groups.
