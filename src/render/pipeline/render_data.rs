@@ -16,7 +16,6 @@ pub struct RenderData {
     pub core: Rc<Core>,
 
     pub world: SampledImage,
-    pub world_mips: SampledImage,
     pub minefield: SampledImage,
 
     pub lighting_buffer: StorageImage,
@@ -73,30 +72,6 @@ impl RenderData {
             mipmap_mode: vk::SamplerMipmapMode::NEAREST,
         };
         SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
-    }
-
-    fn create_world_mips(core: Rc<Core>) -> SampledImage {
-        let image_options = ImageOptions {
-            typ: vk::ImageType::TYPE_3D,
-            extent: vk::Extent3D {
-                width: ROOT_BLOCK_WIDTH / 2,
-                height: ROOT_BLOCK_WIDTH / 2,
-                depth: ROOT_BLOCK_WIDTH / 2,
-            },
-            format: vk::Format::R32G32_UINT,
-            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            mip_levels: 9,
-            ..Default::default()
-        };
-        let sampler_options = SamplerOptions {
-            min_filter: vk::Filter::NEAREST,
-            mag_filter: vk::Filter::NEAREST,
-            address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
-            unnormalized_coordinates: false,
-            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
-        };
-        SampledImage::create(core.clone(), "world_mip", &image_options, &sampler_options)
     }
 
     fn create_minefield(core: Rc<Core>) -> SampledImage {
@@ -182,7 +157,6 @@ impl RenderData {
             core: core.clone(),
 
             world: Self::create_world(core.clone()),
-            world_mips: Self::create_world_mips(core.clone()),
             minefield: Self::create_minefield(core.clone()),
 
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
