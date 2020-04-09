@@ -17,7 +17,7 @@ pub enum Chunk {
 }
 
 impl Chunk {
-    pub fn generate(chunk_coord: &(usize, usize, usize)) -> Chunk {
+    pub fn generate(chunk_coord: &util::Coord3D) -> Chunk {
         let origin = (
             chunk_coord.0 * CHUNK_SIZE,
             chunk_coord.1 * CHUNK_SIZE,
@@ -71,7 +71,7 @@ impl Chunk {
         &self,
         target: &mut [u16],
         target_stride: usize,
-        target_offset: &(usize, usize, usize),
+        target_offset: &util::Coord3D,
     ) {
         if let Self::NonEmpty(data) = self {
             data.copy_blocks(target, target_stride, target_offset);
@@ -94,7 +94,7 @@ impl Chunk {
         &self,
         target: &mut [u8],
         target_stride: usize,
-        target_offset: &(usize, usize, usize),
+        target_offset: &util::Coord3D,
     ) {
         if let Self::NonEmpty(data) = self {
             data.copy_minefield(target, target_stride, target_offset);
@@ -110,6 +110,138 @@ impl Chunk {
                     target_stride,
                 )] = MAX_LOD as u8;
             }
+        }
+    }
+}
+
+pub struct ChunkMip {
+    minefield: Vec<u8>,
+    blocks: Vec<Material>,
+}
+
+impl ChunkMip {
+    fn new() -> ChunkMip {
+        ChunkMip {
+            minefield: vec![0; CHUNK_VOLUME],
+            blocks: vec![Material::black(); CHUNK_VOLUME],
+        }
+    }
+
+    pub fn from_chunks(neighborhood: &[&Chunk]) -> ChunkMip {
+        debug_assert!(
+            neighborhood.len() == 8,
+            "Neighborhood must be a 2x2x2 region!"
+        );
+        let mut mip = Self::new();
+        for index in 0..8 {
+            let offset = util::scale_coord_3d(&util::index_to_coord_3d(index, 2), CHUNK_SIZE / 2);
+            mip.incorporate_chunk(&neighborhood[index], &offset);
+        }
+        mip
+    }
+
+    fn incorporate_chunk(
+        &mut self,
+        chunk: &Chunk,
+        offset: &util::Coord3D,
+    ) {
+        if let Chunk::NonEmpty(data) = chunk {
+            // Min LOD 1 because chunks store LOD 0 data.
+            self.incorporate_minefield(&data.minefield, offset, 1);
+            self.incorporate_blocks(&data.blocks, offset);
+        } else {
+            for index in 0..CHUNK_VOLUME {
+                // The entire chunk is empty. Write the LOD corresponding to chunk size everywhere.
+                self.minefield[index] = MAX_LOD as u8;
+            }
+            // The material can stay black.
+        }
+    }
+
+    // Takes a minefield, shrinks it, and writes the shrunk data to a part of this mip's minefield.
+    // The offset specifies where to place it, since the data will only take up 1/8th of the total
+    // space.
+    fn incorporate_minefield(
+        &mut self,
+        minefield: &[u8],
+        offset: &util::Coord3D,
+        min_lod: u8,
+    ) {
+        for coord in util::coord_iter_3d(CHUNK_SIZE / 2) {
+            let source_coord = util::scale_coord_3d(&coord, 2);
+            let target_coord = util::offset_coord_3d(&coord, &offset);
+            let mut lowest_lod = u8::max_value();
+            for offset in &[
+                (0, 0, 0),
+                (0, 0, 1),
+                (0, 1, 0),
+                (0, 1, 1),
+                (1, 0, 0),
+                (1, 0, 1),
+                (1, 1, 0),
+                (1, 1, 1),
+            ] {
+                lowest_lod = lowest_lod.min(
+                    minefield[util::coord_to_index_3d(
+                        &util::offset_coord_3d(&source_coord, offset),
+                        CHUNK_SIZE,
+                    )],
+                );
+            }
+            lowest_lod = lowest_lod.max(min_lod);
+            self.minefield[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] = lowest_lod;
+        }
+    }
+
+    // Shrinks block id data to material data with dimensions twice as small.
+    fn incorporate_blocks(
+        &mut self,
+        blocks: &[u16],
+        offset: &util::Coord3D,
+    ) {
+        for coord in util::coord_iter_3d(CHUNK_SIZE / 2) {
+            let source_coord = util::scale_coord_3d(&coord, 2);
+            let target_coord = util::offset_coord_3d(&coord, &offset);
+            let mut material = Material::black();
+            for offset in &[
+                (0, 0, 0),
+                (0, 0, 1),
+                (0, 1, 0),
+                (0, 1, 1),
+                (1, 0, 0),
+                (1, 0, 1),
+                (1, 1, 0),
+                (1, 1, 1),
+            ] {
+                let material_id = blocks[util::coord_to_index_3d(
+                        &util::offset_coord_3d(&source_coord, offset),
+                        CHUNK_SIZE,
+                    )];
+                if material_id == 0 {
+                    continue;
+                }
+                material.add(&MATERIALS[material_id as usize]);
+            }
+            material.multiply(1.0 / 8.0);
+            self.blocks[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] = material;
+        }
+    }
+
+    pub fn copy_minefield(
+        &self,
+        target: &mut [u8],
+        target_stride: usize,
+        target_offset: &util::Coord3D,
+    ) {
+        for coord in util::coord_iter_3d(CHUNK_SIZE) {
+            let source_index = util::coord_to_index_3d(&coord, CHUNK_SIZE);
+            let target_coord = (
+                coord.0 + target_offset.0,
+                coord.1 + target_offset.1,
+                coord.2 + target_offset.2,
+            );
+            let target_index = util::coord_to_index_3d(&target_coord, target_stride);
+            target[target_index] = self.minefield[source_index];
         }
     }
 }
@@ -130,7 +262,7 @@ impl ChunkData {
         &self,
         target: &mut [u16],
         target_stride: usize,
-        target_offset: &(usize, usize, usize),
+        target_offset: &util::Coord3D,
     ) {
         for coord in util::coord_iter_3d(CHUNK_SIZE) {
             let source_index = util::coord_to_index_3d(&coord, CHUNK_SIZE);
@@ -148,7 +280,7 @@ impl ChunkData {
         &self,
         target: &mut [u8],
         target_stride: usize,
-        target_offset: &(usize, usize, usize),
+        target_offset: &util::Coord3D,
     ) {
         for coord in util::coord_iter_3d(CHUNK_SIZE) {
             let source_index = util::coord_to_index_3d(&coord, CHUNK_SIZE);
@@ -192,7 +324,7 @@ impl UnfinishedChunkData {
     }
 
     /// Sets the block at the given position and updates all LODs accordingly.
-    fn set_block(&mut self, coord: &(usize, usize, usize), value: u16) {
+    fn set_block(&mut self, coord: &util::Coord3D, value: u16) {
         if value == 0 {
             unimplemented!("No implementation for erasing blocks yet.");
         }

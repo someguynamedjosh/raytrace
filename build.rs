@@ -120,6 +120,7 @@ fn gen_material_code() {
 pub struct Material {{
     pub albedo: (f32, f32, f32),
     pub emission: (f32, f32, f32),
+    pub power: f32,
 }}
 
 impl Material {{
@@ -127,7 +128,28 @@ impl Material {{
         Self {{
             albedo: (0.0, 0.0, 0.0),
             emission: (0.0, 0.0, 0.0),
+            power: 1.0,
         }}
+    }}
+
+	pub fn add(&mut self, other: &Self) {{
+		self.albedo.0 += other.albedo.0;
+		self.albedo.1 += other.albedo.1;
+		self.albedo.2 += other.albedo.2;
+		self.emission.0 += other.emission.0;
+		self.emission.1 += other.emission.1;
+        self.emission.2 += other.emission.2;
+        self.power += other.power;
+	}}
+
+	pub fn multiply(&mut self, factor: f32) {{
+		self.albedo.0 *= factor;
+		self.albedo.1 *= factor;
+		self.albedo.2 *= factor;
+		self.emission.0 *= factor;
+		self.emission.1 *= factor;
+        self.emission.2 *= factor;
+        self.power *= factor;
     }}
 }}
 
@@ -146,8 +168,9 @@ impl Material {{
             concat!(
                 "\tMaterial {{\n",
                 "\t\talbedo:   ({:.9}, {:.9}, {:.9}),\n",
-                "\t\temission: ({:.9}, {:.9}, {:.9}),\n\t",
-                "}},",
+                "\t\temission: ({:.9}, {:.9}, {:.9}),\n",
+                "\t\tpower: 1.0,\n",
+                "\t}},",
             ),
             material.albedo.0 as f32 / 255.0,
             material.albedo.1 as f32 / 255.0,

@@ -21,10 +21,12 @@ pub fn compute_triple_euler_vector(heading: Rad<f32>, pitch: Rad<f32>) -> Triple
     TripleEulerVector { forward, up, right }
 }
 
+/// X is least significant (changes the fastest).
 pub fn index_to_coord_2d(index: usize, stride: usize) -> (usize, usize) {
     (index % stride, index / stride % stride)
 }
 
+/// X is least significant (changes the fastest).
 pub fn coord_to_index_2d(coord: &(usize, usize), stride: usize) -> usize {
     coord.1 * stride + coord.0
 }
@@ -33,12 +35,16 @@ pub fn scale_coord_2d(coord: &(usize, usize), scale: usize) -> (usize, usize) {
     (coord.0 * scale, coord.1 * scale)
 }
 
+/// X is least significant (changes the fastest).
 pub fn coord_iter_2d(size: usize) -> impl Iterator<Item = (usize, usize)> {
     let coord_iter = 0..size;
     coord_iter.flat_map(move |y| (0..size).map(move |x| (x, y)))
 }
 
-pub fn index_to_coord_3d(index: usize, stride: usize) -> (usize, usize, usize) {
+pub type Coord3D = (usize, usize, usize);
+
+/// X is least significant (changes the fastest).
+pub fn index_to_coord_3d(index: usize, stride: usize) -> Coord3D {
     (
         index % stride,
         index / stride % stride,
@@ -46,19 +52,25 @@ pub fn index_to_coord_3d(index: usize, stride: usize) -> (usize, usize, usize) {
     )
 }
 
-pub fn coord_to_index_3d(coord: &(usize, usize, usize), stride: usize) -> usize {
+/// X is least significant (changes the fastest).
+pub fn coord_to_index_3d(coord: &Coord3D, stride: usize) -> usize {
     (coord.2 * stride + coord.1) * stride + coord.0
 }
 
-pub fn scale_coord_3d(coord: &(usize, usize, usize), scale: usize) -> (usize, usize, usize) {
+pub fn offset_coord_3d(coord: &Coord3D, offset: &Coord3D) -> Coord3D {
+    (coord.0 + offset.0, coord.1 + offset.1, coord.2 + offset.2)
+}
+
+pub fn scale_coord_3d(coord: &Coord3D, scale: usize) -> Coord3D {
     (coord.0 * scale, coord.1 * scale, coord.2 * scale)
 }
 
-pub fn shrink_coord_3d(coord: &(usize, usize, usize), divisor: usize) -> (usize, usize, usize) {
+pub fn shrink_coord_3d(coord: &Coord3D, divisor: usize) -> Coord3D {
     (coord.0 / divisor, coord.1 / divisor, coord.2 / divisor)
 }
 
-pub fn coord_iter_3d(size: usize) -> impl Iterator<Item = (usize, usize, usize)> {
+/// X is least significant (changes the fastest).
+pub fn coord_iter_3d(size: usize) -> impl Iterator<Item = Coord3D> {
     let coord_iter = 0..size;
     let coord_iter = coord_iter.flat_map(move |z| (0..size).map(move |y| (y, z)));
     coord_iter.flat_map(move |yz| (0..size).map(move |x| (x, yz.0, yz.1)))
