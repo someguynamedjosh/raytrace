@@ -28,8 +28,9 @@ impl Chunk {
         let mountain_noise = functions::MountainNoise::new();
         let mut random = rand::thread_rng();
         let height =
-            |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as usize;
+            |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 160.0) as usize;
         let material = |random: &mut ThreadRng, height: usize| {
+            let height = height as isize - 160;
             if height < 12 {
                 2
             } else if height < 30 {

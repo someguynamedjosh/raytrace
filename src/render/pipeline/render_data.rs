@@ -234,7 +234,14 @@ impl RenderData {
         let mut blocks_buffer_data = blocks_buffer.bind_all();
         let mut minefield_buffer_data = minefield_buffer.bind_all();
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let chunk = world.borrow_chunk(&chunk_coord);
+            let chunk = world.borrow_chunk(&util::offset_coord_3d(
+                &chunk_coord,
+                &(
+                    ROOT_CHUNK_WIDTH / 2,
+                    ROOT_CHUNK_WIDTH / 2,
+                    ROOT_CHUNK_WIDTH / 2,
+                ),
+            ));
             chunk.copy_blocks(
                 blocks_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
