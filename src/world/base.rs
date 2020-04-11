@@ -18,7 +18,7 @@ use super::UnpackedChunkData;
 */
 
 pub struct World {
-    lods: Vec<HashMap<util::Coord3D, UnpackedChunkData>>,
+    lods: Vec<HashMap<util::SignedCoord3D, UnpackedChunkData>>,
 }
 
 impl World {
@@ -28,7 +28,7 @@ impl World {
         World { lods }
     }
 
-    fn checked_generate_chunk(&mut self, chunk_coord: &util::Coord3D, lod: usize) {
+    fn checked_generate_chunk(&mut self, chunk_coord: &util::SignedCoord3D, lod: usize) {
         if self.lods[lod].contains_key(chunk_coord) {
             return;
         }
@@ -39,15 +39,17 @@ impl World {
             );
         } else {
             // Coordinate of this "chunk" in the next LOD down.
-            let next_lod_coord = util::scale_coord_3d(chunk_coord, 2);
+            let next_lod_coord = util::scale_signed_coord_3d(chunk_coord, 2);
             let mut neighborhood = Vec::new();
             // Ensure that all the chunks we will need are generated.
             for offset in util::coord_iter_3d(2) {
-                let coord = util::offset_coord_3d(&next_lod_coord, &offset);
+                let offset = util::coord_to_signed_coord(&offset);
+                let coord = util::offset_signed_coord_3d(&next_lod_coord, &offset);
                 self.checked_generate_chunk(&coord, lod - 1);
             }
             for offset in util::coord_iter_3d(2) {
-                let coord = util::offset_coord_3d(&next_lod_coord, &offset);
+                let offset = util::coord_to_signed_coord(&offset);
+                let coord = util::offset_signed_coord_3d(&next_lod_coord, &offset);
                 let chunk = self.lods[lod - 1].get(&coord).unwrap();
                 neighborhood.push(chunk);
             }
@@ -56,7 +58,7 @@ impl World {
         }
     }
 
-    pub fn borrow_chunk(&mut self, chunk_coord: &util::Coord3D, lod: usize) -> &UnpackedChunkData {
+    pub fn borrow_chunk(&mut self, chunk_coord: &util::SignedCoord3D, lod: usize) -> &UnpackedChunkData {
         if self.lods.len() <= lod {
             for _ in self.lods.len()..(lod + 1) {
                 self.lods.push(HashMap::new());

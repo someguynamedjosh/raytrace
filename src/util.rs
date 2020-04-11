@@ -42,6 +42,7 @@ pub fn coord_iter_2d(size: usize) -> impl Iterator<Item = (usize, usize)> {
 }
 
 pub type Coord3D = (usize, usize, usize);
+pub type SignedCoord3D = (isize, isize, isize);
 
 /// X is least significant (changes the fastest).
 pub fn index_to_coord_3d(index: usize, stride: usize) -> Coord3D {
@@ -66,6 +67,22 @@ pub fn scale_coord_3d(coord: &Coord3D, scale: usize) -> Coord3D {
 }
 
 pub fn shrink_coord_3d(coord: &Coord3D, divisor: usize) -> Coord3D {
+    (coord.0 / divisor, coord.1 / divisor, coord.2 / divisor)
+}
+
+pub fn offset_signed_coord_3d(coord: &SignedCoord3D, offset: &SignedCoord3D) -> SignedCoord3D {
+    (coord.0 + offset.0, coord.1 + offset.1, coord.2 + offset.2)
+}
+
+pub fn scale_signed_coord_3d(coord: &SignedCoord3D, scale: isize) -> SignedCoord3D {
+    (coord.0 * scale, coord.1 * scale, coord.2 * scale)
+}
+
+pub fn coord_to_signed_coord(coord: &Coord3D) -> SignedCoord3D {
+    (coord.0 as isize, coord.1 as isize, coord.2 as isize)
+}
+
+pub fn shrink_signed_coord_3d(coord: &SignedCoord3D, divisor: isize) -> SignedCoord3D {
     (coord.0 / divisor, coord.1 / divisor, coord.2 / divisor)
 }
 

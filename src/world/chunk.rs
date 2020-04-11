@@ -231,16 +231,15 @@ impl UnpackedChunkData {
 }
 
 impl UnpackedChunkData {
-    pub fn generate(chunk_coord: &util::Coord3D) -> UnpackedChunkData {
-        let origin = util::scale_coord_3d(chunk_coord, CHUNK_SIZE);
+    pub fn generate(chunk_coord: &util::SignedCoord3D) -> UnpackedChunkData {
+        let origin = util::scale_signed_coord_3d(chunk_coord, CHUNK_SIZE as isize);
         let mut data = UnpackedChunkData::new(0);
 
         let mountain_noise = functions::MountainNoise::new();
         let mut random = rand::thread_rng();
         let height =
-            |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 160.0) as usize;
-        let material = |random: &mut ThreadRng, height: usize| {
-            let height = height as isize - 160;
+            |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as isize;
+        let material = |random: &mut ThreadRng, height: isize| {
             if height < 12 {
                 2
             } else if height < 30 {
@@ -265,13 +264,13 @@ impl UnpackedChunkData {
         };
 
         for (cx, cy) in util::coord_iter_2d(CHUNK_SIZE) {
-            let height_val = height(cx + origin.0, cy + origin.1);
+            let height_val = height(cx as isize + origin.0, cy as isize + origin.1);
             if height_val < origin.2 {
                 continue;
             }
-            for z in origin.2..height_val.min(origin.2 + CHUNK_SIZE) {
+            for z in origin.2..height_val.min(origin.2 + CHUNK_SIZE as isize) {
                 let material_val = material(&mut random, z);
-                let cz = z - origin.2;
+                let cz = (z - origin.2) as usize;
                 data.set_block(&(cx, cy, cz), MATERIALS[material_val].clone());
             }
         }
