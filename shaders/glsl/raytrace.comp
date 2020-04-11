@@ -160,6 +160,8 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
                 }
                 // Get the current step, according to the new LOD.
                 current_step = get_step((result.position + pos_offset) / lod_divisor, current_lod);
+                // We encountered a block. We haven't had time to get to the edge yet.
+                if (current_step <= current_lod) break;
             }
         }
         step_size = (1 << current_step) / 2;
