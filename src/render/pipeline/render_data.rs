@@ -62,7 +62,7 @@ impl RenderData {
                 height: ROOT_BLOCK_WIDTH as u32,
                 depth: ROOT_BLOCK_WIDTH as u32,
             },
-            format: vk::Format::R16_UINT,
+            format: vk::Format::R32_UINT,
             usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             ..Default::default()
         };
@@ -216,7 +216,7 @@ impl RenderData {
     fn make_world_upload_buffers(
         &mut self,
         world: &mut World,
-    ) -> (Buffer<u16>, Buffer<u8>, Buffer<u32>, Buffer<u8>) {
+    ) -> (Buffer<u32>, Buffer<u8>, Buffer<u32>, Buffer<u8>) {
         let mut blocks_buffer = Buffer::create(
             self.core.clone(),
             "blocks",
@@ -241,8 +241,8 @@ impl RenderData {
                     ROOT_CHUNK_WIDTH / 2,
                     ROOT_CHUNK_WIDTH / 2,
                 ),
-            ));
-            chunk.copy_blocks(
+            )).pack();
+            chunk.copy_materials(
                 blocks_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
@@ -271,13 +271,13 @@ impl RenderData {
         let mut blocks_lod1_buffer_data = blocks_lod1_buffer.bind_all();
         let mut minefield_lod1_buffer_data = minefield_lod1_buffer.bind_all();
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let mip = world.borrow_lod1_mip(&chunk_coord);
+            let mip = world.borrow_lod1_mip(&chunk_coord).pack();
             mip.copy_minefield(
                 minefield_lod1_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
             );
-            mip.copy_blocks(
+            mip.copy_materials(
                 blocks_lod1_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),

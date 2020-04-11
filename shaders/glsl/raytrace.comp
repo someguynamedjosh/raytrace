@@ -171,30 +171,25 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     }
 
     result.distance = length(origin - result.position);
+    uint packed_material = 0;
     if (current_lod == 0) {
-        uint value = textureLod(world, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
-        result.albedo = get_material_albedo(value);
-        result.emission = get_material_emission(value);
-        result.air = value == 0;
+        packed_material = textureLod(world, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
     } else if (current_lod == 1) {
         if (
-            result.position.x > -int(ROOT_BLOCK_WIDTH)
-            && result.position.y > -int(ROOT_BLOCK_WIDTH)
-            && result.position.z > -int(ROOT_BLOCK_WIDTH)
-            && result.position.x < ROOT_BLOCK_WIDTH 
-            && result.position.y < ROOT_BLOCK_WIDTH 
-            && result.position.z < ROOT_BLOCK_WIDTH
+            abs(result.position.x) < ROOT_BLOCK_WIDTH 
+            && abs(result.position.y) < ROOT_BLOCK_WIDTH 
+            && abs(result.position.z) < ROOT_BLOCK_WIDTH
         ) {
-            result.emission = vec3(0); // Packed materials don't contain emission data yet.
             result.air = false;
-            uint packed_material = textureLod(world_lod1, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 2), 0.0).r;
-            result.albedo.r = (packed_material >> 14 & 0x7F) / (0x7F + 0.0);
-            result.albedo.g = (packed_material >> 7 & 0x7F) / (0x7F + 0.0);
-            result.albedo.b = (packed_material >> 0 & 0x7F) / (0x7F + 0.0);
+            packed_material = textureLod(world_lod1, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 2), 0.0).r;
         } else {
             result.air = true;
         }
     }
+    result.emission = vec3(0); // Packed materials don't contain emission data yet.
+    result.albedo.r = (packed_material >> 14 & 0x7F) / (0x7F + 0.0);
+    result.albedo.g = (packed_material >> 7 & 0x7F) / (0x7F + 0.0);
+    result.albedo.b = (packed_material >> 0 & 0x7F) / (0x7F + 0.0);
 
     float offset_amount = 0.001;
 
