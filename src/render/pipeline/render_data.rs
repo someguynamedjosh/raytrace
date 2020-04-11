@@ -6,7 +6,8 @@ use crate::render::constants::*;
 use crate::render::general::command_buffer::CommandBuffer;
 use crate::render::general::core::Core;
 use crate::render::general::structures::{
-    Buffer, DataDestination, ImageOptions, SampledImage, SamplerOptions, StorageImage,
+    Buffer, BufferWrapper, DataDestination, ExtentWrapper, ImageOptions, ImageWrapper,
+    SampledImage, SamplerOptions, StorageImage,
 };
 use crate::util;
 use crate::world::{World, CHUNK_SIZE};
@@ -213,72 +214,26 @@ impl RenderData {
         }
     }
 
-    // fn make_world_upload_buffers(
-    //     &mut self,
-    //     world: &mut World,
-    //     lod: usize,
-    // ) -> (Buffer<u32>, Buffer<u8>) {
-    //     let mut materials_buffer = Buffer::create(
-    //         self.core.clone(),
-    //         "materials",
-    //         ROOT_BLOCK_VOLUME as u64,
-    //         vk::BufferUsageFlags::TRANSFER_SRC,
-    //     );
-    //     let mut minefield_buffer = Buffer::create(
-    //         self.core.clone(),
-    //         "minefield",
-    //         ROOT_BLOCK_VOLUME as u64,
-    //         vk::BufferUsageFlags::TRANSFER_SRC,
-    //     );
-
-    //     const ROOT_CHUNK_WIDTH: usize = ROOT_BLOCK_WIDTH / CHUNK_SIZE;
-    //     let mut materials_buffer_data = materials_buffer.bind_all();
-    //     let mut minefield_buffer_data = minefield_buffer.bind_all();
-    //     for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-    //         let chunk = world.borrow_chunk(&util::offset_coord_3d(
-    //             &chunk_coord,
-    //             &(
-    //                 ROOT_CHUNK_WIDTH / 2,
-    //                 ROOT_CHUNK_WIDTH / 2,
-    //                 ROOT_CHUNK_WIDTH / 2,
-    //             ),
-    //         ), 0).pack();
-    //         chunk.copy_materials(
-    //             materials_buffer_data.as_slice_mut(),
-    //             ROOT_BLOCK_WIDTH,
-    //             &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
-    //         );
-    //         chunk.copy_minefield(
-    //             minefield_buffer_data.as_slice_mut(),
-    //             ROOT_BLOCK_WIDTH,
-    //             &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
-    //         );
-    //     }
-    //     drop(materials_buffer_data);
-    //     drop(minefield_buffer_data);
-
-    //     (materials_buffer, minefield_buffer)
-    // }
-
     fn make_world_upload_buffers(
         &mut self,
         world: &mut World,
-    ) -> (Buffer<u32>, Buffer<u8>, Buffer<u32>, Buffer<u8>) {
-        let mut blocks_buffer = Buffer::create(
+        lod: usize,
+    ) -> (Buffer<u32>, Buffer<u8>) {
+        let mut material_buffer = Buffer::create(
             self.core.clone(),
-            "blocks",
+            &format!("material_lod{}", lod),
             ROOT_BLOCK_VOLUME as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
         );
         let mut minefield_buffer = Buffer::create(
             self.core.clone(),
-            "minefield",
+            &format!("minefield_lod{}", lod),
             ROOT_BLOCK_VOLUME as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
         );
 
         const ROOT_CHUNK_WIDTH: usize = ROOT_BLOCK_WIDTH / CHUNK_SIZE;
-        let mut blocks_buffer_data = blocks_buffer.bind_all();
+        let mut material_buffer_data = material_buffer.bind_all();
         let mut minefield_buffer_data = minefield_buffer.bind_all();
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
             let world_coord = util::coord_to_signed_coord(&chunk_coord);
@@ -290,9 +245,9 @@ impl RenderData {
                     -(ROOT_CHUNK_WIDTH as isize / 2),
                 ),
             );
-            let chunk = world.borrow_chunk(&world_coord, 0).pack();
+            let chunk = world.borrow_chunk(&world_coord, lod).pack();
             chunk.copy_materials(
-                blocks_buffer_data.as_slice_mut(),
+                material_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
             );
@@ -302,105 +257,41 @@ impl RenderData {
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
             );
         }
-        drop(blocks_buffer_data);
+        drop(material_buffer_data);
         drop(minefield_buffer_data);
 
-        let mut blocks_lod1_buffer = Buffer::create(
-            self.core.clone(),
-            "blocks_lod1",
-            ROOT_BLOCK_VOLUME as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-        );
-        let mut minefield_lod1_buffer = Buffer::create(
-            self.core.clone(),
-            "minefield_lod1",
-            ROOT_BLOCK_VOLUME as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-        );
-        let mut blocks_lod1_buffer_data = blocks_lod1_buffer.bind_all();
-        let mut minefield_lod1_buffer_data = minefield_lod1_buffer.bind_all();
-        for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let world_coord = util::coord_to_signed_coord(&chunk_coord);
-            let world_coord = util::offset_signed_coord_3d(
-                &world_coord,
-                &(
-                    -(ROOT_CHUNK_WIDTH as isize / 2),
-                    -(ROOT_CHUNK_WIDTH as isize / 2),
-                    -(ROOT_CHUNK_WIDTH as isize / 2),
-                ),
-            );
-            let chunk = world.borrow_chunk(&world_coord, 1).pack();
-            chunk.copy_minefield(
-                minefield_lod1_buffer_data.as_slice_mut(),
-                ROOT_BLOCK_WIDTH,
-                &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
-            );
-            chunk.copy_materials(
-                blocks_lod1_buffer_data.as_slice_mut(),
-                ROOT_BLOCK_WIDTH,
-                &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
-            );
-        }
-        drop(blocks_lod1_buffer_data);
-        drop(minefield_lod1_buffer_data);
+        (material_buffer, minefield_buffer)
+    }
 
-        (
-            blocks_buffer,
-            minefield_buffer,
-            blocks_lod1_buffer,
-            minefield_lod1_buffer,
-        )
+    fn upload_buf_commands(
+        commands: &mut CommandBuffer,
+        buffer: &impl BufferWrapper,
+        image: &(impl ImageWrapper + ExtentWrapper),
+    ) {
+        commands.transition_layout(
+            image,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        commands.copy_buffer_to_image(buffer, image, image);
+        commands.transition_layout(
+            image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::GENERAL,
+        );
     }
 
     pub fn initialize(&mut self, game: &mut Game) {
         let world = game.borrow_world_mut();
-        let (lod0_buf, minefield, lod1_buf, minefield_lod1) = self.make_world_upload_buffers(world);
-        let commands = CommandBuffer::create_single(self.core.clone());
+        let (material_lod0, minefield_lod0) = self.make_world_upload_buffers(world, 0);
+        let (material_lod1, minefield_lod1) = self.make_world_upload_buffers(world, 1);
+
+        let mut commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
-        commands.transition_layout(
-            &self.world,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        commands.copy_buffer_to_image(&lod0_buf, &self.world, &self.world);
-        commands.transition_layout(
-            &self.world,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::GENERAL,
-        );
-        commands.transition_layout(
-            &self.minefield,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        commands.copy_buffer_to_image(&minefield, &self.minefield, &self.minefield);
-        commands.transition_layout(
-            &self.minefield,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::GENERAL,
-        );
-        commands.transition_layout(
-            &self.world_lod1,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        commands.copy_buffer_to_image(&lod1_buf, &self.world_lod1, &self.world_lod1);
-        commands.transition_layout(
-            &self.world_lod1,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::GENERAL,
-        );
-        commands.transition_layout(
-            &self.minefield_lod1,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        commands.copy_buffer_to_image(&minefield_lod1, &self.minefield_lod1, &self.minefield_lod1);
-        commands.transition_layout(
-            &self.minefield_lod1,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::GENERAL,
-        );
+        Self::upload_buf_commands(&mut commands, &material_lod0, &self.world);
+        Self::upload_buf_commands(&mut commands, &minefield_lod0, &self.minefield);
+        Self::upload_buf_commands(&mut commands, &material_lod1, &self.world_lod1);
+        Self::upload_buf_commands(&mut commands, &minefield_lod1, &self.minefield_lod1);
         let generic_layout_images = [
             &self.albedo_buffer,
             &self.completed_buffer,
