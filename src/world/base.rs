@@ -18,47 +18,52 @@ use super::UnpackedChunkData;
 */
 
 pub struct World {
-    chunks: HashMap<util::Coord3D, UnpackedChunkData>,
-    lod1_mips: HashMap<util::Coord3D, UnpackedChunkData>,
+    lods: Vec<HashMap<util::Coord3D, UnpackedChunkData>>,
 }
 
 impl World {
     pub fn new() -> World {
-        let mut world = World {
-            chunks: HashMap::new(),
-            lod1_mips: HashMap::new(),
-        };
-        world
+        // Just create the first LOD for now. Other LODs can be created on demand.
+        let lods = vec![HashMap::new()];
+        World { lods }
     }
 
-    pub fn borrow_chunk(&mut self, chunk_coord: &util::Coord3D) -> &UnpackedChunkData {
-        if !self.chunks.contains_key(chunk_coord) {
-            self.chunks.insert(
+    fn checked_generate_chunk(&mut self, chunk_coord: &util::Coord3D, lod: usize) {
+        if self.lods[lod].contains_key(chunk_coord) {
+            return;
+        }
+        if lod == 0 {
+            self.lods[0].insert(
                 chunk_coord.clone(),
                 UnpackedChunkData::generate(chunk_coord),
             );
-        }
-        self.chunks.get(chunk_coord).unwrap()
-    }
-
-    pub fn borrow_lod1_mip(&mut self, chunk_coord: &util::Coord3D) -> &UnpackedChunkData {
-        if !self.lod1_mips.contains_key(chunk_coord) {
-            let lod0_coord = util::scale_coord_3d(chunk_coord, 2);
+        } else {
+            // Coordinate of this "chunk" in the next LOD down.
+            let next_lod_coord = util::scale_coord_3d(chunk_coord, 2);
             let mut neighborhood = Vec::new();
+            // Ensure that all the chunks we will need are generated.
             for offset in util::coord_iter_3d(2) {
-                self.borrow_chunk(&util::offset_coord_3d(&lod0_coord, &offset));
+                let coord = util::offset_coord_3d(&next_lod_coord, &offset);
+                self.checked_generate_chunk(&coord, lod - 1);
             }
             for offset in util::coord_iter_3d(2) {
-                // Unwrap is safe because we just ensured they all exist with borrow_chunk above.
-                let chunk = self
-                    .chunks
-                    .get(&util::offset_coord_3d(&lod0_coord, &offset))
-                    .unwrap();
+                let coord = util::offset_coord_3d(&next_lod_coord, &offset);
+                let chunk = self.lods[lod - 1].get(&coord).unwrap();
                 neighborhood.push(chunk);
             }
-            let mip = UnpackedChunkData::from_smaller_chunks(&neighborhood[..]);
-            self.lod1_mips.insert(chunk_coord.clone(), mip);
+            let new_data = UnpackedChunkData::from_smaller_chunks(&neighborhood);
+            self.lods[lod].insert(chunk_coord.clone(), new_data);
         }
-        self.lod1_mips.get(chunk_coord).unwrap()
+    }
+
+    pub fn borrow_chunk(&mut self, chunk_coord: &util::Coord3D, lod: usize) -> &UnpackedChunkData {
+        if self.lods.len() <= lod {
+            for _ in self.lods.len()..(lod + 1) {
+                self.lods.push(HashMap::new());
+            }
+        }
+        // Ensure the chunk exists. (This function returns early if the chunk already exists.)
+        self.checked_generate_chunk(chunk_coord, lod);
+        self.lods[lod].get(chunk_coord).unwrap()
     }
 }

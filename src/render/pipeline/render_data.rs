@@ -241,7 +241,7 @@ impl RenderData {
                     ROOT_CHUNK_WIDTH / 2,
                     ROOT_CHUNK_WIDTH / 2,
                 ),
-            )).pack();
+            ), 0).pack();
             chunk.copy_materials(
                 blocks_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
@@ -271,7 +271,7 @@ impl RenderData {
         let mut blocks_lod1_buffer_data = blocks_lod1_buffer.bind_all();
         let mut minefield_lod1_buffer_data = minefield_lod1_buffer.bind_all();
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let mip = world.borrow_lod1_mip(&chunk_coord).pack();
+            let mip = world.borrow_chunk(&chunk_coord, 1).pack();
             mip.copy_minefield(
                 minefield_lod1_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
