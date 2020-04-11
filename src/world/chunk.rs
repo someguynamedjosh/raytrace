@@ -217,6 +217,24 @@ impl ChunkMip {
             target[target_index] = self.minefield[source_index];
         }
     }
+
+    pub fn copy_blocks(
+        &self,
+        target: &mut [u32],
+        target_stride: usize,
+        target_offset: &util::Coord3D,
+    ) {
+        for coord in util::coord_iter_3d(CHUNK_SIZE) {
+            let source_index = util::coord_to_index_3d(&coord, CHUNK_SIZE);
+            let target_coord = (
+                coord.0 + target_offset.0,
+                coord.1 + target_offset.1,
+                coord.2 + target_offset.2,
+            );
+            let target_index = util::coord_to_index_3d(&target_coord, target_stride);
+            target[target_index] = self.blocks[source_index].pack();
+        }
+    }
 }
 
 pub struct ChunkData {

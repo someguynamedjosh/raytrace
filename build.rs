@@ -128,7 +128,7 @@ impl Material {{
         Self {{
             albedo: (0.0, 0.0, 0.0),
             emission: (0.0, 0.0, 0.0),
-            power: 1.0,
+            power: 0.0,
         }}
     }}
 
@@ -151,6 +151,14 @@ impl Material {{
         self.emission.2 *= factor;
         self.power *= factor;
     }}
+
+    pub fn pack(&self) -> u32 {{
+        let ar = (self.albedo.0 / self.power * 0x7F as f32) as u32;
+        let ag = (self.albedo.1 / self.power * 0x7F as f32) as u32;
+        let ab = (self.albedo.2 / self.power * 0x7F as f32) as u32;
+        let albedo = ar << 14 | ag << 7 | ab;
+        albedo
+    }}
 }}
 
 #[rustfmt::skip]"#
@@ -162,14 +170,14 @@ impl Material {{
         materials.len()
     )
     .unwrap();
-    for material in &materials {
+    for (index, material) in materials.iter().enumerate() {
         writeln!(
             rust_materials,
             concat!(
                 "\tMaterial {{\n",
                 "\t\talbedo:   ({:.9}, {:.9}, {:.9}),\n",
                 "\t\temission: ({:.9}, {:.9}, {:.9}),\n",
-                "\t\tpower: 1.0,\n",
+                "\t\tpower: {:.1},\n",
                 "\t}},",
             ),
             material.albedo.0 as f32 / 255.0,
@@ -178,6 +186,7 @@ impl Material {{
             material.emission.0 as f32 / 255.0,
             material.emission.1 as f32 / 255.0,
             material.emission.2 as f32 / 255.0,
+            if index == 0 { 0.0 } else { 1.0 }
         )
         .unwrap();
     }

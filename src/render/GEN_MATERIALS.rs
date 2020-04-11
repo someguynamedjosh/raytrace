@@ -11,7 +11,7 @@ impl Material {
         Self {
             albedo: (0.0, 0.0, 0.0),
             emission: (0.0, 0.0, 0.0),
-            power: 1.0,
+            power: 0.0,
         }
     }
 
@@ -34,6 +34,14 @@ impl Material {
         self.emission.2 *= factor;
         self.power *= factor;
     }
+
+    pub fn pack(&self) -> u32 {
+        let ar = (self.albedo.0 / self.power * 0x7F as f32) as u32;
+        let ag = (self.albedo.1 / self.power * 0x7F as f32) as u32;
+        let ab = (self.albedo.2 / self.power * 0x7F as f32) as u32;
+        let albedo = ar << 14 | ag << 7 | ab;
+        albedo
+    }
 }
 
 #[rustfmt::skip]
@@ -41,7 +49,7 @@ pub const MATERIALS: [Material; 7] = [
 	Material {
 		albedo:   (1.000000000, 0.000000000, 1.000000000),
 		emission: (0.000000000, 0.000000000, 0.000000000),
-		power: 1.0,
+		power: 0.0,
 	},
 	Material {
 		albedo:   (1.000000000, 0.000000000, 1.000000000),

@@ -244,9 +244,8 @@ impl<ItemType> Buffer<ItemType> {
 impl<ItemType> Drop for Buffer<ItemType> {
     fn drop(&mut self) {
         unsafe {
-            // TODO: UNCOMMENT!!!1!!
-            // self.core.device.destroy_buffer(self.buffer, None);
-            // self.core.device.free_memory(self.memory, None);
+            self.core.device.destroy_buffer(self.buffer, None);
+            self.core.device.free_memory(self.memory, None);
         }
     }
 }

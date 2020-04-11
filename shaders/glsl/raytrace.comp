@@ -31,7 +31,8 @@ layout(set = 0, binding = 10) uniform UniformData {
     ivec3 region_offset;
 } uniform_data;
 
-layout(set = 0, binding = 11) uniform usampler3D minefield_lod1;
+layout(set = 0, binding = 11) uniform usampler3D world_lod1;
+layout(set = 0, binding = 12) uniform usampler3D minefield_lod1;
 
 const uint ROOT_BLOCK_WIDTH = 256;
 
@@ -59,7 +60,9 @@ const uint MAX_SAMPLES = 8;
 const float PI = 3.1415926535897932384626433832795;
 
 struct HitResult {
-    uint value;
+    vec3 albedo;
+    vec3 emission;
+    bool air;
     float distance;
     uint normal;
     vec3 position;
@@ -169,7 +172,10 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
 
     result.distance = length(origin - result.position);
     if (current_lod == 0) {
-        result.value = textureLod(world, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
+        uint value = textureLod(world, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
+        result.albedo = get_material_albedo(value);
+        result.emission = get_material_emission(value);
+        result.air = value == 0;
     } else if (current_lod == 1) {
         if (
             result.position.x > -int(ROOT_BLOCK_WIDTH)
@@ -179,9 +185,14 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
             && result.position.y < ROOT_BLOCK_WIDTH 
             && result.position.z < ROOT_BLOCK_WIDTH
         ) {
-            result.value = 2;
+            result.emission = vec3(0); // Packed materials don't contain emission data yet.
+            result.air = false;
+            uint packed_material = textureLod(world_lod1, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 2), 0.0).r;
+            result.albedo.r = (packed_material >> 14 & 0x7F) / (0x7F + 0.0);
+            result.albedo.g = (packed_material >> 7 & 0x7F) / (0x7F + 0.0);
+            result.albedo.b = (packed_material >> 0 & 0x7F) / (0x7F + 0.0);
         } else {
-            result.value = 0;
+            result.air = true;
         }
     }
 
@@ -308,29 +319,29 @@ void main() {
     vec3 sunangle = vec3(cos(uniform_data.sun_angle) * 0.5, sin(uniform_data.sun_angle), cos(uniform_data.sun_angle));
     vec3 light = skylight;
     HitResult primary = trace_ray(uniform_data.origin, ray_direction);
-    if (primary.value > 0) {
+    if (!primary.air) {
         light = vec3(0.0);
         noise_value = texture(blue_noise, mod(noise_offset, vec2(NOISE_SIZE)));
         HitResult sun1 = trace_sun(primary, sunangle);
-        if (sun1.value == 0) {
+        if (sun1.air) {
             light += sunlight;
         }
         HitResult dif1 = trace_diffuse(primary);
-        if (dif1.value == 0) {
+        if (dif1.air) {
             light += skylight;
         } else {
             vec3 light2 = vec3(0.0);
-            vec3 albedo2 = get_material_albedo(dif1.value);
+            vec3 albedo2 = dif1.albedo;
             noise_value = texture(blue_noise, mod(noise_offset + vec2(2.0 / NOISE_SIZE), vec2(NOISE_SIZE)));
             HitResult sun2 = trace_sun(dif1, sunangle);
-            if (sun2.value == 0 && false) {
+            if (sun2.air) {
                 light2 += albedo2 * sunlight;
             }
             HitResult dif2 = trace_diffuse(dif1);
-            if (dif2.value == 0 && false) {
+            if (dif2.air) {
                 light2 += albedo2 * skylight;
             }
-            light2 += get_material_emission(dif1.value);
+            light2 += dif1.emission;
             light += light2;
         }
     }
@@ -348,17 +359,17 @@ void main() {
     imageStore(
         normal_buffer,
         pixel,
-        uvec4(primary.value == 0 ? 16 : primary.normal)
+        uvec4(primary.air ? 16 : primary.normal)
     );
     imageStore(
         albedo_buffer,
         pixel,
-        primary.value == 0 ? vec4(1.0) : vec4(get_material_albedo(primary.value), 1.0)
+        primary.air ? vec4(1.0) : vec4(primary.albedo, 1.0)
     );
     imageStore(
         emission_buffer,
         pixel,
-        primary.value == 0 ? vec4(0.0) : vec4(get_material_emission(primary.value) / 4.0, 1.0)
+        primary.air ? vec4(0.0) : vec4(primary.emission / 4.0, 1.0)
     );
     imageStore(
         fog_color_buffer,
