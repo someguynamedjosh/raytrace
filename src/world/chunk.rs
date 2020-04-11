@@ -137,20 +137,19 @@ impl ChunkMip {
             let offset = util::scale_coord_3d(&util::index_to_coord_3d(index, 2), CHUNK_SIZE / 2);
             mip.incorporate_chunk(&neighborhood[index], &offset);
         }
+
         mip
     }
 
-    fn incorporate_chunk(
-        &mut self,
-        chunk: &Chunk,
-        offset: &util::Coord3D,
-    ) {
+    fn incorporate_chunk(&mut self, chunk: &Chunk, offset: &util::Coord3D) {
         if let Chunk::NonEmpty(data) = chunk {
             // Min LOD 1 because chunks store LOD 0 data.
             self.incorporate_minefield(&data.minefield, offset, 1);
             self.incorporate_blocks(&data.blocks, offset);
         } else {
-            for index in 0..CHUNK_VOLUME {
+            for coord in util::coord_iter_3d(CHUNK_SIZE / 2) {
+                let index =
+                    util::coord_to_index_3d(&util::offset_coord_3d(&coord, offset), CHUNK_SIZE);
                 // The entire chunk is empty. Write the LOD corresponding to chunk size everywhere.
                 self.minefield[index] = MAX_LOD as u8;
             }
@@ -161,29 +160,15 @@ impl ChunkMip {
     // Takes a minefield, shrinks it, and writes the shrunk data to a part of this mip's minefield.
     // The offset specifies where to place it, since the data will only take up 1/8th of the total
     // space.
-    fn incorporate_minefield(
-        &mut self,
-        minefield: &[u8],
-        offset: &util::Coord3D,
-        min_lod: u8,
-    ) {
+    fn incorporate_minefield(&mut self, minefield: &[u8], offset: &util::Coord3D, min_lod: u8) {
         for coord in util::coord_iter_3d(CHUNK_SIZE / 2) {
             let source_coord = util::scale_coord_3d(&coord, 2);
             let target_coord = util::offset_coord_3d(&coord, &offset);
             let mut lowest_lod = u8::max_value();
-            for offset in &[
-                (0, 0, 0),
-                (0, 0, 1),
-                (0, 1, 0),
-                (0, 1, 1),
-                (1, 0, 0),
-                (1, 0, 1),
-                (1, 1, 0),
-                (1, 1, 1),
-            ] {
+            for offset in util::coord_iter_3d(2) {
                 lowest_lod = lowest_lod.min(
                     minefield[util::coord_to_index_3d(
-                        &util::offset_coord_3d(&source_coord, offset),
+                        &util::offset_coord_3d(&source_coord, &offset),
                         CHUNK_SIZE,
                     )],
                 );
@@ -194,29 +179,16 @@ impl ChunkMip {
     }
 
     // Shrinks block id data to material data with dimensions twice as small.
-    fn incorporate_blocks(
-        &mut self,
-        blocks: &[u16],
-        offset: &util::Coord3D,
-    ) {
+    fn incorporate_blocks(&mut self, blocks: &[u16], offset: &util::Coord3D) {
         for coord in util::coord_iter_3d(CHUNK_SIZE / 2) {
             let source_coord = util::scale_coord_3d(&coord, 2);
             let target_coord = util::offset_coord_3d(&coord, &offset);
             let mut material = Material::black();
-            for offset in &[
-                (0, 0, 0),
-                (0, 0, 1),
-                (0, 1, 0),
-                (0, 1, 1),
-                (1, 0, 0),
-                (1, 0, 1),
-                (1, 1, 0),
-                (1, 1, 1),
-            ] {
+            for offset in util::coord_iter_3d(2) {
                 let material_id = blocks[util::coord_to_index_3d(
-                        &util::offset_coord_3d(&source_coord, offset),
-                        CHUNK_SIZE,
-                    )];
+                    &util::offset_coord_3d(&source_coord, &offset),
+                    CHUNK_SIZE,
+                )];
                 if material_id == 0 {
                     continue;
                 }

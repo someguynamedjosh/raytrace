@@ -31,6 +31,8 @@ layout(set = 0, binding = 10) uniform UniformData {
     ivec3 region_offset;
 } uniform_data;
 
+layout(set = 0, binding = 11) uniform usampler3D minefield_lod1;
+
 const uint ROOT_BLOCK_WIDTH = 256;
 
 const uint EMPTY_CHUNK_INDEX = 0xFFFF;
@@ -87,14 +89,14 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.y > 0 ? -1 : 1,
         direction.z > 0 ? -1 : 1
     );
-    uint current_lod = texture(minefield, result.position).r;
+    uint current_lod = texture(minefield_lod1, result.position / 2).r;
     uint lod_divisor = (1 << current_lod) / 2;
 
     uint limit = 2048;
     vec3 length_to_next_voxel, lookup_offset;
     // For some reason, using a non-infinite loop boosts performance even though
     // the limit of the loop is never reached.
-    for (; current_lod > 0 && limit > 0; limit--) {
+    for (; current_lod > 1 && limit > 0; limit--) {
         // Things that don't increase performance: 
         // - pre-multiplying result.position 
         // - only setting the result normal if a new value gets hit.
@@ -117,12 +119,30 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
                 result.normal = normals.z;
             }
         }
-        current_lod = texture(minefield, result.position).r;
+        current_lod = texture(minefield_lod1, result.position / 2).r;
         lod_divisor = (1 << current_lod) / 2;
     }
 
     result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
     result.distance = length(origin - result.position);
+
+    // TODO: Remove.
+    if (
+        result.position.x > 0
+        && result.position.y > 0
+        && result.position.z > 0
+        && result.position.x < ROOT_BLOCK_WIDTH * 2
+        && result.position.y < ROOT_BLOCK_WIDTH * 2
+        && result.position.z < ROOT_BLOCK_WIDTH * 2
+        // result.position.x > -ROOT_BLOCK_WIDTH 
+        // && result.position.y > -ROOT_BLOCK_WIDTH 
+        // && result.position.z > -ROOT_BLOCK_WIDTH 
+        // && result.position.x < ROOT_BLOCK_WIDTH 
+        // && result.position.y < ROOT_BLOCK_WIDTH 
+        // && result.position.z < ROOT_BLOCK_WIDTH
+    ) {
+        result.value = 2;
+    }
 
     float offset_amount = 0.001;
 

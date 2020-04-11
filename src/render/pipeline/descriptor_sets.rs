@@ -78,9 +78,10 @@ fn generate_raytrace_ds_prototypes(
         render_data.normal_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.depth_buffer.create_dp(vk::ImageLayout::GENERAL),
         //
-        //
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         render_data.raytrace_uniform_data_buffer.create_dp(),
+        //
+        render_data.minefield_lod1.create_dp(vk::ImageLayout::GENERAL),
     ]]
 }
 

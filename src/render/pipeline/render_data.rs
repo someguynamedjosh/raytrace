@@ -18,6 +18,8 @@ pub struct RenderData {
 
     pub world: SampledImage,
     pub minefield: SampledImage,
+    pub world_lod1: SampledImage,
+    pub minefield_lod1: SampledImage,
 
     pub lighting_buffer: StorageImage,
     pub completed_buffer: StorageImage,
@@ -75,7 +77,30 @@ impl RenderData {
         SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
     }
 
-    fn create_minefield(core: Rc<Core>) -> SampledImage {
+    fn create_world_lod1(core: Rc<Core>) -> SampledImage {
+        let image_options = ImageOptions {
+            typ: vk::ImageType::TYPE_3D,
+            extent: vk::Extent3D {
+                width: ROOT_BLOCK_WIDTH as u32,
+                height: ROOT_BLOCK_WIDTH as u32,
+                depth: ROOT_BLOCK_WIDTH as u32,
+            },
+            format: vk::Format::R32_UINT,
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            ..Default::default()
+        };
+        let sampler_options = SamplerOptions {
+            min_filter: vk::Filter::NEAREST,
+            mag_filter: vk::Filter::NEAREST,
+            address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+            unnormalized_coordinates: false,
+            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+        };
+        SampledImage::create(core.clone(), "world_lod1", &image_options, &sampler_options)
+    }
+
+    fn create_minefield(core: Rc<Core>, label: &str) -> SampledImage {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
@@ -95,7 +120,7 @@ impl RenderData {
             unnormalized_coordinates: true,
             ..Default::default()
         };
-        SampledImage::create(core.clone(), "minefield", &image_options, &sampler_options)
+        SampledImage::create(core.clone(), label, &image_options, &sampler_options)
     }
 
     fn create_blue_noise(core: Rc<Core>) -> SampledImage {
@@ -158,7 +183,9 @@ impl RenderData {
             core: core.clone(),
 
             world: Self::create_world(core.clone()),
-            minefield: Self::create_minefield(core.clone()),
+            minefield: Self::create_minefield(core.clone(), "minefield"),
+            world_lod1: Self::create_world_lod1(core.clone()),
+            minefield_lod1: Self::create_minefield(core.clone(), "minefield_lod1"),
 
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
             completed_buffer: Self::create_framebuffer(core.clone(), "completed_buf", rgba16_unorm),
@@ -186,7 +213,10 @@ impl RenderData {
         }
     }
 
-    fn make_world_upload_buffers(&mut self, world: &mut World) -> (Buffer<u16>, Buffer<u8>) {
+    fn make_world_upload_buffers(
+        &mut self,
+        world: &mut World,
+    ) -> (Buffer<u16>, Buffer<u8>, Buffer<u8>) {
         let mut blocks_buffer = Buffer::create(
             self.core.clone(),
             "blocks",
@@ -219,12 +249,29 @@ impl RenderData {
         drop(blocks_buffer_data);
         drop(minefield_buffer_data);
 
-        (blocks_buffer, minefield_buffer)
+        let mut minefield_lod1_buffer = Buffer::create(
+            self.core.clone(),
+            "minefield_lod1",
+            ROOT_BLOCK_VOLUME as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        );
+        let mut minefield_lod1_buffer_data = minefield_lod1_buffer.bind_all();
+        for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
+            let mip = world.borrow_lod1_mip(&chunk_coord);
+            mip.copy_minefield(
+                minefield_lod1_buffer_data.as_slice_mut(),
+                ROOT_BLOCK_WIDTH,
+                &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
+            );
+        }
+        drop(minefield_lod1_buffer_data);
+
+        (blocks_buffer, minefield_buffer, minefield_lod1_buffer)
     }
 
     pub fn initialize(&mut self, game: &mut Game) {
         let world = game.borrow_world_mut();
-        let (lod0_buf, minefield) = self.make_world_upload_buffers(world);
+        let (lod0_buf, minefield, minefield_lod1) = self.make_world_upload_buffers(world);
         let commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
         commands.transition_layout(
@@ -246,6 +293,17 @@ impl RenderData {
         commands.copy_buffer_to_image(&minefield, &self.minefield, &self.minefield);
         commands.transition_layout(
             &self.minefield,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::GENERAL,
+        );
+        commands.transition_layout(
+            &self.minefield_lod1,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        commands.copy_buffer_to_image(&minefield_lod1, &self.minefield_lod1, &self.minefield_lod1);
+        commands.transition_layout(
+            &self.minefield_lod1,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::GENERAL,
         );
