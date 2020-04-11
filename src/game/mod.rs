@@ -52,7 +52,7 @@ impl Game {
         } else {
             result.camera.origin.x = 0.0;
             result.camera.origin.y = 0.0;
-            result.camera.origin.z = 0.0;
+            result.camera.origin.z = 60.0;
         }
         result
     }

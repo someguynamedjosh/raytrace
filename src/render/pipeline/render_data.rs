@@ -281,19 +281,16 @@ impl RenderData {
         let mut blocks_buffer_data = blocks_buffer.bind_all();
         let mut minefield_buffer_data = minefield_buffer.bind_all();
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let chunk = world
-                .borrow_chunk(
-                    &util::coord_to_signed_coord(&util::offset_coord_3d(
-                        &chunk_coord,
-                        &(
-                            ROOT_CHUNK_WIDTH / 2,
-                            ROOT_CHUNK_WIDTH / 2,
-                            ROOT_CHUNK_WIDTH / 2,
-                        ),
-                    )),
-                    0,
-                )
-                .pack();
+            let world_coord = util::coord_to_signed_coord(&chunk_coord);
+            let world_coord = util::offset_signed_coord_3d(
+                &world_coord,
+                &(
+                    -(ROOT_CHUNK_WIDTH as isize / 2),
+                    -(ROOT_CHUNK_WIDTH as isize / 2),
+                    -(ROOT_CHUNK_WIDTH as isize / 2),
+                ),
+            );
+            let chunk = world.borrow_chunk(&world_coord, 0).pack();
             chunk.copy_materials(
                 blocks_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
@@ -323,13 +320,22 @@ impl RenderData {
         let mut blocks_lod1_buffer_data = blocks_lod1_buffer.bind_all();
         let mut minefield_lod1_buffer_data = minefield_lod1_buffer.bind_all();
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let mip = world.borrow_chunk(&util::coord_to_signed_coord(&chunk_coord), 1).pack();
-            mip.copy_minefield(
+            let world_coord = util::coord_to_signed_coord(&chunk_coord);
+            let world_coord = util::offset_signed_coord_3d(
+                &world_coord,
+                &(
+                    -(ROOT_CHUNK_WIDTH as isize / 2),
+                    -(ROOT_CHUNK_WIDTH as isize / 2),
+                    -(ROOT_CHUNK_WIDTH as isize / 2),
+                ),
+            );
+            let chunk = world.borrow_chunk(&world_coord, 1).pack();
+            chunk.copy_minefield(
                 minefield_lod1_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
             );
-            mip.copy_materials(
+            chunk.copy_materials(
                 blocks_lod1_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
