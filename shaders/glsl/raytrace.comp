@@ -4,7 +4,7 @@
 
 // If defined, a limiter will be applied to terminate any ray trace that takes too long. The pixel
 // the ray trace occured for will be highlighted in pink.
-// #define REPORT_ERROR
+#define REPORT_ERROR
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -72,10 +72,24 @@ vec2 noise_offset;
 bool error = false;
 #endif
 
+uint get_step(vec3 tex_pos, uint current_lod) {
+    if (current_lod == 0) {
+        return texture(minefield, tex_pos).r;
+    } else if (current_lod == 1) {
+        return texture(minefield_lod1, tex_pos).r;
+    }
+}
+
 HitResult trace_ray(vec3 origin, vec3 direction) {
     direction = normalize(direction);
     HitResult result;
     result.position = origin;
+
+    // Like a sideways manhattan distance. Basically whichever coordinate is the largest.
+    float origin_distance = 0.0;
+    origin_distance = max(origin_distance, abs(origin.x));
+    origin_distance = max(origin_distance, abs(origin.y));
+    origin_distance = max(origin_distance, abs(origin.z));
 
     // How much to travel along the ray to move 1 unit in a particular axis.
     vec3 length_per_axis = vec3(1) / vec3(abs(direction));
@@ -89,19 +103,25 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.y > 0 ? -1 : 1,
         direction.z > 0 ? -1 : 1
     );
-    uint current_lod = texture(minefield_lod1, result.position / 2).r;
-    uint lod_divisor = (1 << current_lod) / 2;
+    uint current_lod = 0;
+    if (origin_distance > ROOT_BLOCK_WIDTH / 2) {
+        current_lod = 1;
+    }
+    uint lod_divisor = (1 << current_lod);
+    vec3 pos_offset = vec3(ROOT_BLOCK_WIDTH / 2 * lod_divisor);
+    uint current_step = get_step((result.position + pos_offset) / lod_divisor, current_lod);
+    uint step_size = (1 << current_step) / 2;
 
     uint limit = 2048;
     vec3 length_to_next_voxel, lookup_offset;
     // For some reason, using a non-infinite loop boosts performance even though
     // the limit of the loop is never reached.
-    for (; current_lod > 1 && limit > 0; limit--) {
+    for (; limit > 0; limit--) {
         // Things that don't increase performance: 
         // - pre-multiplying result.position 
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
-        length_to_next_voxel = (vec3(0.0001) + mod(result.position * muls, vec3(lod_divisor))) * length_per_axis;
+        length_to_next_voxel = (vec3(0.0001) + mod((result.position + pos_offset) * muls, vec3(step_size))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.x;
@@ -119,29 +139,48 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
                 result.normal = normals.z;
             }
         }
-        current_lod = texture(minefield_lod1, result.position / 2).r;
-        lod_divisor = (1 << current_lod) / 2;
+        current_step = get_step((result.position + pos_offset) / lod_divisor, current_lod);
+        if (current_step <= current_lod) {
+            if (
+                abs(result.position.x) < ROOT_BLOCK_WIDTH / 2 * lod_divisor
+                && abs(result.position.y) < ROOT_BLOCK_WIDTH / 2 * lod_divisor
+                && abs(result.position.z) < ROOT_BLOCK_WIDTH / 2 * lod_divisor
+            ) {
+                // We encountered a block inside the minefield.
+                break;
+            } else {
+                // We encountered the edge of the LOD.
+                if (current_lod == 0) {
+                    current_lod = 1;
+                    lod_divisor *= 2;
+                    pos_offset *= 2;
+                } else if (current_lod == 1) {
+                    // We hit the sky.
+                    break;
+                }
+                // Get the current step, according to the new LOD.
+                current_step = get_step((result.position + pos_offset) / lod_divisor, current_lod);
+            }
+        }
+        step_size = (1 << current_step) / 2;
     }
 
-    result.value = textureLod(world, result.position / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
     result.distance = length(origin - result.position);
-
-    // TODO: Remove.
-    if (
-        result.position.x > 0
-        && result.position.y > 0
-        && result.position.z > 0
-        && result.position.x < ROOT_BLOCK_WIDTH * 2
-        && result.position.y < ROOT_BLOCK_WIDTH * 2
-        && result.position.z < ROOT_BLOCK_WIDTH * 2
-        // result.position.x > -ROOT_BLOCK_WIDTH 
-        // && result.position.y > -ROOT_BLOCK_WIDTH 
-        // && result.position.z > -ROOT_BLOCK_WIDTH 
-        // && result.position.x < ROOT_BLOCK_WIDTH 
-        // && result.position.y < ROOT_BLOCK_WIDTH 
-        // && result.position.z < ROOT_BLOCK_WIDTH
-    ) {
-        result.value = 2;
+    if (current_lod == 0) {
+        result.value = textureLod(world, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
+    } else if (current_lod == 1) {
+        if (
+            result.position.x > -int(ROOT_BLOCK_WIDTH)
+            && result.position.y > -int(ROOT_BLOCK_WIDTH)
+            && result.position.z > -int(ROOT_BLOCK_WIDTH)
+            && result.position.x < ROOT_BLOCK_WIDTH 
+            && result.position.y < ROOT_BLOCK_WIDTH 
+            && result.position.z < ROOT_BLOCK_WIDTH
+        ) {
+            result.value = 2;
+        } else {
+            result.value = 0;
+        }
     }
 
     float offset_amount = 0.001;

@@ -50,9 +50,9 @@ impl Game {
             result.camera.pitch.0 = args[5].parse().unwrap();
             result.sun_angle = args[6].parse().unwrap();
         } else {
-            result.camera.origin.x = 40.0;
-            result.camera.origin.y = 40.0;
-            result.camera.origin.z = 80.0;
+            result.camera.origin.x = 0.0;
+            result.camera.origin.y = 0.0;
+            result.camera.origin.z = 0.0;
         }
         result
     }
