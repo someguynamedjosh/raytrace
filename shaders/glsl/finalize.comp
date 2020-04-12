@@ -40,7 +40,7 @@ void main() {
     vec3 final_color = albedo_color * light_color + emission_color;
 
     vec3 fog_color = imageLoad(fog_color_buffer, pixel).rgb * LIGHTING_SCALE;
-    float fog_amount = imageLoad(depth_buffer, pixel).r / 256.0 / 128.0;
+    float fog_amount = imageLoad(depth_buffer, pixel).r / 256.0 / 128.0 / 100.0;
     if (fog_amount > 1.0) fog_amount = 1.0;
     final_color = final_color * (1 - fog_amount) + fog_color * fog_amount;
 

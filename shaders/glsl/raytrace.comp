@@ -33,6 +33,10 @@ layout(set = 0, binding = 10) uniform UniformData {
 
 layout(set = 0, binding = 11) uniform usampler3D world_lod1;
 layout(set = 0, binding = 12) uniform usampler3D minefield_lod1;
+layout(set = 0, binding = 13) uniform usampler3D world_lod2;
+layout(set = 0, binding = 14) uniform usampler3D minefield_lod2;
+layout(set = 0, binding = 15) uniform usampler3D world_lod3;
+layout(set = 0, binding = 16) uniform usampler3D minefield_lod3;
 
 const uint ROOT_BLOCK_WIDTH = 256;
 
@@ -80,6 +84,10 @@ uint get_step(vec3 tex_pos, uint current_lod) {
         return texture(minefield, tex_pos).r;
     } else if (current_lod == 1) {
         return texture(minefield_lod1, tex_pos).r;
+    } else if (current_lod == 2) {
+        return texture(minefield_lod2, tex_pos).r;
+    } else if (current_lod == 3) {
+        return texture(minefield_lod3, tex_pos).r;
     }
 }
 
@@ -107,7 +115,11 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.z > 0 ? -1 : 1
     );
     uint current_lod = 0;
-    if (origin_distance > ROOT_BLOCK_WIDTH / 2) {
+    if (origin_distance > ROOT_BLOCK_WIDTH * 2) {
+        current_lod = 3;
+    } else if (origin_distance > ROOT_BLOCK_WIDTH) {
+        current_lod = 2;
+    } else if (origin_distance > ROOT_BLOCK_WIDTH / 2) {
         current_lod = 1;
     }
     uint lod_divisor = (1 << current_lod);
@@ -153,11 +165,11 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
                 break;
             } else {
                 // We encountered the edge of the LOD.
-                if (current_lod == 0) {
-                    current_lod = 1;
+                if (current_lod < 3) {
+                    current_lod += 1;
                     lod_divisor *= 2;
                     pos_offset *= 2;
-                } else if (current_lod == 1) {
+                } else {
                     // We hit the sky.
                     break;
                 }
@@ -175,13 +187,17 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     if (current_lod == 0) {
         packed_material = textureLod(world, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH), 0.0).r;
     } else if (current_lod == 1) {
+        packed_material = textureLod(world_lod1, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 2), 0.0).r;
+    } else if (current_lod == 2) {
+        packed_material = textureLod(world_lod2, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 4), 0.0).r;
+    } else if (current_lod == 3) {
         if (
-            abs(result.position.x) < ROOT_BLOCK_WIDTH 
-            && abs(result.position.y) < ROOT_BLOCK_WIDTH 
-            && abs(result.position.z) < ROOT_BLOCK_WIDTH
+            abs(result.position.x) < ROOT_BLOCK_WIDTH * 4
+            && abs(result.position.y) < ROOT_BLOCK_WIDTH * 4
+            && abs(result.position.z) < ROOT_BLOCK_WIDTH* 4
         ) {
             result.air = false;
-            packed_material = textureLod(world_lod1, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 2), 0.0).r;
+            packed_material = textureLod(world_lod3, (result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 8), 0.0).r;
         } else {
             result.air = true;
         }

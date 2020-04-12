@@ -1,3 +1,4 @@
+use array_macro::array;
 use ash::vk;
 use std::rc::Rc;
 
@@ -14,13 +15,13 @@ use crate::world::{World, CHUNK_SIZE};
 
 use super::structs::RaytraceUniformData;
 
+pub const NUM_LODS: usize = 4;
+
 pub struct RenderData {
     pub core: Rc<Core>,
 
-    pub world: SampledImage,
-    pub minefield: SampledImage,
-    pub world_lod1: SampledImage,
-    pub minefield_lod1: SampledImage,
+    pub material_images: [SampledImage; NUM_LODS],
+    pub minefield_images: [SampledImage; NUM_LODS],
 
     pub lighting_buffer: StorageImage,
     pub completed_buffer: StorageImage,
@@ -55,7 +56,7 @@ impl RenderData {
         StorageImage::create(core, name, &options)
     }
 
-    fn create_world(core: Rc<Core>) -> SampledImage {
+    fn create_material_image(core: Rc<Core>, lod: usize) -> SampledImage {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
@@ -75,33 +76,15 @@ impl RenderData {
             unnormalized_coordinates: false,
             mipmap_mode: vk::SamplerMipmapMode::NEAREST,
         };
-        SampledImage::create(core.clone(), "world", &image_options, &sampler_options)
+        SampledImage::create(
+            core.clone(),
+            &format!("material_lod{}", lod),
+            &image_options,
+            &sampler_options,
+        )
     }
 
-    fn create_world_lod1(core: Rc<Core>) -> SampledImage {
-        let image_options = ImageOptions {
-            typ: vk::ImageType::TYPE_3D,
-            extent: vk::Extent3D {
-                width: ROOT_BLOCK_WIDTH as u32,
-                height: ROOT_BLOCK_WIDTH as u32,
-                depth: ROOT_BLOCK_WIDTH as u32,
-            },
-            format: vk::Format::R32_UINT,
-            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            ..Default::default()
-        };
-        let sampler_options = SamplerOptions {
-            min_filter: vk::Filter::NEAREST,
-            mag_filter: vk::Filter::NEAREST,
-            address_mode: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
-            unnormalized_coordinates: false,
-            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
-        };
-        SampledImage::create(core.clone(), "world_lod1", &image_options, &sampler_options)
-    }
-
-    fn create_minefield(core: Rc<Core>, label: &str) -> SampledImage {
+    fn create_minefield(core: Rc<Core>, lod: usize) -> SampledImage {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
@@ -121,7 +104,12 @@ impl RenderData {
             unnormalized_coordinates: true,
             ..Default::default()
         };
-        SampledImage::create(core.clone(), label, &image_options, &sampler_options)
+        SampledImage::create(
+            core.clone(),
+            &format!("minefield_lod{}", lod),
+            &image_options,
+            &sampler_options,
+        )
     }
 
     fn create_blue_noise(core: Rc<Core>) -> SampledImage {
@@ -180,13 +168,12 @@ impl RenderData {
         let rgba8_unorm = vk::Format::R8G8B8A8_UNORM;
         let r16_uint = vk::Format::R16_UINT;
         let r8_uint = vk::Format::R8_UINT;
+
         RenderData {
             core: core.clone(),
 
-            world: Self::create_world(core.clone()),
-            minefield: Self::create_minefield(core.clone(), "minefield"),
-            world_lod1: Self::create_world_lod1(core.clone()),
-            minefield_lod1: Self::create_minefield(core.clone(), "minefield_lod1"),
+            material_images: array![|lod| Self::create_material_image(core.clone(), lod); NUM_LODS],
+            minefield_images: array![|lod| Self::create_minefield(core.clone(), lod); NUM_LODS],
 
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
             completed_buffer: Self::create_framebuffer(core.clone(), "completed_buf", rgba16_unorm),
@@ -283,15 +270,14 @@ impl RenderData {
 
     pub fn initialize(&mut self, game: &mut Game) {
         let world = game.borrow_world_mut();
-        let (material_lod0, minefield_lod0) = self.make_world_upload_buffers(world, 0);
-        let (material_lod1, minefield_lod1) = self.make_world_upload_buffers(world, 1);
+        let upload_buffers = array![|lod| self.make_world_upload_buffers(world, lod); NUM_LODS];
 
         let mut commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
-        Self::upload_buf_commands(&mut commands, &material_lod0, &self.world);
-        Self::upload_buf_commands(&mut commands, &minefield_lod0, &self.minefield);
-        Self::upload_buf_commands(&mut commands, &material_lod1, &self.world_lod1);
-        Self::upload_buf_commands(&mut commands, &minefield_lod1, &self.minefield_lod1);
+        for (index, (material_buffer, minefield_buffer)) in upload_buffers.iter().enumerate() {
+            Self::upload_buf_commands(&mut commands, material_buffer, &self.material_images[index]);
+            Self::upload_buf_commands(&mut commands, minefield_buffer, &self.minefield_images[index]);
+        }
         let generic_layout_images = [
             &self.albedo_buffer,
             &self.completed_buffer,

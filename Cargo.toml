@@ -7,16 +7,16 @@ authors = ["Code_Cube <therealcodecube@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+array-macro = "1.0"
 ash = "0.29"
 cgmath = "0.17"
 colored = "1.9"
 image = "0.22"
-winit = "0.21"
-time = "0.2"
 noise = "0.6"
 num = "0.2"
 rand = "0.7"
-array-macro = "1.0"
+time = "0.2"
+winit = "0.21"
 
 # Additional dependencies for other platforms 
 # https://github.com/unknownue/vulkan-tutorial-rust/blob/master/Cargo.toml

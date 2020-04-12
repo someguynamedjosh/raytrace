@@ -54,6 +54,14 @@ impl World {
                 neighborhood.push(chunk);
             }
             let new_data = UnpackedChunkData::from_smaller_chunks(&neighborhood);
+            // For now, this is here to prevent the program from filling up all the RAM. In the 
+            // future, we will need a system which dynamically stores stuff to the disk when memory
+            // is getting too full.
+            for offset in util::coord_iter_3d(2) {
+                let offset = util::coord_to_signed_coord(&offset);
+                let coord = util::offset_signed_coord_3d(&next_lod_coord, &offset);
+                self.lods[lod - 1].remove(&coord);
+            }
             self.lods[lod].insert(chunk_coord.clone(), new_data);
         }
     }

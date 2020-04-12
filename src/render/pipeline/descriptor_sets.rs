@@ -66,8 +66,8 @@ fn generate_raytrace_ds_prototypes(
     render_data: &RenderData,
 ) -> Vec<Vec<DescriptorPrototype>> {
     vec![vec![
-        render_data.world.create_dp(vk::ImageLayout::GENERAL),
-        render_data.minefield.create_dp(vk::ImageLayout::GENERAL),
+        render_data.material_images[0].create_dp(vk::ImageLayout::GENERAL),
+        render_data.minefield_images[0].create_dp(vk::ImageLayout::GENERAL),
         //
         render_data.albedo_buffer.create_dp(vk::ImageLayout::GENERAL),
         render_data.emission_buffer.create_dp(vk::ImageLayout::GENERAL),
@@ -81,8 +81,12 @@ fn generate_raytrace_ds_prototypes(
         render_data.blue_noise.create_dp(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         render_data.raytrace_uniform_data_buffer.create_dp(),
         //
-        render_data.world_lod1.create_dp(vk::ImageLayout::GENERAL),
-        render_data.minefield_lod1.create_dp(vk::ImageLayout::GENERAL),
+        render_data.material_images[1].create_dp(vk::ImageLayout::GENERAL),
+        render_data.minefield_images[1].create_dp(vk::ImageLayout::GENERAL),
+        render_data.material_images[2].create_dp(vk::ImageLayout::GENERAL),
+        render_data.minefield_images[2].create_dp(vk::ImageLayout::GENERAL),
+        render_data.material_images[3].create_dp(vk::ImageLayout::GENERAL),
+        render_data.minefield_images[3].create_dp(vk::ImageLayout::GENERAL),
     ]]
 }
 
