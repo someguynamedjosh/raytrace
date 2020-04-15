@@ -167,7 +167,9 @@ impl UnpackedChunkData {
                 CHUNK_SIZE * CHUNK_SIZE + 1,
                 CHUNK_SIZE * CHUNK_SIZE + CHUNK_SIZE,
                 CHUNK_SIZE * CHUNK_SIZE + CHUNK_SIZE + 1,
-            ].iter() {
+            ]
+            .iter()
+            {
                 material.add(&materials[source_index + offset]);
             }
             material.multiply(1.0 / 8.0);
@@ -241,10 +243,6 @@ impl UnpackedChunkData {
 }
 
 impl UnpackedChunkData {
-    fn height(x: isize, y: isize, noise: &functions::MountainNoise2) -> isize {
-        (noise.get(x as f64 / 200.0, y as f64 / 200.0) * 400.0 + 10.0) as isize
-    }
-
     fn material(random: &mut ThreadRng, height: isize) -> usize {
         if height < 12 {
             2
@@ -269,26 +267,24 @@ impl UnpackedChunkData {
         }
     }
 
-    pub fn generate(chunk_coord: &util::SignedCoord3D) -> UnpackedChunkData {
+    pub fn generate(
+        chunk_coord: &util::SignedCoord3D,
+        heightmap: &super::Heightmap,
+    ) -> UnpackedChunkData {
         let origin = util::scale_signed_coord_3d(chunk_coord, CHUNK_SIZE as isize);
         let mut data = UnpackedChunkData::new(0);
 
-        let mountain_noise = functions::MountainNoise2::new();
         let mut random = rand::thread_rng();
 
-        for (cx, cy) in util::coord_iter_2d(CHUNK_SIZE) {
-            let height_val = Self::height(
-                cx as isize + origin.0,
-                cy as isize + origin.1,
-                &mountain_noise,
-            );
+        for coord2d in util::coord_iter_2d(CHUNK_SIZE) {
+            let height_val = heightmap.get(&coord2d);
             if height_val < origin.2 {
                 continue;
             }
             for z in origin.2..height_val.min(origin.2 + CHUNK_SIZE as isize) {
                 let material_val = Self::material(&mut random, z);
                 let cz = (z - origin.2) as usize;
-                data.set_block(&(cx, cy, cz), MATERIALS[material_val].clone());
+                data.set_block(&(coord2d.0, coord2d.1, cz), MATERIALS[material_val].clone());
             }
         }
 

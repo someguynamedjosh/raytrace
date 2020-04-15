@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::util;
 
-use super::UnpackedChunkData;
+use super::{Heightmap, UnpackedChunkData};
 
 /*
 0:512
@@ -19,13 +19,24 @@ use super::UnpackedChunkData;
 
 pub struct World {
     lods: Vec<HashMap<util::SignedCoord3D, UnpackedChunkData>>,
+    heightmaps: HashMap<util::SignedCoord2D, Heightmap>,
 }
 
 impl World {
     pub fn new() -> World {
-        // Just create the first LOD for now. Other LODs can be created on demand.
-        let lods = vec![HashMap::new()];
-        World { lods }
+        World {
+            // Just create the first LOD for now. Other LODs can be created on demand.
+            lods: vec![HashMap::new()],
+            heightmaps: HashMap::new(),
+        }
+    }
+
+    fn get_heightmap(&mut self, chunk_coord: &util::SignedCoord2D) -> &Heightmap {
+        if !self.heightmaps.contains_key(chunk_coord) {
+            self.heightmaps
+                .insert(chunk_coord.clone(), Heightmap::generate(chunk_coord));
+        }
+        self.heightmaps.get(chunk_coord).unwrap()
     }
 
     fn checked_generate_chunk(&mut self, chunk_coord: &util::SignedCoord3D, lod: usize) {
@@ -33,10 +44,9 @@ impl World {
             return;
         }
         if lod == 0 {
-            self.lods[0].insert(
-                chunk_coord.clone(),
-                UnpackedChunkData::generate(chunk_coord),
-            );
+            let heightmap_ref = self.get_heightmap(&(chunk_coord.0, chunk_coord.1));
+            let chunk = UnpackedChunkData::generate(chunk_coord, heightmap_ref);
+            self.lods[0].insert(chunk_coord.clone(), chunk);
         } else {
             // Coordinate of this "chunk" in the next LOD down.
             let next_lod_coord = util::scale_signed_coord_3d(chunk_coord, 2);
@@ -54,7 +64,7 @@ impl World {
                 neighborhood.push(chunk);
             }
             let new_data = UnpackedChunkData::from_smaller_chunks(&neighborhood);
-            // For now, this is here to prevent the program from filling up all the RAM. In the 
+            // For now, this is here to prevent the program from filling up all the RAM. In the
             // future, we will need a system which dynamically stores stuff to the disk when memory
             // is getting too full.
             for offset in util::coord_iter_3d(2) {
@@ -66,7 +76,11 @@ impl World {
         }
     }
 
-    pub fn borrow_chunk(&mut self, chunk_coord: &util::SignedCoord3D, lod: usize) -> &UnpackedChunkData {
+    pub fn borrow_chunk(
+        &mut self,
+        chunk_coord: &util::SignedCoord3D,
+        lod: usize,
+    ) -> &UnpackedChunkData {
         if self.lods.len() <= lod {
             for _ in self.lods.len()..(lod + 1) {
                 self.lods.push(HashMap::new());

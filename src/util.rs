@@ -21,17 +21,34 @@ pub fn compute_triple_euler_vector(heading: Rad<f32>, pitch: Rad<f32>) -> Triple
     TripleEulerVector { forward, up, right }
 }
 
+pub type Coord2D = (usize, usize);
+pub type SignedCoord2D = (isize, isize);
+
 /// X is least significant (changes the fastest).
-pub fn index_to_coord_2d(index: usize, stride: usize) -> (usize, usize) {
+pub fn index_to_coord_2d(index: usize, stride: usize) -> Coord2D {
     (index % stride, index / stride % stride)
 }
 
 /// X is least significant (changes the fastest).
-pub fn coord_to_index_2d(coord: &(usize, usize), stride: usize) -> usize {
+pub fn coord_to_index_2d(coord: &Coord2D, stride: usize) -> usize {
     coord.1 * stride + coord.0
 }
 
-pub fn scale_coord_2d(coord: &(usize, usize), scale: usize) -> (usize, usize) {
+pub fn scale_coord_2d(coord: &Coord2D, scale: usize) -> Coord2D {
+    (coord.0 * scale, coord.1 * scale)
+}
+
+/// X is least significant (changes the fastest).
+pub fn index_to_signed_coord_2d(index: isize, stride: isize) -> SignedCoord2D {
+    (index % stride, index / stride % stride)
+}
+
+/// X is least significant (changes the fastest).
+pub fn signed_coord_to_index_2d(coord: &SignedCoord2D, stride: isize) -> isize {
+    coord.1 * stride + coord.0
+}
+
+pub fn scale_signed_coord_2d(coord: &SignedCoord2D, scale: isize) -> SignedCoord2D {
     (coord.0 * scale, coord.1 * scale)
 }
 
