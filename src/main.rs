@@ -7,10 +7,24 @@ mod render;
 mod util;
 mod world;
 
+fn profile_chunk_gen() {
+    let instance_timer = Instant::now();
+    let mut world = world::World::new();
+    world.borrow_chunk(&(0, 0, 0), 3);
+    println!("Created in {}ms.", instance_timer.elapsed().as_millis());
+}
+
 fn main() {
+    // TODO: REMOVE
+    profile_chunk_gen();
+    return;
+
     let mut game = game::Game::new();
     let event_loop = EventLoop::new();
+    println!("Creating renderer (and world.)");
+    let instance_timer = Instant::now();
     let (_core, mut pipeline) = render::create_instance(&event_loop, &mut game);
+    println!("Created in {}s.", instance_timer.elapsed().as_secs_f32());
     let mut frame_timer = Instant::now();
     let mut performance_buffer = util::RingBufferAverage::new(16);
     event_loop.run(move |event, _, control_flow| match event {

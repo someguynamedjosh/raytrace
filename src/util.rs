@@ -35,10 +35,39 @@ pub fn scale_coord_2d(coord: &(usize, usize), scale: usize) -> (usize, usize) {
     (coord.0 * scale, coord.1 * scale)
 }
 
+pub struct CoordIter2D {
+    coord: (usize, usize),
+    size: usize,
+    first: bool,
+}
+
+impl Iterator for CoordIter2D {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.first {
+            self.first = false;
+            return Some(self.coord.clone());
+        }
+        self.coord.0 += 1;
+        if self.coord.0 == self.size {
+            self.coord.0 = 0;
+            self.coord.1 += 1;
+            if self.coord.1 == self.size {
+                return None;
+            }
+        }
+        Some(self.coord.clone())
+    }
+}
+
 /// X is least significant (changes the fastest).
-pub fn coord_iter_2d(size: usize) -> impl Iterator<Item = (usize, usize)> {
-    let coord_iter = 0..size;
-    coord_iter.flat_map(move |y| (0..size).map(move |x| (x, y)))
+pub fn coord_iter_2d(size: usize) -> CoordIter2D {
+    CoordIter2D {
+        coord: (0, 0),
+        size,
+        first: true,
+    }
 }
 
 pub type Coord3D = (usize, usize, usize);
@@ -86,11 +115,43 @@ pub fn shrink_signed_coord_3d(coord: &SignedCoord3D, divisor: isize) -> SignedCo
     (coord.0 / divisor, coord.1 / divisor, coord.2 / divisor)
 }
 
+pub struct CoordIter3D {
+    coord: (usize, usize, usize),
+    size: usize,
+    first: bool,
+}
+
+impl Iterator for CoordIter3D {
+    type Item = (usize, usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.first {
+            self.first = false;
+            return Some(self.coord.clone());
+        }
+        self.coord.0 += 1;
+        if self.coord.0 == self.size {
+            self.coord.0 = 0;
+            self.coord.1 += 1;
+            if self.coord.1 == self.size {
+                self.coord.1 = 0;
+                self.coord.2 += 1;
+                if self.coord.2 == self.size {
+                    return None;
+                }
+            }
+        }
+        Some(self.coord.clone())
+    }
+}
+
 /// X is least significant (changes the fastest).
-pub fn coord_iter_3d(size: usize) -> impl Iterator<Item = Coord3D> {
-    let coord_iter = 0..size;
-    let coord_iter = coord_iter.flat_map(move |z| (0..size).map(move |y| (y, z)));
-    coord_iter.flat_map(move |yz| (0..size).map(move |x| (x, yz.0, yz.1)))
+pub fn coord_iter_3d(size: usize) -> CoordIter3D {
+    CoordIter3D {
+        coord: (0, 0, 0),
+        size,
+        first: true,
+    }
 }
 
 pub struct RingBufferAverage<ElementType> {

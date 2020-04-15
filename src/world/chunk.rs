@@ -6,8 +6,8 @@ use crate::util;
 use super::functions;
 
 // The index of the LOD that takes up an entire chunk.
-pub const MAX_LOD: usize = 6;
-pub const CHUNK_SIZE: usize = 1 << MAX_LOD; // 64
+pub const MAX_LOD: usize = 7;
+pub const CHUNK_SIZE: usize = 1 << MAX_LOD; // 128
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
 pub enum PackedChunk {
@@ -154,11 +154,21 @@ impl UnpackedChunkData {
     ) {
         for coord in util::coord_iter_3d(CHUNK_SIZE / 2) {
             let source_coord = util::scale_coord_3d(&coord, 2);
+            let source_index = util::coord_to_index_3d(&source_coord, CHUNK_SIZE);
             let target_coord = util::offset_coord_3d(&coord, offset);
             let mut material = Material::black();
-            for offset in util::coord_iter_3d(2) {
-                let source_coord = util::offset_coord_3d(&source_coord, &offset);
-                material.add(&materials[util::coord_to_index_3d(&source_coord, CHUNK_SIZE)]);
+            // Gives every index in a 2x2x2 neighborhood when added to the original index.
+            for offset in [
+                0,
+                1,
+                CHUNK_SIZE,
+                CHUNK_SIZE + 1,
+                CHUNK_SIZE * CHUNK_SIZE,
+                CHUNK_SIZE * CHUNK_SIZE + 1,
+                CHUNK_SIZE * CHUNK_SIZE + CHUNK_SIZE,
+                CHUNK_SIZE * CHUNK_SIZE + CHUNK_SIZE + 1,
+            ].iter() {
+                material.add(&materials[source_index + offset]);
             }
             material.multiply(1.0 / 8.0);
             self.materials[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] = material;
@@ -171,7 +181,7 @@ impl UnpackedChunkData {
 
     pub fn pack(&self) -> PackedChunk {
         let mut packed_data = PackedChunkData::new();
-        let mut lods = Vec::new();
+        let mut lods = Vec::with_capacity(MAX_LOD);
         let mut lod_volume = CHUNK_VOLUME / 8;
         while lod_volume > 0 {
             lods.push(vec![false; lod_volume]);
@@ -205,8 +215,8 @@ impl UnpackedChunkData {
         }
 
         // Pack the LODs into the minefield.
-        for coord in util::coord_iter_3d(CHUNK_SIZE) {
-            let index = util::coord_to_index_3d(&coord, CHUNK_SIZE);
+        for index in 0..CHUNK_VOLUME {
+            let coord = util::index_to_coord_3d(index, CHUNK_SIZE);
             if self.materials[index].power > 0.4 {
                 packed_data.minefield[index] = self.scale;
                 continue;
@@ -231,45 +241,52 @@ impl UnpackedChunkData {
 }
 
 impl UnpackedChunkData {
+    fn height(x: isize, y: isize, noise: &functions::MountainNoise2) -> isize {
+        (noise.get(x as f64 / 200.0, y as f64 / 200.0) * 400.0 + 10.0) as isize
+    }
+
+    fn material(random: &mut ThreadRng, height: isize) -> usize {
+        if height < 12 {
+            2
+        } else if height < 30 {
+            let threshold = (height - 12) as u32;
+            if random.next_u32() % (30 - 12) < threshold {
+                5
+            } else {
+                2
+            }
+        } else if height < 35 {
+            5
+        } else if height < 60 {
+            let threshold = (height - 35) as u32;
+            if random.next_u32() % (60 - 35) < threshold {
+                6
+            } else {
+                5
+            }
+        } else {
+            6
+        }
+    }
+
     pub fn generate(chunk_coord: &util::SignedCoord3D) -> UnpackedChunkData {
         let origin = util::scale_signed_coord_3d(chunk_coord, CHUNK_SIZE as isize);
         let mut data = UnpackedChunkData::new(0);
 
-        let mountain_noise = functions::MountainNoise::new();
+        let mountain_noise = functions::MountainNoise2::new();
         let mut random = rand::thread_rng();
-        let height =
-            |x, y| (mountain_noise.get(x as f64 / 200.0, y as f64 / 200.0) * 80.0 + 10.0) as isize;
-        let material = |random: &mut ThreadRng, height: isize| {
-            if height < 12 {
-                2
-            } else if height < 30 {
-                let threshold = (height - 12) as u32;
-                if random.next_u32() % (30 - 12) < threshold {
-                    5
-                } else {
-                    2
-                }
-            } else if height < 35 {
-                5
-            } else if height < 60 {
-                let threshold = (height - 35) as u32;
-                if random.next_u32() % (60 - 35) < threshold {
-                    6
-                } else {
-                    5
-                }
-            } else {
-                6
-            }
-        };
 
         for (cx, cy) in util::coord_iter_2d(CHUNK_SIZE) {
-            let height_val = height(cx as isize + origin.0, cy as isize + origin.1);
+            let height_val = Self::height(
+                cx as isize + origin.0,
+                cy as isize + origin.1,
+                &mountain_noise,
+            );
             if height_val < origin.2 {
                 continue;
             }
             for z in origin.2..height_val.min(origin.2 + CHUNK_SIZE as isize) {
-                let material_val = material(&mut random, z);
+                let material_val = Self::material(&mut random, z);
                 let cz = (z - origin.2) as usize;
                 data.set_block(&(cx, cy, cz), MATERIALS[material_val].clone());
             }

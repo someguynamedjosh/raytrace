@@ -19,6 +19,10 @@ fn map_to_range(value: f64, min: f64, max: f64) -> f64 {
     clip(value * (max - min) + min)
 }
 
+fn magnitude(dx: f64, dy: f64) -> f64 {
+    return (dx * dx + dy * dy).sqrt();
+}
+
 impl MountainNoise {
     pub fn new() -> MountainNoise {
         let worley = Worley::new();
@@ -59,5 +63,31 @@ impl MountainNoise {
         base *= rustle;
 
         base
+    }
+}
+
+pub struct MountainNoise2 {
+    simplex: OpenSimplex,
+}
+
+impl MountainNoise2 {
+    pub fn new() -> MountainNoise2 {
+        MountainNoise2 {
+            simplex: OpenSimplex::new(),
+        }
+    }
+
+    pub fn get(&self, x: f64, y: f64) -> f64 {
+        let d = 0.2;
+        let left = self.simplex.get([x - d, y]);
+        let right = self.simplex.get([x + d, y]);
+        let up = self.simplex.get([x, y - d]);
+        let down = self.simplex.get([x, y + d]);
+        let [dx, dy] = [(right - left) / (d * 2.0), (down - up) / (d * 2.0)];
+        let slope = magnitude(dx, dy);
+
+        let base = self.simplex.get([x, y]);
+        let eroded = base - slope * 0.5 + 0.5;
+        (eroded / 1.5).powf(3.0)
     }
 }
