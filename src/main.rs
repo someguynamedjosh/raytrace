@@ -7,18 +7,7 @@ mod render;
 mod util;
 mod world;
 
-fn profile_chunk_gen() {
-    let instance_timer = Instant::now();
-    let mut world = world::World::new();
-    let chunk = world.borrow_chunk(&(0, 0, 0), 3);
-    println!("Created in {}ms.", instance_timer.elapsed().as_millis());
-}
-
 fn main() {
-    // TODO: REMOVE
-    profile_chunk_gen();
-    return;
-
     let mut game = game::Game::new();
     let event_loop = EventLoop::new();
     println!("Creating renderer (and world.)");

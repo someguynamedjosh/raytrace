@@ -316,15 +316,19 @@ impl UnpackedChunkData {
 
         let mut random = rand::thread_rng();
 
-        for coord2d in util::coord_iter_2d(CHUNK_SIZE) {
-            let height_val = heightmap.get(&coord2d);
-            if height_val < origin.2 {
-                continue;
-            }
-            for z in origin.2..height_val.min(origin.2 + CHUNK_SIZE as isize) {
-                let material_val = Self::material(&mut random, z);
-                let cz = (z - origin.2) as usize;
-                data.set_block(&(coord2d.0, coord2d.1, cz), MATERIALS[material_val].clone());
+        if origin.2 + (CHUNK_SIZE as isize) < 12 {
+            data.fill(&MATERIALS[2]);
+        } else {
+            for coord2d in util::coord_iter_2d(CHUNK_SIZE) {
+                let height_val = heightmap.get(&coord2d);
+                if height_val < origin.2 {
+                    continue;
+                }
+                for z in origin.2..height_val.min(origin.2 + CHUNK_SIZE as isize) {
+                    let material_val = Self::material(&mut random, z);
+                    let cz = (z - origin.2) as usize;
+                    data.set_block(&(coord2d.0, coord2d.1, cz), MATERIALS[material_val].clone());
+                }
             }
         }
     }

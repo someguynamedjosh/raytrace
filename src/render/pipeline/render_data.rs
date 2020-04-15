@@ -222,6 +222,8 @@ impl RenderData {
         const ROOT_CHUNK_WIDTH: usize = ROOT_BLOCK_WIDTH / CHUNK_SIZE;
         let mut material_buffer_data = material_buffer.bind_all();
         let mut minefield_buffer_data = minefield_buffer.bind_all();
+        let mut gen_time = 0;
+        let mut copy_time = 0;
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
             let world_coord = util::coord_to_signed_coord(&chunk_coord);
             let world_coord = util::offset_signed_coord_3d(
@@ -232,7 +234,10 @@ impl RenderData {
                     -(ROOT_CHUNK_WIDTH as isize / 2),
                 ),
             );
+            let timer = std::time::Instant::now();
             let chunk = world.borrow_chunk(&world_coord, lod).pack();
+            gen_time += timer.elapsed().as_millis();
+            let timer = std::time::Instant::now();
             chunk.copy_materials(
                 material_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
@@ -243,7 +248,9 @@ impl RenderData {
                 ROOT_BLOCK_WIDTH,
                 &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
             );
+            copy_time += timer.elapsed().as_millis();
         }
+        println!("Gen time: {}ms, copy time: {}ms", gen_time, copy_time);
         drop(material_buffer_data);
         drop(minefield_buffer_data);
 
@@ -276,7 +283,11 @@ impl RenderData {
         commands.begin_one_time_submit();
         for (index, (material_buffer, minefield_buffer)) in upload_buffers.iter().enumerate() {
             Self::upload_buf_commands(&mut commands, material_buffer, &self.material_images[index]);
-            Self::upload_buf_commands(&mut commands, minefield_buffer, &self.minefield_images[index]);
+            Self::upload_buf_commands(
+                &mut commands,
+                minefield_buffer,
+                &self.minefield_images[index],
+            );
         }
         let generic_layout_images = [
             &self.albedo_buffer,
