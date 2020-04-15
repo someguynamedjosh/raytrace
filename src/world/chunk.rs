@@ -127,6 +127,12 @@ impl UnpackedChunkData {
     /// Neighborhood must be ordered so that X changes the fastest and Z changes the slowest, like
     /// in util::coord_iter_3d().
     pub fn from_smaller_chunks(neighborhood: &[&UnpackedChunkData]) -> UnpackedChunkData {
+        let mut new_data = Self::new(neighborhood[0].scale + 1);
+        new_data.replace_with_mip_of(neighborhood);
+        new_data
+    }
+
+    pub fn replace_with_mip_of(&mut self, neighborhood: &[&UnpackedChunkData]) {
         debug_assert!(
             neighborhood.len() == 8,
             "Neighborhood must contain 8 chunks."
@@ -135,16 +141,20 @@ impl UnpackedChunkData {
         for chunk in neighborhood {
             debug_assert!(
                 chunk.scale == smaller_scale,
-                "Scales of all component chunks must be equal."
+                "Scales of all component chunks must be equal, {} != {}.",
+                chunk.scale,
+                smaller_scale
             );
         }
-
-        let mut new_data = Self::new(neighborhood[0].scale + 1);
+        self.scale = neighborhood[0].scale + 1;
         for (chunk, offset) in neighborhood.iter().zip(util::coord_iter_3d(2)) {
             let offset = util::scale_coord_3d(&offset, CHUNK_SIZE / 2);
-            new_data.incorporate_materials_from_smaller_chunk(&chunk.materials, &offset);
+            self.incorporate_materials_from_smaller_chunk(&chunk.materials, &offset);
         }
-        new_data
+    }
+
+    pub fn get_scale(&self) -> u8 {
+        self.scale
     }
 
     fn incorporate_materials_from_smaller_chunk(
@@ -179,6 +189,12 @@ impl UnpackedChunkData {
 
     fn set_block(&mut self, coord: &util::Coord3D, value: Material) {
         self.materials[util::coord_to_index_3d(coord, CHUNK_SIZE)] = value;
+    }
+
+    fn fill(&mut self, value: &Material) {
+        for index in 0..CHUNK_VOLUME {
+            self.materials[index] = value.clone();
+        }
     }
 
     pub fn pack(&self) -> PackedChunk {
@@ -267,12 +283,36 @@ impl UnpackedChunkData {
         }
     }
 
+    pub fn empty() -> UnpackedChunkData {
+        UnpackedChunkData::new(0)
+    }
+
     pub fn generate(
         chunk_coord: &util::SignedCoord3D,
         heightmap: &super::Heightmap,
     ) -> UnpackedChunkData {
-        let origin = util::scale_signed_coord_3d(chunk_coord, CHUNK_SIZE as isize);
         let mut data = UnpackedChunkData::new(0);
+        Self::generate_impl(&mut data, chunk_coord, heightmap);
+        data
+    }
+
+    pub fn generate_over(
+        data: &mut UnpackedChunkData,
+        chunk_coord: &util::SignedCoord3D,
+        heightmap: &super::Heightmap,
+    ) {
+        data.fill(&Material::black());
+        Self::generate_impl(data, chunk_coord, heightmap);
+    }
+
+    fn generate_impl(
+        data: &mut UnpackedChunkData,
+        chunk_coord: &util::SignedCoord3D,
+        heightmap: &super::Heightmap,
+    ) {
+        data.scale = 0;
+
+        let origin = util::scale_signed_coord_3d(chunk_coord, CHUNK_SIZE as isize);
 
         let mut random = rand::thread_rng();
 
@@ -287,7 +327,5 @@ impl UnpackedChunkData {
                 data.set_block(&(coord2d.0, coord2d.1, cz), MATERIALS[material_val].clone());
             }
         }
-
-        data
     }
 }

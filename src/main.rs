@@ -10,7 +10,7 @@ mod world;
 fn profile_chunk_gen() {
     let instance_timer = Instant::now();
     let mut world = world::World::new();
-    world.borrow_chunk(&(0, 0, 0), 3);
+    let chunk = world.borrow_chunk(&(0, 0, 0), 3);
     println!("Created in {}ms.", instance_timer.elapsed().as_millis());
 }
 
