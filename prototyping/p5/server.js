@@ -40,6 +40,11 @@ app.get('/:sketchName', async (req, res) => {
                     <script>${refreshWatcher(req.params.sketchName)}</script>
                     <script src="https://cdn.jsdelivr.net/npm/p5@1.0.0/lib/p5.js"></script>
                     <script>${script}</script>
+                    <style>
+                        html {
+                            background: black;
+                        }
+                    </style>
                 </head>
                 <body>
                 </body>
