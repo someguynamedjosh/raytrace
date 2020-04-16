@@ -1,6 +1,6 @@
 vec3 get_material_albedo(uint material) {
 	switch(material) {
-		case 0: return vec3(1, 0, 1);
+		case 0: return vec3(0, 0, 0);
 		case 1: return vec3(1, 0, 1);
 		case 2: return vec3(0.30980393, 0.8666667, 0.47843137);
 		case 3: return vec3(0.4, 0.3019608, 0.2);

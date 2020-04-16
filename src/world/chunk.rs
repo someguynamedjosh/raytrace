@@ -127,7 +127,7 @@ impl UnpackedChunkData {
     /// minefield in the pack function.
     fn new(scale: u8) -> UnpackedChunkData {
         UnpackedChunkData {
-            materials: vec![Material::black(); CHUNK_VOLUME],
+            materials: vec![Material::air(); CHUNK_VOLUME],
             scale,
         }
     }
@@ -175,6 +175,7 @@ impl UnpackedChunkData {
             let source_index = util::coord_to_index_3d(&source_coord, CHUNK_SIZE);
             let target_coord = util::offset_coord_3d(&coord, offset);
             let mut material = Material::black();
+            let mut power = 0;
             // Gives every index in a 2x2x2 neighborhood when added to the original index.
             for offset in [
                 0,
@@ -188,10 +189,18 @@ impl UnpackedChunkData {
             ]
             .iter()
             {
-                material.add(&materials[source_index + offset]);
+                let source = &materials[source_index + offset];
+                if source.solid {
+                    material.add(source);
+                    power += 1;
+                }
             }
-            material.multiply(1.0 / 8.0);
-            self.materials[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] = material;
+            if power > 3 {
+                material.divide(power);
+                self.materials[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] = material;
+            } else {
+                self.materials[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] = MATERIALS[0].clone();
+            }
         }
     }
 
@@ -217,7 +226,7 @@ impl UnpackedChunkData {
         for index in 0..CHUNK_VOLUME {
             // If there is a non-empty material at the index, mark the whole chunk as non-empty and
             // modify the LODs accordingly.
-            if self.materials[index].power > 0.4 {
+            if self.materials[index].solid {
                 let coord = util::index_to_coord_3d(index, CHUNK_SIZE);
                 let mut lod_coord = util::shrink_coord_3d(&coord, 2);
                 let mut lod_stride = CHUNK_SIZE / 2;
@@ -243,7 +252,7 @@ impl UnpackedChunkData {
         // Pack the LODs into the minefield.
         for index in 0..CHUNK_VOLUME {
             let coord = util::index_to_coord_3d(index, CHUNK_SIZE);
-            if self.materials[index].power > 0.4 {
+            if self.materials[index].solid {
                 packed_data.minefield[index] = self.scale;
                 continue;
             }
@@ -309,7 +318,7 @@ impl UnpackedChunkData {
         chunk_coord: &util::SignedCoord3D,
         heightmap: &super::Heightmap,
     ) {
-        data.fill(&Material::black());
+        data.fill(&Material::air());
         Self::generate_impl(data, chunk_coord, heightmap);
     }
 

@@ -118,17 +118,25 @@ fn gen_material_code() {
         r#"
 #[derive(Clone)]
 pub struct Material {{
-    pub albedo: (f32, f32, f32),
-    pub emission: (f32, f32, f32),
-    pub power: f32,
+    pub albedo: (u16, u16, u16),
+    pub emission: (u16, u16, u16),
+    pub solid: bool,
 }}
 
 impl Material {{
+    pub fn air() -> Self {{
+        Self {{
+            albedo: (0, 0, 0),
+            emission: (0, 0, 0),
+            solid: false,
+        }}
+    }}
+
     pub fn black() -> Self {{
         Self {{
-            albedo: (0.0, 0.0, 0.0),
-            emission: (0.0, 0.0, 0.0),
-            power: 0.0,
+            albedo: (0, 0, 0),
+            emission: (0, 0, 0),
+            solid: true,
         }}
     }}
 
@@ -139,23 +147,21 @@ impl Material {{
 		self.emission.0 += other.emission.0;
 		self.emission.1 += other.emission.1;
         self.emission.2 += other.emission.2;
-        self.power += other.power;
 	}}
 
-	pub fn multiply(&mut self, factor: f32) {{
-		self.albedo.0 *= factor;
-		self.albedo.1 *= factor;
-		self.albedo.2 *= factor;
-		self.emission.0 *= factor;
-		self.emission.1 *= factor;
-        self.emission.2 *= factor;
-        self.power *= factor;
+	pub fn divide(&mut self, factor: u16) {{
+		self.albedo.0 /= factor;
+		self.albedo.1 /= factor;
+		self.albedo.2 /= factor;
+		self.emission.0 /= factor;
+		self.emission.1 /= factor;
+        self.emission.2 /= factor;
     }}
 
     pub fn pack(&self) -> u32 {{
-        let ar = (self.albedo.0 / self.power * 0x7F as f32) as u32;
-        let ag = (self.albedo.1 / self.power * 0x7F as f32) as u32;
-        let ab = (self.albedo.2 / self.power * 0x7F as f32) as u32;
+        let ar = (self.albedo.0) as u32;
+        let ag = (self.albedo.1) as u32;
+        let ab = (self.albedo.2) as u32;
         let albedo = ar << 14 | ag << 7 | ab;
         albedo
     }}
@@ -177,16 +183,16 @@ impl Material {{
                 "\tMaterial {{\n",
                 "\t\talbedo:   ({:.9}, {:.9}, {:.9}),\n",
                 "\t\temission: ({:.9}, {:.9}, {:.9}),\n",
-                "\t\tpower: {:.1},\n",
+                "\t\tsolid: {},\n",
                 "\t}},",
             ),
-            material.albedo.0 as f32 / 255.0,
-            material.albedo.1 as f32 / 255.0,
-            material.albedo.2 as f32 / 255.0,
-            material.emission.0 as f32 / 255.0,
-            material.emission.1 as f32 / 255.0,
-            material.emission.2 as f32 / 255.0,
-            if index == 0 { 0.0 } else { 1.0 }
+            material.albedo.0 / 2,
+            material.albedo.1 / 2,
+            material.albedo.2 / 2,
+            material.emission.0 / 2,
+            material.emission.1 / 2,
+            material.emission.2 / 2,
+            index != 0,
         )
         .unwrap();
     }
