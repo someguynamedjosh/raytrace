@@ -123,13 +123,5 @@ impl World {
         let index = self.temp_generate_chunk(chunk_coord, lod);
         self.temp_chunks_in_use -= 1;
         &self.temp_chunks[index]
-        // if self.lods.len() <= lod {
-        //     for _ in self.lods.len()..(lod + 1) {
-        //         self.lods.push(HashMap::new());
-        //     }
-        // }
-        // // Ensure the chunk exists. (This function returns early if the chunk already exists.)
-        // self.checked_generate_chunk(chunk_coord, lod);
-        // self.lods[lod].get(chunk_coord).unwrap()
     }
 }

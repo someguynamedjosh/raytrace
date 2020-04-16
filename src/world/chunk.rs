@@ -71,6 +71,14 @@ impl PackedChunkData {
         }
     }
 
+    pub fn borrow_minefield(&self) -> &[u8] {
+        &self.minefield[..]
+    }
+
+    pub fn borrow_materials(&self) -> &[u32] {
+        &self.materials[..]
+    }
+
     pub fn copy_materials(
         &self,
         target: &mut [u32],
