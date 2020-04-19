@@ -116,7 +116,7 @@ fn gen_material_code() {
     writeln!(
         rust_materials,
         r#"
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Material {{
     pub albedo: (u16, u16, u16),
     pub emission: (u16, u16, u16),
@@ -163,7 +163,23 @@ impl Material {{
         let ag = (self.albedo.1) as u32;
         let ab = (self.albedo.2) as u32;
         let albedo = ar << 14 | ag << 7 | ab;
-        albedo
+        let solid = if self.solid {{ 1 }} else {{ 0 }};
+        (solid << 15) | albedo
+    }}
+
+    pub fn unpack(packed: u32) -> Self {{
+        let albedo = (
+            (packed >> 14 & 0x7F) as u16,
+            (packed >> 7 & 0x7F) as u16,
+            (packed >> 0 & 0x7F) as u16,
+        );
+        let emission = (0, 0, 0);
+        let solid = packed >> 15 & 0b1 != 0;
+        Self {{
+            albedo,
+            emission,
+            solid,
+        }}
     }}
 }}
 

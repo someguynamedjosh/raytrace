@@ -58,9 +58,10 @@ impl PackedChunk {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub struct PackedChunkData {
-    minefield: Vec<u8>,
-    materials: Vec<u32>,
+    pub minefield: Vec<u8>,
+    pub materials: Vec<u32>,
 }
 
 impl PackedChunkData {
@@ -116,9 +117,10 @@ impl PackedChunkData {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub struct UnpackedChunkData {
-    materials: Vec<Material>,
-    scale: u8,
+    pub materials: Vec<Material>,
+    pub scale: u8,
 }
 
 impl UnpackedChunkData {
@@ -214,8 +216,13 @@ impl UnpackedChunkData {
         }
     }
 
-    pub fn pack(&self) -> PackedChunk {
-        let mut packed_data = PackedChunkData::new();
+    pub fn pack(&self) -> PackedChunkData {
+        let mut data = PackedChunkData::new();
+        self.pack_over(&mut data);
+        data
+    }
+
+    pub fn pack_over(&self, packed_data: &mut PackedChunkData) {
         let mut lods = Vec::with_capacity(MAX_LOD);
         let mut lod_volume = CHUNK_VOLUME / 8;
         while lod_volume > 0 {
@@ -244,9 +251,13 @@ impl UnpackedChunkData {
             packed_data.materials[index] = self.materials[index].pack();
         }
 
-        // If the whole chunk is empty, return as such.
+        // If the whole chunk is empty, just fill the data.
         if !lods[MAX_LOD - 1][0] {
-            return PackedChunk::Empty { scale: self.scale };
+            for index in 0..CHUNK_VOLUME {
+                packed_data.materials[index] = Material::air().pack();
+                packed_data.minefield[index] = self.scale + MAX_LOD as u8;
+            }
+            return;
         }
 
         // Pack the LODs into the minefield.
@@ -270,8 +281,6 @@ impl UnpackedChunkData {
                 current_lod += 1;
             }
         }
-
-        PackedChunk::NonEmpty(packed_data)
     }
 }
 
