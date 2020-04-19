@@ -103,6 +103,17 @@ impl PackedChunkData {
             target[target_index] = self.minefield[source_index];
         }
     }
+
+    pub fn unpack_into(
+        &self,
+        unpacked_data: &mut UnpackedChunkData,
+        scale: u8,
+    ) {
+        for index in 0..CHUNK_VOLUME {
+            unpacked_data.materials[index] = Material::unpack(self.materials[index]);
+        }
+        unpacked_data.scale = scale;
+    }
 }
 
 #[derive(Clone, PartialEq)]

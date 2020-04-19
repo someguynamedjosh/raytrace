@@ -14,7 +14,6 @@ fn main() {
     let instance_timer = Instant::now();
     let (_core, mut pipeline) = render::create_instance(&event_loop, &mut game);
     println!("Created in {}s.", instance_timer.elapsed().as_secs_f32());
-    return;
     let mut frame_timer = Instant::now();
     let mut performance_buffer = util::RingBufferAverage::new(16);
     event_loop.run(move |event, _, control_flow| match event {
