@@ -8,8 +8,10 @@ lazy_static! {
     static ref MOUNTAIN_NOISE: functions::MountainNoise2 = functions::MountainNoise2::new();
 }
 
+const SCALE: f64 = 1600.0;
+
 fn height(x: isize, y: isize) -> isize {
-    (MOUNTAIN_NOISE.get(x as f64 / 200.0, y as f64 / 200.0) * 400.0 + 10.0) as isize
+    (MOUNTAIN_NOISE.get(x as f64 / SCALE, y as f64 / SCALE) * SCALE * 0.2 + 10.0) as isize
 }
 
 pub fn generate_heightmap(data: &mut Heightmap, chunk_coord: &util::SignedCoord2D) {
@@ -23,20 +25,18 @@ pub fn generate_heightmap(data: &mut Heightmap, chunk_coord: &util::SignedCoord2
 }
 
 fn material(random: &mut ThreadRng, height: isize) -> usize {
-    if height < 12 {
+    if height < 20 {
         2
-    } else if height < 30 {
-        let threshold = (height - 12) as u32;
-        if random.next_u32() % (30 - 12) < threshold {
+    } else if height < 80 {
+        let threshold = (height - 20) as u32;
+        if random.next_u32() % (80 - 20) < threshold {
             5
         } else {
             2
         }
-    } else if height < 35 {
-        5
-    } else if height < 60 {
-        let threshold = (height - 35) as u32;
-        if random.next_u32() % (60 - 35) < threshold {
+    } else if height < 160 {
+        let threshold = (height - 80) as u32;
+        if random.next_u32() % (160 - 80) < threshold {
             6
         } else {
             5
@@ -63,12 +63,19 @@ pub fn generate_chunk(
         for coord2d in util::coord_iter_2d(CHUNK_SIZE) {
             let height_val = heightmap.get(&coord2d);
             if height_val < origin.2 {
+                for cz in 0..CHUNK_SIZE {
+                    data.set_block(&(coord2d.0, coord2d.1, cz), Material::air());
+                }
                 continue;
             }
             for z in origin.2..height_val.min(origin.2 + CHUNK_SIZE as isize) {
                 let material_val = material(&mut random, z);
                 let cz = (z - origin.2) as usize;
                 data.set_block(&(coord2d.0, coord2d.1, cz), MATERIALS[material_val].clone());
+            }
+            for z in height_val..(origin.2 + CHUNK_SIZE as isize) {
+                let cz = (z - origin.2) as usize;
+                data.set_block(&(coord2d.0, coord2d.1, cz), Material::air());
             }
         }
     }

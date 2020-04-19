@@ -1,5 +1,5 @@
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Material {
     pub albedo: (u16, u16, u16),
     pub emission: (u16, u16, u16),

@@ -1,11 +1,9 @@
+extern crate raytrace;
+
+use raytrace::*;
 use std::time::Instant;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-
-mod game;
-mod render;
-mod util;
-mod world;
 
 fn main() {
     let mut game = game::Game::new();

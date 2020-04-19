@@ -6,3 +6,4 @@ prototyping/**/out
 shaders/spirv
 graph.svg
 perf.*
+**/bin/scratch.rs
