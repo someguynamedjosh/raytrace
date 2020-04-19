@@ -1,7 +1,6 @@
-use super::{Heightmap, PackedChunk, PackedChunkData, UnpackedChunkData, CHUNK_VOLUME};
+use super::{Heightmap, PackedChunkData, UnpackedChunkData, CHUNK_VOLUME};
 use crate::render::Material;
 use crate::util;
-use byteorder::{LittleEndian, WriteBytesExt};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -44,10 +43,10 @@ impl ChunkStorage {
 
     fn write_packed_chunk_data(file: &mut File, data: &PackedChunkData) -> io::Result<()> {
         file.seek(SeekFrom::Start(HEADER_SIZE))?;
-        for piece in data.borrow_materials() {
+        for piece in &data.materials {
             file.write(&piece.to_le_bytes())?;
         }
-        file.write_all(data.borrow_minefield())?;
+        file.write_all(&data.minefield)?;
         Ok(())
     }
 
@@ -108,11 +107,16 @@ impl ChunkStorage {
         coord: &ChunkStorageCoord,
     ) -> (PackedChunkData, UnpackedChunkData) {
         if coord.3 == 0 {
-            let unpacked_data = UnpackedChunkData::generate(
+            let mut heightmap = Heightmap::new();
+            super::generate_heightmap(&mut heightmap, &(coord.0, coord.1));
+            let mut unpacked_data = UnpackedChunkData::new(0);
+            super::generate_chunk(
+                &mut unpacked_data,
                 &(coord.0, coord.1, coord.2),
-                &Heightmap::generate(&(coord.0, coord.1)),
+                &heightmap,
             );
-            let packed_data = unpacked_data.pack();
+            let mut packed_data = PackedChunkData::new();
+            unpacked_data.pack_into(&mut packed_data);
             self.store_chunk(coord, &packed_data, &unpacked_data);
             (packed_data, unpacked_data)
         } else {
@@ -124,13 +128,15 @@ impl ChunkStorage {
                     &next_lod_coord,
                     &util::coord_to_signed_coord(&offset),
                 );
-                let mut data = UnpackedChunkData::empty();
+                let mut data = UnpackedChunkData::new(next_lod);
                 self.read_unpacked_chunk_data(&(coord.0, coord.1, coord.2, next_lod), &mut data);
                 neighborhood.push(data);
             }
             let neighborhood_refs: Vec<_> = neighborhood.iter().collect();
-            let unpacked_data = UnpackedChunkData::from_smaller_chunks(&neighborhood_refs[..]);
-            let packed_data = unpacked_data.pack();
+            let mut unpacked_data = UnpackedChunkData::new(coord.3);
+            super::generate_mip(&mut unpacked_data, &neighborhood_refs[..]);
+            let mut packed_data = PackedChunkData::new();
+            unpacked_data.pack_into(&mut packed_data);
             self.store_chunk(coord, &packed_data, &unpacked_data);
             (packed_data, unpacked_data)
         }
@@ -152,6 +158,7 @@ impl ChunkStorage {
         coord: &ChunkStorageCoord,
         data: &mut UnpackedChunkData,
     ) {
+        debug_assert!(data.scale == coord.3);
         if self.has_chunk(coord) {
             let mut file =
                 File::open(self.get_path_for(coord)).expect("Failed to open chunk storage.");
@@ -180,7 +187,6 @@ impl ChunkStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::World;
     use rand::RngCore;
 
     fn make_temp_dir() -> PathBuf {
@@ -198,9 +204,12 @@ mod tests {
 
     #[test]
     fn save_load() {
-        let mut world = World::new();
-        let chunk = world.borrow_chunk(&(0, 0, 0), 1).clone();
-        let packed = chunk.pack();
+        let mut heightmap = Heightmap::new();
+        crate::world::generate_heightmap(&mut heightmap, &(0, 0));
+        let mut chunk = UnpackedChunkData::new(0);
+        crate::world::generate_chunk(&mut chunk, &(0, 0, 0), &heightmap);
+        let mut packed = PackedChunkData::new();
+        chunk.pack_into(&mut packed);
 
         let storage = ChunkStorage {
             storage_dir: make_temp_dir(),
@@ -223,7 +232,7 @@ mod tests {
             storage_dir: make_temp_dir(),
         };
 
-        let mut data = UnpackedChunkData::empty();
+        let mut data = UnpackedChunkData::new(1);
         storage.read_unpacked_chunk_data(&(0, 0, 0, 1), &mut data);
 
         // cleanup(storage.storage_dir);
