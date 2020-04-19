@@ -24,7 +24,7 @@ impl ChunkStorage {
             .expect("System somehow doesn't have a config dir?")
             .join("raytrace")
             .join("world");
-        std::fs::create_dir_all(&storage_dir).unwrap();
+        std::fs::create_dir_all(&storage_dir).expect("Failed to create chunk storage directory.");
         ChunkStorage {
             storage_dir,
             uc_buffers: array![UnpackedChunkData::new(0); NUM_BUFFERS],
@@ -42,14 +42,12 @@ impl ChunkStorage {
         base.join(filename)
     }
 
-    fn store_chunk(base_path: &PathBuf, coord: &ChunkStorageCoord, packed_data: &PackedChunkData, scale: u8) {
-        let mut file = File::create(Self::get_path_for(base_path, coord))
-            .expect("Failed to create chunk storage.");
-        Self::write_packed_chunk_data(&mut file, packed_data, scale)
-            .expect("Failed to write to chunk storage.");
-    }
-
-    fn write_packed_chunk_data(file: &mut File, data: &PackedChunkData, scale: u8) -> io::Result<()> {
+    fn write_packed_chunk_data(
+        path: &PathBuf,
+        data: &PackedChunkData,
+        scale: u8,
+    ) -> io::Result<()> {
+        let mut file = File::create(path)?;
         file.seek(SeekFrom::Start(HEADER_SIZE - 1))?;
         file.write_all(&[scale])?;
         unsafe {
@@ -62,7 +60,8 @@ impl ChunkStorage {
         Ok(())
     }
 
-    fn read_into_packed_chunk_data(file: &mut File, data: &mut PackedChunkData) -> io::Result<u8> {
+    fn read_into_packed_chunk_data(path: &PathBuf, data: &mut PackedChunkData) -> io::Result<u8> {
+        let mut file = File::open(path)?;
         file.seek(SeekFrom::Start(HEADER_SIZE - 1))?;
         let mut scale = [0; 1];
         file.read_exact(&mut scale)?;
@@ -91,12 +90,14 @@ impl ChunkStorage {
             super::generate_chunk(unpacked_data, &(coord.0, coord.1, coord.2), &heightmap);
             let packed_data = &mut self.pc_buffers[pc_buffer_index];
             unpacked_data.pack_into(packed_data);
-            Self::store_chunk(
-                &self.storage_dir,
-                coord,
+            if let Err(err) = Self::write_packed_chunk_data(
+                &Self::get_path_for(&self.storage_dir, coord),
                 &self.pc_buffers[pc_buffer_index],
                 unpacked_data.scale,
-            );
+            ) {
+                println!("WARNING: Failed to write chunk data for {:?}.", coord);
+                println!("Caused by: {}", err);
+            }
 
             (pc_buffer_index, uc_buffer_index)
         } else {
@@ -112,8 +113,7 @@ impl ChunkStorage {
                     &next_lod_coord,
                     &util::coord_to_signed_coord(&offset),
                 );
-                let (unused, index) = self
-                    .load_chunk_data(&(coord.0, coord.1, coord.2, next_lod));
+                let (unused, index) = self.load_chunk_data(&(coord.0, coord.1, coord.2, next_lod));
                 self.available_pc_buffers.push(unused);
                 neighborhood.push(index);
             }
@@ -126,12 +126,14 @@ impl ChunkStorage {
             super::generate_mip(unpacked_data, &neighborhood_refs[..]);
             let packed_data = &mut self.pc_buffers[pc_buffer_index];
             unpacked_data.pack_into(packed_data);
-            Self::store_chunk(
-                &self.storage_dir,
-                coord,
+            if let Err(err) = Self::write_packed_chunk_data(
+                &Self::get_path_for(&self.storage_dir, coord),
                 &self.pc_buffers[pc_buffer_index],
                 unpacked_data.scale,
-            );
+            ) {
+                println!("WARNING: Failed to write chunk data for {:?}.", coord);
+                println!("Caused by: {}", err);
+            }
             self.available_uc_buffers.append(&mut neighborhood);
             (pc_buffer_index, uc_buffer_index)
         }
@@ -142,19 +144,25 @@ impl ChunkStorage {
             let pc_buffer_index = self.available_pc_buffers.pop().unwrap();
             let uc_buffer_index = self.available_uc_buffers.pop().unwrap();
 
-            let mut file = File::open(Self::get_path_for(&self.storage_dir, coord))
-                .expect("Failed to open chunk storage.");
-            let scale = Self::read_into_packed_chunk_data(
-                &mut file,
+            match Self::read_into_packed_chunk_data(
+                &Self::get_path_for(&self.storage_dir, coord),
                 &mut self.pc_buffers[pc_buffer_index],
-            )
-            .unwrap();
-            self.pc_buffers[pc_buffer_index]
-                .unpack_into(&mut self.uc_buffers[uc_buffer_index], scale);
-            (pc_buffer_index, uc_buffer_index)
+            ) {
+                Ok(scale) => {
+                    self.pc_buffers[pc_buffer_index]
+                        .unpack_into(&mut self.uc_buffers[uc_buffer_index], scale);
+                    (pc_buffer_index, uc_buffer_index)
+                }
+                Err(err) => {
+                    println!("WARNING: Failed to read chunk data for {:?}.", coord);
+                    println!("Caused by: {}", err);
+                    self.available_pc_buffers.push(pc_buffer_index);
+                    self.available_uc_buffers.push(uc_buffer_index);
+                    self.generate_and_store_chunk(coord)
+                }
+            }
         } else {
-            let r = self.generate_and_store_chunk(coord);
-            r
+            self.generate_and_store_chunk(coord)
         }
     }
 
@@ -162,15 +170,20 @@ impl ChunkStorage {
         if self.has_chunk(coord) {
             let pc_buffer_index = self.available_pc_buffers.pop().unwrap();
 
-            let mut file = File::open(Self::get_path_for(&self.storage_dir, coord))
-                .expect("Failed to open chunk storage.");
-            Self::read_into_packed_chunk_data(
-                &mut file,
+            match Self::read_into_packed_chunk_data(
+                &Self::get_path_for(&self.storage_dir, coord),
                 &mut self.pc_buffers[pc_buffer_index],
-            )
-            .unwrap();
-
-            pc_buffer_index
+            ) {
+                Ok(..) => pc_buffer_index,
+                Err(err) => {
+                    println!("WARNING: Failed to read chunk data for {:?}.", coord);
+                    println!("Caused by: {}", err);
+                    self.available_pc_buffers.push(pc_buffer_index);
+                    let (pc_index, unused) = self.generate_and_store_chunk(coord);
+                    self.available_uc_buffers.push(unused);
+                    pc_index
+                }
+            }
         } else {
             let (pc_index, unused) = self.generate_and_store_chunk(coord);
             self.available_uc_buffers.push(unused);
