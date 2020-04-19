@@ -1,8 +1,10 @@
 use super::{Heightmap, PackedChunkData, UnpackedChunkData};
 use crate::util;
+use crate::world::CHUNK_VOLUME;
 use array_macro::array;
+use lz4::{Decoder, EncoderBuilder};
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::path::PathBuf;
 
 pub type ChunkStorageCoord = (isize, isize, isize, u8);
@@ -47,31 +49,33 @@ impl ChunkStorage {
         data: &PackedChunkData,
         scale: u8,
     ) -> io::Result<()> {
-        let mut file = File::create(path)?;
-        file.seek(SeekFrom::Start(HEADER_SIZE - 1))?;
-        file.write_all(&[scale])?;
+        let file = File::create(path)?;
+        let mut writer = EncoderBuilder::new().level(4).build(file)?;
+        writer.write_all(&[scale])?;
         unsafe {
             let mat_slice = &data.materials[..];
             let mat_slice_u8 =
                 std::slice::from_raw_parts(mat_slice.as_ptr() as *const u8, mat_slice.len() * 4);
-            file.write_all(mat_slice_u8)?;
+            writer.write_all(mat_slice_u8)?;
         }
-        file.write_all(&data.minefield)?;
+        writer.write_all(&data.minefield)?;
+        writer.finish().1?;
         Ok(())
     }
 
     fn read_into_packed_chunk_data(path: &PathBuf, data: &mut PackedChunkData) -> io::Result<u8> {
-        let mut file = File::open(path)?;
-        file.seek(SeekFrom::Start(HEADER_SIZE - 1))?;
+        let file = File::open(path)?;
+        let mut reader = Decoder::new(file)?;
+
         let mut scale = [0; 1];
-        file.read_exact(&mut scale)?;
+        reader.read_exact(&mut scale)?;
         unsafe {
             let mat_slice = &mut data.materials[..];
             let mat_slice_u8 =
                 std::slice::from_raw_parts_mut(mat_slice.as_ptr() as *mut u8, mat_slice.len() * 4);
-            file.read_exact(mat_slice_u8)?;
+            reader.read_exact(mat_slice_u8)?;
         }
-        file.read_exact(&mut data.minefield[..])?;
+        reader.read_exact(&mut data.minefield[..])?;
         Ok(scale[0])
     }
 
