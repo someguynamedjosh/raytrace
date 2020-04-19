@@ -11,7 +11,7 @@ use crate::render::general::structures::{
     SampledImage, SamplerOptions, StorageImage,
 };
 use crate::util;
-use crate::world::{World, CHUNK_SIZE};
+use crate::world::{ChunkStorage, CHUNK_SIZE};
 
 use super::structs::RaytraceUniformData;
 
@@ -203,7 +203,7 @@ impl RenderData {
 
     fn make_world_upload_buffers(
         &mut self,
-        world: &mut World,
+        world: &mut ChunkStorage,
         lod: usize,
     ) -> (Buffer<u32>, Buffer<u8>) {
         let mut material_buffer = Buffer::create(
@@ -235,7 +235,7 @@ impl RenderData {
                 ),
             );
             let timer = std::time::Instant::now();
-            let chunk = world.borrow_chunk(&world_coord, lod).pack();
+            let chunk = world.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2, lod as u8));
             gen_time += timer.elapsed().as_millis();
             let timer = std::time::Instant::now();
             chunk.copy_materials(

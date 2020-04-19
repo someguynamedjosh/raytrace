@@ -17,7 +17,7 @@ pub fn generate_heightmap(data: &mut Heightmap, chunk_coord: &util::SignedCoord2
 
     let mut index = 0;
     for (x, y) in util::coord_iter_2d(super::CHUNK_SIZE) {
-        data.data[0] = height(origin.0 + x as isize, origin.1 + y as isize);
+        data.data[index] = height(origin.0 + x as isize, origin.1 + y as isize);
         index += 1;
     }
 }

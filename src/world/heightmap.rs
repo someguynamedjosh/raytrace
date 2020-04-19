@@ -7,7 +7,7 @@ pub struct Heightmap {
 impl Heightmap {
     pub fn new() -> Heightmap {
         Heightmap {
-            data: Vec::with_capacity(super::CHUNK_SIZE * super::CHUNK_SIZE),
+            data: vec![0; super::CHUNK_SIZE * super::CHUNK_SIZE],
         }
     }
 

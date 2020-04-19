@@ -3,7 +3,7 @@ use winit::event::VirtualKeyCode;
 
 use crate::render::Camera;
 use crate::util;
-use crate::world::{self, World};
+use crate::world::{self, ChunkStorage};
 
 use std::env;
 
@@ -13,7 +13,7 @@ use control::ControlSet;
 
 pub struct Game {
     camera: Camera,
-    world: World,
+    world: ChunkStorage,
     controls: ControlSet,
 
     sun_angle: f32,
@@ -38,7 +38,7 @@ impl Game {
         let args: Vec<_> = env::args().collect();
         let mut result = Game {
             camera: Camera::new(),
-            world: world::make_world(),
+            world: ChunkStorage::new(),
             controls: Self::make_controls(),
             sun_angle: 0.0,
         };
@@ -100,11 +100,11 @@ impl Game {
         self.camera.pitch.0 = ((256.0 - y) / 200.0) as f32;
     }
 
-    pub fn borrow_world(&self) -> &World {
+    pub fn borrow_world(&self) -> &ChunkStorage {
         &self.world
     }
 
-    pub fn borrow_world_mut(&mut self) -> &mut World {
+    pub fn borrow_world_mut(&mut self) -> &mut ChunkStorage {
         &mut self.world
     }
 
