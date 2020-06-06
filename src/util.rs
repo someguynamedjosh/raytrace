@@ -319,6 +319,25 @@ pub fn copy_3d<T: Copy>(
     }
 }
 
+#[test]
+fn test_copy_3d() {
+    use array_macro::array;
+    use rand::prelude::*;
+    let source = array![|_| rand::thread_rng().next_u32(); 64];
+    let mut target = array![0; 64];
+    copy_3d(
+        (1, 1, 2),
+        &source,
+        4,
+        (1, 2, 2),
+        &mut target[..],
+        4,
+        (3, 2, 1),
+    );
+    assert!(source[coord_to_index_3d(&(1, 2, 2), 4)] == target[coord_to_index_3d(&(3, 2, 1), 4)]);
+    assert!(source[coord_to_index_3d(&(1, 2, 3), 4)] == target[coord_to_index_3d(&(3, 2, 2), 4)]);
+}
+
 /// Copies all the data from source to target in the area that they overlap. The target data is
 /// considered to be placed at (0, 0, 0), and the source data can be thought as being placed inside
 /// the target data at source_offset.
@@ -376,6 +395,23 @@ pub fn copy_3d_auto_clip<T: Copy>(
         target_stride,
         target_position,
     );
+}
+
+#[test]
+fn test_copy_3d_auto_clip() {
+    use array_macro::array;
+    use rand::prelude::*;
+    let source = array![|_| rand::thread_rng().next_u32(); 64];
+    let mut target = array![0; 64];
+    copy_3d_auto_clip(
+        &source,
+        4,
+        (3, 2, 2),
+        &mut target[..],
+        4,
+    );
+    assert!(source[coord_to_index_3d(&(0, 0, 0), 4)] == target[coord_to_index_3d(&(3, 2, 2), 4)]);
+    assert!(source[coord_to_index_3d(&(0, 0, 1), 4)] == target[coord_to_index_3d(&(3, 2, 3), 4)]);
 }
 
 /// Functions like copy_3d_auto_clip except that source_size dictates the area that can be copied
@@ -456,6 +492,25 @@ pub fn copy_3d_bounded_auto_clip<T: Copy>(
         target_stride,
         target_position,
     );
+}
+
+#[test]
+fn test_copy_3d_bounded_auto_clip() {
+    use array_macro::array;
+    use rand::prelude::*;
+    let source = array![|_| rand::thread_rng().next_u32(); 64];
+    let mut target = array![0; 64];
+    copy_3d_bounded_auto_clip(
+        &source,
+        4,
+        (3, 2, 2),
+        (1, 1, 2),
+        &mut target[..],
+        4,
+    );
+    assert!(source[coord_to_index_3d(&(0, 0, 0), 4)] == target[coord_to_index_3d(&(3, 2, 2), 4)]);
+    assert!(source[coord_to_index_3d(&(0, 0, 1), 4)] == target[coord_to_index_3d(&(3, 2, 3), 4)]);
+    assert!(target[coord_to_index_3d(&(3, 3, 2), 4)] == 0);
 }
 
 pub fn fill_slice_3d<T: Copy>(

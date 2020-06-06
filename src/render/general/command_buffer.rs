@@ -215,6 +215,7 @@ impl CommandBuffer {
             );
         }
     }
+
     pub fn copy_buffer_to_image(
         &self,
         data_buffer: &impl BufferWrapper,
@@ -261,14 +262,17 @@ impl CommandBuffer {
     pub fn copy_buffer_to_image_offset(
         &self,
         data_buffer: &impl BufferWrapper,
+        buffer_offset: u64,
+        buffer_width: u32,
+        buffer_height: u32,
         image: &impl ImageWrapper,
-        extent: &impl ExtentWrapper,
         offset: vk::Offset3D,
+        extent: &impl ExtentWrapper,
     ) {
         let copy_info = vk::BufferImageCopy {
-            buffer_offset: 0,
-            buffer_row_length: 0,
-            buffer_image_height: 0,
+            buffer_offset,
+            buffer_row_length: buffer_width,
+            buffer_image_height: buffer_height,
 
             image_subresource: vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
