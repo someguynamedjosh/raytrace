@@ -14,41 +14,41 @@ pub enum PackedChunk {
 impl PackedChunk {
     pub fn copy_materials(
         &self,
+        source_offset: util::SignedCoord3D,
         target: &mut [u32],
         target_stride: usize,
-        target_offset: &util::Coord3D,
     ) {
         if let Self::NonEmpty(data) = self {
-            data.copy_materials(target, target_stride, target_offset);
+            data.copy_materials(source_offset, target, target_stride);
         } else {
-            // Write black to every value.
-            for coord in util::coord_iter_3d(CHUNK_SIZE) {
-                target[util::coord_to_index_3d(
-                    &util::offset_coord_3d(&coord, target_offset),
-                    target_stride,
-                )] = 0;
-            }
+            util::fill_slice_3d_auto_clip(
+                0,
+                target,
+                target_stride,
+                source_offset,
+                (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE),
+            );
         }
     }
 
     pub fn copy_minefield(
         &self,
+        source_offset: util::SignedCoord3D,
         target: &mut [u8],
         target_stride: usize,
-        target_offset: &util::Coord3D,
     ) {
         match self {
             Self::NonEmpty(data) => {
-                data.copy_minefield(target, target_stride, target_offset);
+                data.copy_minefield(source_offset, target, target_stride);
             }
             Self::Empty { scale } => {
-                // Write a chunk-sized LOD to every value.
-                for coord in util::coord_iter_3d(CHUNK_SIZE) {
-                    target[util::coord_to_index_3d(
-                        &util::offset_coord_3d(&coord, target_offset),
-                        target_stride,
-                    )] = MAX_LOD as u8 + scale;
-                }
+                util::fill_slice_3d_auto_clip(
+                    MAX_LOD as u8 + scale,
+                    target,
+                    target_stride,
+                    source_offset,
+                    (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE),
+                );
             }
         }
     }
@@ -70,45 +70,35 @@ impl PackedChunkData {
 
     pub fn copy_materials(
         &self,
+        source_offset: util::SignedCoord3D,
         target: &mut [u32],
         target_stride: usize,
-        target_offset: &util::Coord3D,
     ) {
-        for coord in util::coord_iter_3d(CHUNK_SIZE) {
-            let source_index = util::coord_to_index_3d(&coord, CHUNK_SIZE);
-            let target_coord = (
-                coord.0 + target_offset.0,
-                coord.1 + target_offset.1,
-                coord.2 + target_offset.2,
-            );
-            let target_index = util::coord_to_index_3d(&target_coord, target_stride);
-            target[target_index] = self.materials[source_index];
-        }
+        util::copy_3d_auto_clip(
+            &self.materials,
+            CHUNK_SIZE,
+            source_offset,
+            target,
+            target_stride,
+        );
     }
 
     pub fn copy_minefield(
         &self,
+        source_offset: util::SignedCoord3D,
         target: &mut [u8],
         target_stride: usize,
-        target_offset: &util::Coord3D,
     ) {
-        for coord in util::coord_iter_3d(CHUNK_SIZE) {
-            let source_index = util::coord_to_index_3d(&coord, CHUNK_SIZE);
-            let target_coord = (
-                coord.0 + target_offset.0,
-                coord.1 + target_offset.1,
-                coord.2 + target_offset.2,
-            );
-            let target_index = util::coord_to_index_3d(&target_coord, target_stride);
-            target[target_index] = self.minefield[source_index];
-        }
+        util::copy_3d_auto_clip(
+            &self.minefield,
+            CHUNK_SIZE,
+            source_offset,
+            target,
+            target_stride,
+        );
     }
 
-    pub fn unpack_into(
-        &self,
-        unpacked_data: &mut UnpackedChunkData,
-        scale: u8,
-    ) {
+    pub fn unpack_into(&self, unpacked_data: &mut UnpackedChunkData, scale: u8) {
         for index in 0..CHUNK_VOLUME {
             unpacked_data.materials[index] = Material::unpack(self.materials[index]);
         }

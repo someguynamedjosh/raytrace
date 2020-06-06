@@ -10,7 +10,7 @@ use crate::render::general::structures::{
     Buffer, BufferWrapper, DataDestination, ExtentWrapper, ImageOptions, ImageWrapper,
     SampledImage, SamplerOptions, StorageImage,
 };
-use crate::util;
+use crate::util::{self, traits::*};
 use crate::world::{ChunkStorage, CHUNK_SIZE};
 
 use super::structs::RaytraceUniformData;
@@ -241,30 +241,71 @@ impl RenderData {
         let mut gen_time = 0;
         let mut copy_time = 0;
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let world_coord = util::coord_to_signed_coord(&chunk_coord);
-            let world_coord = util::offset_signed_coord_3d(
-                &world_coord,
-                &(
-                    -(ROOT_CHUNK_WIDTH as isize / 2),
-                    -(ROOT_CHUNK_WIDTH as isize / 2),
-                    -(ROOT_CHUNK_WIDTH as isize / 2),
-                ),
-            );
+            let world_coord = util::coord_to_signed_coord(&chunk_coord).add((
+                -(ROOT_CHUNK_WIDTH as isize / 2),
+                -(ROOT_CHUNK_WIDTH as isize / 2),
+                -(ROOT_CHUNK_WIDTH as isize / 2),
+            ));
             let timer = std::time::Instant::now();
-            let chunk = world.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2, lod as u8));
+            let chunk = world.borrow_packed_chunk_data(&(
+                world_coord.0,
+                world_coord.1,
+                world_coord.2,
+                lod as u8,
+            ));
             gen_time += timer.elapsed().as_millis();
             let timer = std::time::Instant::now();
             chunk.copy_materials(
+                util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).sign(),
                 material_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
-                &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
             );
             chunk.copy_minefield(
+                util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).sign(),
                 minefield_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
-                &util::scale_coord_3d(&chunk_coord, CHUNK_SIZE),
             );
             copy_time += timer.elapsed().as_millis();
+        }
+        if lod == 0 {
+            for (x, z) in util::coord_iter_2d(ROOT_CHUNK_WIDTH) {
+                let chunk_coord = (x, 2, z);
+                let world_coord = chunk_coord.sign().sub((
+                    ROOT_CHUNK_WIDTH as isize / 2,
+                    ROOT_CHUNK_WIDTH as isize / 2,
+                    ROOT_CHUNK_WIDTH as isize / 2,
+                ));
+                let timer = std::time::Instant::now();
+                let chunk = world.borrow_packed_chunk_data(&(
+                    world_coord.0,
+                    world_coord.1,
+                    world_coord.2,
+                    0,
+                ));
+                gen_time += timer.elapsed().as_millis();
+                let source_offset = util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).sign().sub((
+                    0,
+                    ROOT_BLOCK_WIDTH as isize,
+                    0,
+                ));
+                let copy_size = (CHUNK_SIZE, 16, CHUNK_SIZE);
+                util::copy_3d_bounded_auto_clip(
+                    &chunk.materials,
+                    CHUNK_SIZE,
+                    source_offset,
+                    copy_size,
+                    material_buffer_data.as_slice_mut(),
+                    ROOT_BLOCK_WIDTH,
+                );
+                util::copy_3d_bounded_auto_clip(
+                    &chunk.minefield,
+                    CHUNK_SIZE,
+                    source_offset,
+                    copy_size,
+                    minefield_buffer_data.as_slice_mut(),
+                    ROOT_BLOCK_WIDTH,
+                );
+            }
         }
         println!("Gen time: {}ms, copy time: {}ms", gen_time, copy_time);
         drop(material_buffer_data);

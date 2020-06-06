@@ -186,15 +186,6 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         ) {
             // We encountered the edge of the LOD.
             if (current_lod < 3) {
-                // Since we can rotate textures around so that only a sliver of the edge is visible,
-                // we might end up in a situation where the ray traveled very far forward even
-                // though the next LOD would not allow it.
-                // TODO: Once we actually send the correct data to fill in those gaps, this code
-                // might not be necessary.
-                vec3 overextension = abs(result.position - current_space_offset) - vec3(ROOT_BLOCK_WIDTH / 2 * lod_divisor);
-                vec3 axis_amounts = overextension / abs(direction);
-                float over_amount = max(max(axis_amounts.x, axis_amounts.y), axis_amounts.z);
-                result.position -= (over_amount - 0.001) * direction;
                 current_lod += 1;
                 lod_divisor *= 2;
                 pos_offset *= 2;
