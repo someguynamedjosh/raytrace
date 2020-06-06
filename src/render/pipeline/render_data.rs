@@ -8,7 +8,7 @@ use crate::render::general::structures::{
     Buffer, BufferWrapper, DataDestination, ExtentWrapper, ImageOptions, ImageWrapper,
     SampledImage, SamplerOptions, StorageImage,
 };
-use crate::util::{self, traits::*};
+use crate::util::{self, prelude::*};
 use crate::world::{ChunkStorage, CHUNK_SIZE};
 use array_macro::array;
 use ash::vk;
@@ -149,11 +149,11 @@ impl RenderData {
             old_transform_c1: [0.0, 0.0, 0.0].into(),
             old_transform_c2: [0.0, 0.0, 0.0].into(),
             region_offset: [0, 0, 0].into(),
-            lod0_rotation: [0, 16, 0].into(),
+            lod0_rotation: [0, 0, 0].into(),
             lod1_rotation: [0, 0, 0].into(),
             lod2_rotation: [0, 0, 0].into(),
             lod3_rotation: [0, 0, 0].into(),
-            lod0_space_offset: [0, 16, 0].into(),
+            lod0_space_offset: [0, 0, 0].into(),
             lod1_space_offset: [0, 0, 0].into(),
             lod2_space_offset: [0, 0, 0].into(),
             lod3_space_offset: [0, 0, 0].into(),
@@ -240,10 +240,10 @@ impl RenderData {
         let mut gen_time = 0;
         let mut copy_time = 0;
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let world_coord = util::coord_to_signed_coord(&chunk_coord).add((
-                -(ROOT_CHUNK_WIDTH as isize / 2),
-                -(ROOT_CHUNK_WIDTH as isize / 2),
-                -(ROOT_CHUNK_WIDTH as isize / 2),
+            let world_coord = chunk_coord.sign().sub((
+                (ROOT_CHUNK_WIDTH as isize / 2),
+                (ROOT_CHUNK_WIDTH as isize / 2),
+                (ROOT_CHUNK_WIDTH as isize / 2),
             ));
             let timer = std::time::Instant::now();
             let chunk = world.borrow_packed_chunk_data(&(
