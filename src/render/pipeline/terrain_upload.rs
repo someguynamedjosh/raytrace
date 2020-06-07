@@ -24,6 +24,7 @@ struct TerrainUploadRequest {
     // [0, ROOT_BLOCK_WIDTH / SLICE_SIZE), how many slices to offset in each axis.
     num_slices: Coord3D,
     axis: Axis,
+    lod: usize,
     // What position this LOD will be at after the request is completed.
     new_position: Position,
 }
@@ -129,8 +130,12 @@ impl TerrainUploadManager {
             };
             // Which chunk we are loading from.
             let world_coord = piece_offset.add(chunk_offset).signed().add(request.origin);
-            let chunk =
-                chunks.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2, 0));
+            let chunk = chunks.borrow_packed_chunk_data(&(
+                world_coord.0,
+                world_coord.1,
+                world_coord.2,
+                request.lod as _,
+            ));
             // The coordinate inside the chunk to start copying from.
             let mut copy_start = (0, 0, 0);
             // Basically if we are copying from a chunk at the start of a particular axis, the
@@ -242,7 +247,7 @@ impl TerrainUploadManager {
             depth: data_shape.2 as u32,
         };
         commands.transition_layout(
-            &data.material_images[0],
+            &data.material_images[request.lod],
             vk::ImageLayout::GENERAL,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
@@ -251,17 +256,17 @@ impl TerrainUploadManager {
             0,
             data_shape.width,
             data_shape.height,
-            &data.material_images[0],
+            &data.material_images[request.lod],
             target_offset,
             &data_shape,
         );
         commands.transition_layout(
-            &data.material_images[0],
+            &data.material_images[request.lod],
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::GENERAL,
         );
         commands.transition_layout(
-            &data.minefield_images[0],
+            &data.minefield_images[request.lod],
             vk::ImageLayout::GENERAL,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
@@ -270,17 +275,17 @@ impl TerrainUploadManager {
             0,
             data_shape.width,
             data_shape.height,
-            &data.minefield_images[0],
+            &data.minefield_images[request.lod],
             target_offset,
             &data_shape,
         );
         commands.transition_layout(
-            &data.minefield_images[0],
+            &data.minefield_images[request.lod],
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::GENERAL,
         );
 
-        self.gpu_lod_positions[0] = request.new_position;
+        self.gpu_lod_positions[request.lod] = request.new_position;
     }
 
     pub fn setup_next_request(
@@ -300,18 +305,18 @@ impl TerrainUploadManager {
         self.gpu_lod_positions[lod].render_offset(lod as _)
     }
 
-    pub fn request_increase(&mut self, axis: Axis) {
+    pub fn request_increase(&mut self, axis: Axis, lod: usize) {
         // Load the next slice then increment the number of loaded slices.
-        let old_position = self.lod_positions[0].clone();
+        let old_position = self.lod_positions[lod].clone();
         let num_slices = match axis {
-            Axis::X => &mut self.lod_positions[0].num_loaded_slices.0,
-            Axis::Y => &mut self.lod_positions[0].num_loaded_slices.1,
-            Axis::Z => &mut self.lod_positions[0].num_loaded_slices.2,
+            Axis::X => &mut self.lod_positions[lod].num_loaded_slices.0,
+            Axis::Y => &mut self.lod_positions[lod].num_loaded_slices.1,
+            Axis::Z => &mut self.lod_positions[lod].num_loaded_slices.2,
         };
         let coord = match axis {
-            Axis::X => &mut self.lod_positions[0].origin.0,
-            Axis::Y => &mut self.lod_positions[0].origin.1,
-            Axis::Z => &mut self.lod_positions[0].origin.2,
+            Axis::X => &mut self.lod_positions[lod].origin.0,
+            Axis::Y => &mut self.lod_positions[lod].origin.1,
+            Axis::Z => &mut self.lod_positions[lod].origin.2,
         };
         *num_slices += 1;
         if *num_slices == ROOT_BLOCK_WIDTH / SLICE_SIZE {
@@ -328,21 +333,22 @@ impl TerrainUploadManager {
             origin: old_position.origin.add(origin_offset),
             num_slices: old_position.num_loaded_slices,
             axis,
-            new_position: self.lod_positions[0].clone(),
+            lod,
+            new_position: self.lod_positions[lod].clone(),
         });
     }
 
-    pub fn request_decrease(&mut self, axis: Axis) {
+    pub fn request_decrease(&mut self, axis: Axis, lod: usize) {
         // Rewind the coordinate to the previous slice and then load it from the current region.
         let num_slices = match axis {
-            Axis::X => &mut self.lod_positions[0].num_loaded_slices.0,
-            Axis::Y => &mut self.lod_positions[0].num_loaded_slices.1,
-            Axis::Z => &mut self.lod_positions[0].num_loaded_slices.2,
+            Axis::X => &mut self.lod_positions[lod].num_loaded_slices.0,
+            Axis::Y => &mut self.lod_positions[lod].num_loaded_slices.1,
+            Axis::Z => &mut self.lod_positions[lod].num_loaded_slices.2,
         };
         let coord = match axis {
-            Axis::X => &mut self.lod_positions[0].origin.0,
-            Axis::Y => &mut self.lod_positions[0].origin.1,
-            Axis::Z => &mut self.lod_positions[0].origin.2,
+            Axis::X => &mut self.lod_positions[lod].origin.0,
+            Axis::Y => &mut self.lod_positions[lod].origin.1,
+            Axis::Z => &mut self.lod_positions[lod].origin.2,
         };
         if *num_slices == 0 {
             *num_slices = ROOT_BLOCK_WIDTH / SLICE_SIZE;
@@ -350,32 +356,36 @@ impl TerrainUploadManager {
         }
         *num_slices -= 1;
         self.request_queue.push(TerrainUploadRequest {
-            origin: self.lod_positions[0].origin,
-            num_slices: self.lod_positions[0].num_loaded_slices,
+            origin: self.lod_positions[lod].origin,
+            num_slices: self.lod_positions[lod].num_loaded_slices,
             axis,
-            new_position: self.lod_positions[0].clone(),
+            lod,
+            new_position: self.lod_positions[lod].clone(),
         });
     }
 
     fn request_move_lod_towards(&mut self, lod: usize, desired_center: SignedCoord3D) {
         let current_pos = &self.lod_positions[lod];
         let delta = desired_center.sub(current_pos.render_offset(lod as _));
+        let delta = delta.shrink(1 << lod);
         if delta.0 > SLICE_SIZE as _ {
-            self.request_increase(Axis::X);
+            self.request_increase(Axis::X, lod);
         } else if -delta.0 > SLICE_SIZE as _ {
-            self.request_decrease(Axis::X);
+            self.request_decrease(Axis::X, lod);
         } else if delta.1 > SLICE_SIZE as _ {
-            self.request_increase(Axis::Y);
+            self.request_increase(Axis::Y, lod);
         } else if -delta.1 > SLICE_SIZE as _ {
-            self.request_decrease(Axis::Y);
+            self.request_decrease(Axis::Y, lod);
         } else if delta.2 > SLICE_SIZE as _ {
-            self.request_increase(Axis::Z);
+            self.request_increase(Axis::Z, lod);
         } else if -delta.2 > SLICE_SIZE as _ {
-            self.request_decrease(Axis::Z);
+            self.request_decrease(Axis::Z, lod);
         }
     }
 
     pub fn request_move_towards(&mut self, desired_center: SignedCoord3D) {
-        self.request_move_lod_towards(0, desired_center);
+        for lod in 0..NUM_LODS {
+            self.request_move_lod_towards(lod, desired_center);
+        }
     }
 }

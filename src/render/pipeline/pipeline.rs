@@ -48,6 +48,7 @@ impl Pipeline {
         render_data.initialize(game);
         let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
         let mut tum = TerrainUploadManager::new(Rc::clone(&core));
+        // tum.request_increase(Axis::X, 1);
 
         let denoise_stage = shaders::create_denoise_stage(core.clone(), &descriptor_collection);
         let finalize_stage = shaders::create_finalize_stage(core.clone(), &descriptor_collection);
