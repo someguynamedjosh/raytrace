@@ -18,9 +18,17 @@ pub const BLUE_NOISE_HEIGHT: usize = 512;
 pub const BLUE_NOISE_CHANNELS: usize = 4;
 pub const BLUE_NOISE_SIZE: usize = BLUE_NOISE_WIDTH * BLUE_NOISE_HEIGHT * BLUE_NOISE_CHANNELS;
 
-pub const ROOT_BLOCK_WIDTH: usize = 256;
-pub const ROOT_BLOCK_VOLUME: usize = ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH;
+// The LOD that takes up an entire chunk.
+pub const MAX_CHUNK_LOD: usize = 6;
+pub const CHUNK_SIZE: usize = 1 << MAX_CHUNK_LOD; // 64
+pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+// This should always be a multiple of 2
+pub const ROOT_CHUNK_SIZE: usize = 4;
+pub const ROOT_BLOCK_SIZE: usize = CHUNK_SIZE * ROOT_CHUNK_SIZE;
+pub const ROOT_BLOCK_VOLUME: usize = ROOT_BLOCK_SIZE * ROOT_BLOCK_SIZE * ROOT_BLOCK_SIZE;
 pub const NUM_LODS: usize = 4;
+// Slices are used to upload new terrain data to the GPU.
+pub const SLICE_SIZE: usize = 16;
+pub const SLICES_PER_CHUNK: usize = CHUNK_SIZE / SLICE_SIZE;
 
-pub const NUM_UPLOAD_BUFFERS: usize = 32;
 pub const SHADER_GROUP_SIZE: usize = 8; // Each compute shader works on 8x8 groups.

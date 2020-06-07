@@ -9,7 +9,7 @@ use crate::render::general::structures::{
     SampledImage, SamplerOptions, StorageImage,
 };
 use crate::util::{self, prelude::*};
-use crate::world::{ChunkStorage, CHUNK_SIZE};
+use crate::world::ChunkStorage;
 use array_macro::array;
 use ash::vk;
 use std::rc::Rc;
@@ -57,9 +57,9 @@ impl RenderData {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
-                width: ROOT_BLOCK_WIDTH as u32,
-                height: ROOT_BLOCK_WIDTH as u32,
-                depth: ROOT_BLOCK_WIDTH as u32,
+                width: ROOT_BLOCK_SIZE as u32,
+                height: ROOT_BLOCK_SIZE as u32,
+                depth: ROOT_BLOCK_SIZE as u32,
             },
             format: vk::Format::R32_UINT,
             usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -85,9 +85,9 @@ impl RenderData {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
-                width: ROOT_BLOCK_WIDTH as u32,
-                height: ROOT_BLOCK_WIDTH as u32,
-                depth: ROOT_BLOCK_WIDTH as u32,
+                width: ROOT_BLOCK_SIZE as u32,
+                height: ROOT_BLOCK_SIZE as u32,
+                depth: ROOT_BLOCK_SIZE as u32,
             },
             format: vk::Format::R8_UINT,
             usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -232,16 +232,15 @@ impl RenderData {
             vk::BufferUsageFlags::TRANSFER_SRC,
         );
 
-        const ROOT_CHUNK_WIDTH: usize = ROOT_BLOCK_WIDTH / CHUNK_SIZE;
         let mut material_buffer_data = material_buffer.bind_all();
         let mut minefield_buffer_data = minefield_buffer.bind_all();
         let mut gen_time = 0;
         let mut copy_time = 0;
-        for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
+        for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_SIZE) {
             let world_coord = chunk_coord.signed().sub((
-                (ROOT_CHUNK_WIDTH as isize / 2),
-                (ROOT_CHUNK_WIDTH as isize / 2),
-                (ROOT_CHUNK_WIDTH as isize / 2),
+                (ROOT_CHUNK_SIZE as isize / 2),
+                (ROOT_CHUNK_SIZE as isize / 2),
+                (ROOT_CHUNK_SIZE as isize / 2),
             ));
             let timer = std::time::Instant::now();
             let chunk = world.borrow_packed_chunk_data(&(
@@ -255,12 +254,12 @@ impl RenderData {
             chunk.copy_materials(
                 util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).signed(),
                 material_buffer_data.as_slice_mut(),
-                ROOT_BLOCK_WIDTH,
+                ROOT_BLOCK_SIZE,
             );
             chunk.copy_minefield(
                 util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).signed(),
                 minefield_buffer_data.as_slice_mut(),
-                ROOT_BLOCK_WIDTH,
+                ROOT_BLOCK_SIZE,
             );
             copy_time += timer.elapsed().as_millis();
         }

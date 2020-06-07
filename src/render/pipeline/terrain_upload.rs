@@ -9,19 +9,16 @@ use crate::render::general::structures::{
 };
 use crate::render::pipeline::render_data::RenderData;
 use crate::util::{self, prelude::*};
-use crate::world::{ChunkStorage, CHUNK_SIZE, CHUNK_VOLUME};
+use crate::world::{ChunkStorage};
 use array_macro::array;
 use ash::vk;
 use std::rc::Rc;
 
-// How thick each new slice of terrain data is.
-const SLICE_SIZE: usize = 16;
-const SLICES_PER_CHUNK: usize = CHUNK_SIZE / SLICE_SIZE;
 
 /// Upon consuming this request, the next slice along the specified axis will be uploaded.
 struct TerrainUploadRequest {
     origin: SignedCoord3D,
-    // [0, ROOT_BLOCK_WIDTH / SLICE_SIZE), how many slices to offset in each axis.
+    // [0, ROOT_BLOCK_SIZE / SLICE_SIZE), how many slices to offset in each axis.
     num_slices: Coord3D,
     axis: Axis,
     lod: usize,
@@ -39,8 +36,9 @@ struct Position {
 
 impl Position {
     fn render_offset(&self, lod: isize) -> SignedCoord3D {
+        const COORD: isize = ROOT_CHUNK_SIZE as isize / 2;
         self.origin
-            .add((1, 1, 1))
+            .add(COORD.repeat())
             .scale(CHUNK_SIZE as _)
             .add(self.num_loaded_slices.scale(SLICE_SIZE).signed())
             .scale(1 << lod)
@@ -49,8 +47,9 @@ impl Position {
 
 impl Default for Position {
     fn default() -> Self {
+        const COORD: isize = ROOT_CHUNK_SIZE as isize / 2;
         Self {
-            origin: (-1, -1, -1),
+            origin: (-COORD, -COORD, -COORD),
             num_loaded_slices: (0, 0, 0),
         }
     }
@@ -68,7 +67,7 @@ pub struct TerrainUploadManager {
 impl TerrainUploadManager {
     pub fn new(core: Rc<Core>) -> Self {
         // Enough space to upload one slice at a time.
-        const SIZE: usize = ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH * SLICE_SIZE;
+        const SIZE: usize = ROOT_BLOCK_SIZE * ROOT_BLOCK_SIZE * SLICE_SIZE;
         let minefield_upload_buffer = Buffer::create(
             Rc::clone(&core),
             "tum_minefield_upload",
@@ -103,9 +102,9 @@ impl TerrainUploadManager {
         // The dimensions of the data that will be copied into the buffer and eventually copied
         // to the images on the GPU.
         let data_shape = match request.axis {
-            Axis::X => (SLICE_SIZE, ROOT_BLOCK_WIDTH, ROOT_BLOCK_WIDTH),
-            Axis::Y => (ROOT_BLOCK_WIDTH, SLICE_SIZE, ROOT_BLOCK_WIDTH),
-            Axis::Z => (ROOT_BLOCK_WIDTH, ROOT_BLOCK_WIDTH, SLICE_SIZE),
+            Axis::X => (SLICE_SIZE, ROOT_BLOCK_SIZE, ROOT_BLOCK_SIZE),
+            Axis::Y => (ROOT_BLOCK_SIZE, SLICE_SIZE, ROOT_BLOCK_SIZE),
+            Axis::Z => (ROOT_BLOCK_SIZE, ROOT_BLOCK_SIZE, SLICE_SIZE),
         };
         // The maximum boundaries of the data that will be copied from each chunk.
         let chunk_area_shape = match request.axis {
@@ -121,7 +120,7 @@ impl TerrainUploadManager {
             .num_slices
             .wrap(SLICES_PER_CHUNK.repeat())
             .scale(SLICE_SIZE);
-        for (d1, d2) in util::coord_iter_2d(3) {
+        for (d1, d2) in util::coord_iter_2d(ROOT_CHUNK_SIZE + 1) {
             // Which piece of the slice we are currently copying.
             let piece_offset = match request.axis {
                 Axis::X => (0, d1, d2),
@@ -154,15 +153,15 @@ impl TerrainUploadManager {
             let mut copy_end = (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE);
             // Basically if we are copying from a chunk at the end of a particular axis, the
             // coordinate we start copying before should be specified by area_start. In combination
-            // with the previous effect, we will always end up copying a ROOT_BLOCK_WIDTH sized
+            // with the previous effect, we will always end up copying a ROOT_BLOCK_SIZE sized
             // chunk of data.
-            if piece_offset.0 == 2 {
+            if piece_offset.0 == ROOT_CHUNK_SIZE {
                 copy_end.0 = area_start.0;
             }
-            if piece_offset.1 == 2 {
+            if piece_offset.1 == ROOT_CHUNK_SIZE {
                 copy_end.1 = area_start.1;
             }
-            if piece_offset.2 == 2 {
+            if piece_offset.2 == ROOT_CHUNK_SIZE {
                 copy_end.2 = area_start.2;
             }
             // Also we should end copying at start + SLICE_SIZE along the main axis of the slice.
@@ -184,7 +183,7 @@ impl TerrainUploadManager {
                     Axis::Y => (chunk_offset.0, 0, chunk_offset.2),
                     Axis::Z => (chunk_offset.0, chunk_offset.1, 0),
                 })
-                .wrap(2.repeat())
+                .wrap(ROOT_CHUNK_SIZE.repeat())
                 .scale(CHUNK_SIZE)
                 .signed();
             // If we copied with an offset on an off axis, the destination should have that same
@@ -319,18 +318,18 @@ impl TerrainUploadManager {
             Axis::Z => &mut self.lod_positions[lod].origin.2,
         };
         *num_slices += 1;
-        if *num_slices == ROOT_BLOCK_WIDTH / SLICE_SIZE {
+        if *num_slices == ROOT_BLOCK_SIZE / SLICE_SIZE {
             *num_slices = 0;
-            *coord += (ROOT_BLOCK_WIDTH / CHUNK_SIZE) as isize;
+            *coord += (ROOT_BLOCK_SIZE / CHUNK_SIZE) as isize;
         }
         // This makes it load the data from the next region instead of the current region.
         let origin_offset = match axis {
-            Axis::X => (2, 0, 0),
-            Axis::Y => (0, 2, 0),
-            Axis::Z => (0, 0, 2),
+            Axis::X => (ROOT_CHUNK_SIZE, 0, 0),
+            Axis::Y => (0, ROOT_CHUNK_SIZE, 0),
+            Axis::Z => (0, 0, ROOT_CHUNK_SIZE),
         };
         self.request_queue.push(TerrainUploadRequest {
-            origin: old_position.origin.add(origin_offset),
+            origin: old_position.origin.add(origin_offset.signed()),
             num_slices: old_position.num_loaded_slices,
             axis,
             lod,
@@ -351,8 +350,8 @@ impl TerrainUploadManager {
             Axis::Z => &mut self.lod_positions[lod].origin.2,
         };
         if *num_slices == 0 {
-            *num_slices = ROOT_BLOCK_WIDTH / SLICE_SIZE;
-            *coord -= (ROOT_BLOCK_WIDTH / CHUNK_SIZE) as isize;
+            *num_slices = ROOT_BLOCK_SIZE / SLICE_SIZE;
+            *coord -= (ROOT_BLOCK_SIZE / CHUNK_SIZE) as isize;
         }
         *num_slices -= 1;
         self.request_queue.push(TerrainUploadRequest {

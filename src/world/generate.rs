@@ -1,5 +1,5 @@
-use super::{functions, Heightmap, UnpackedChunkData, CHUNK_SIZE};
-use crate::render::{Material, MATERIALS};
+use super::{functions, Heightmap, UnpackedChunkData};
+use crate::render::{Material, MATERIALS, constants::*};
 use crate::util;
 use lazy_static::lazy_static;
 use rand::prelude::*;
@@ -15,10 +15,10 @@ fn height(x: isize, y: isize) -> isize {
 }
 
 pub fn generate_heightmap(data: &mut Heightmap, chunk_coord: &util::SignedCoord2D) {
-    let origin = util::scale_signed_coord_2d(chunk_coord, super::CHUNK_SIZE as isize);
+    let origin = util::scale_signed_coord_2d(chunk_coord, CHUNK_SIZE as isize);
 
     let mut index = 0;
-    for (x, y) in util::coord_iter_2d(super::CHUNK_SIZE) {
+    for (x, y) in util::coord_iter_2d(CHUNK_SIZE) {
         data.data[index] = height(origin.0 + x as isize, origin.1 + y as isize);
         index += 1;
     }

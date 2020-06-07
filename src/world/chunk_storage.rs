@@ -1,6 +1,5 @@
 use super::{Heightmap, PackedChunkData, UnpackedChunkData};
 use crate::util;
-use crate::world::CHUNK_VOLUME;
 use array_macro::array;
 use lz4::{Decoder, EncoderBuilder};
 use std::fs::File;

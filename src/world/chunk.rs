@@ -1,10 +1,5 @@
-use crate::render::Material;
+use crate::render::{Material, constants::*};
 use crate::util;
-
-// The index of the LOD that takes up an entire chunk.
-pub const MAX_LOD: usize = 7;
-pub const CHUNK_SIZE: usize = 1 << MAX_LOD; // 128
-pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
 pub enum PackedChunk {
     Empty { scale: u8 },
@@ -43,7 +38,7 @@ impl PackedChunk {
             }
             Self::Empty { scale } => {
                 util::fill_slice_3d_auto_clip(
-                    MAX_LOD as u8 + scale,
+                    MAX_CHUNK_LOD as u8 + scale,
                     target,
                     target_stride,
                     source_offset,
@@ -134,7 +129,7 @@ impl UnpackedChunkData {
     }
 
     pub fn pack_into(&self, packed_data: &mut PackedChunkData) {
-        let mut lods = Vec::with_capacity(MAX_LOD);
+        let mut lods = Vec::with_capacity(MAX_CHUNK_LOD);
         let mut lod_volume = CHUNK_VOLUME / 8;
         while lod_volume > 0 {
             lods.push(vec![false; lod_volume]);
@@ -163,10 +158,10 @@ impl UnpackedChunkData {
         }
 
         // If the whole chunk is empty, just fill the data.
-        if !lods[MAX_LOD - 1][0] {
+        if !lods[MAX_CHUNK_LOD - 1][0] {
             for index in 0..CHUNK_VOLUME {
                 packed_data.materials[index] = Material::air().pack();
-                packed_data.minefield[index] = self.scale + MAX_LOD as u8;
+                packed_data.minefield[index] = self.scale + MAX_CHUNK_LOD as u8;
             }
             return;
         }
