@@ -13,7 +13,7 @@ fn main() {
     let (_core, mut pipeline) = render::create_instance(&event_loop, &mut game);
     println!("Created in {}s.", instance_timer.elapsed().as_secs_f32());
     let mut frame_timer = Instant::now();
-    let mut performance_buffer = util::RingBufferAverage::new(16);
+    let mut performance_buffer = util::RingBufferAverage::new(120);
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => match event {
             WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -43,7 +43,11 @@ fn main() {
             frame_timer = Instant::now();
 
             performance_buffer.push_sample(millis);
-            println!("Average frame time: {}ms", performance_buffer.average());
+            print!("\r");
+            print!("{}ms / {}ms", performance_buffer.average(), performance_buffer.max());
+            print!("               ");
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
             game.tick((millis as f64 / 1000.0) as f32);
             pipeline.draw_frame(&mut game);
             game.borrow_controls_mut().tick();

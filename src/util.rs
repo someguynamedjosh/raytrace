@@ -181,6 +181,7 @@ impl<ElementType> RingBufferAverage<ElementType>
 where
     ElementType: std::ops::Add<ElementType, Output = ElementType>
         + std::ops::Div<ElementType, Output = ElementType>
+        + std::cmp::Ord
         + Default
         + Copy,
     u64: Into<ElementType>,
@@ -203,6 +204,14 @@ where
             .iter()
             .fold(Default::default(), |sum: ElementType, item| sum + *item);
         sum / (self.elements.len() as u64).into()
+    }
+
+    pub fn max(&self) -> ElementType {
+        let max = self
+            .elements
+            .iter()
+            .fold(Default::default(), |max: ElementType, item| max.max(*item));
+        max
     }
 
     pub fn push_sample(&mut self, sample: ElementType) {
