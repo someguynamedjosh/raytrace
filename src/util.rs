@@ -215,6 +215,9 @@ pub trait CoordUtil<ElementType> {
     fn add(self, other: Self) -> Self;
     fn sub(self, other: Self) -> Self;
     fn scale(self, factor: ElementType) -> Self;
+    fn shrink(self, factor: ElementType) -> Self;
+    /// Applies modulus to each coordinate.
+    fn wrap(self, bounds: Self) -> Self;
     fn ewmin(self, other: Self) -> Self;
     fn ewmax(self, other: Self) -> Self;
     fn inside(self, other: Self) -> bool;
@@ -224,11 +227,17 @@ pub trait CoordUtil<ElementType> {
 }
 
 use std::cmp::Ord;
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Div, Mul, Rem, Sub};
 
 impl<T> CoordUtil<T> for (T, T)
 where
-    T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Ord,
+    T: Copy
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>
+        + Rem<Output = T>
+        + Ord,
 {
     fn add(self, other: Self) -> Self {
         (self.0 + other.0, self.1 + other.1)
@@ -240,6 +249,14 @@ where
 
     fn scale(self, factor: T) -> Self {
         (self.0 * factor, self.1 * factor)
+    }
+
+    fn shrink(self, factor: T) -> Self {
+        (self.0 / factor, self.1 / factor)
+    }
+
+    fn wrap(self, other: Self) -> Self {
+        (self.0 % other.0, self.1 % other.1)
     }
 
     fn ewmin(self, other: Self) -> Self {
@@ -261,7 +278,13 @@ where
 
 impl<T> CoordUtil<T> for (T, T, T)
 where
-    T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Ord,
+    T: Copy
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Mul<Output = T>
+        + Div<Output = T>
+        + Rem<Output = T>
+        + Ord,
 {
     fn add(self, other: Self) -> Self {
         (self.0 + other.0, self.1 + other.1, self.2 + other.2)
@@ -273,6 +296,14 @@ where
 
     fn scale(self, factor: T) -> Self {
         (self.0 * factor, self.1 * factor, self.2 * factor)
+    }
+
+    fn shrink(self, factor: T) -> Self {
+        (self.0 / factor, self.1 / factor, self.2 / factor)
+    }
+
+    fn wrap(self, other: Self) -> Self {
+        (self.0 % other.0, self.1 % other.1, self.2 % other.2)
     }
 
     fn ewmin(self, other: Self) -> Self {
@@ -310,16 +341,17 @@ impl CoordConvertSigned<SignedCoord3D> for Coord3D {
     }
 }
 
-pub trait CoordExtend<T> {
-    fn extend(self) -> T;
+pub trait CoordRepeat<T> {
+    fn repeat(self) -> T;
 }
 
-impl<T: Copy> CoordExtend<(T, T, T)> for T {
-    fn extend(self) -> (T, T, T) {
+impl<T: Copy> CoordRepeat<(T, T, T)> for T {
+    fn repeat(self) -> (T, T, T) {
         (self, self, self)
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Axis {
     X,
     Y,
@@ -329,7 +361,7 @@ pub enum Axis {
 pub mod prelude {
     pub use super::Axis;
     pub use super::{Coord2D, Coord3D, SignedCoord2D, SignedCoord3D};
-    pub use super::{CoordConvertSigned, CoordExtend, CoordUtil};
+    pub use super::{CoordConvertSigned, CoordRepeat, CoordUtil};
 }
 
 /// Copies data from one array to another, assuming both arrays represent 3d data. data_size
@@ -379,18 +411,18 @@ fn test_copy_3d() {
     use rand::prelude::*;
     let source_dims = (4, 4, 6);
     let source = array![|_| rand::thread_rng().next_u32(); 96];
-    let mut target = array![0; 64];
+    let mut target = array![0; 125];
     copy_3d(
-        (1, 1, 2),
+        (2, 2, 2),
         &source,
         source_dims,
         (1, 2, 2),
         &mut target[..],
-        (4, 4, 4),
+        (5, 5, 5),
         (3, 2, 1),
     );
-    assert!(source[(1, 2, 2).to_index(source_dims)] == target[(3, 2, 1).to_index((4, 4, 4))]);
-    assert!(source[(1, 2, 3).to_index(source_dims)] == target[(3, 2, 2).to_index((4, 4, 4))]);
+    assert!(source[(1, 2, 2).to_index(source_dims)] == target[(3, 2, 1).to_index((5, 5, 5))]);
+    assert!(source[(1, 2, 3).to_index(source_dims)] == target[(3, 2, 2).to_index((5, 5, 5))]);
 }
 
 /// Copies all the data from source to target in the area that they overlap. The target data is
@@ -444,10 +476,10 @@ pub fn copy_3d_auto_clip<T: Copy>(
     copy_3d(
         data_size,
         source,
-        source_stride.extend(),
+        source_stride.repeat(),
         source_start,
         target,
-        target_stride.extend(),
+        target_stride.repeat(),
         target_position,
     );
 }

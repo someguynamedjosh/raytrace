@@ -20,6 +20,7 @@ pub const BLUE_NOISE_SIZE: usize = BLUE_NOISE_WIDTH * BLUE_NOISE_HEIGHT * BLUE_N
 
 pub const ROOT_BLOCK_WIDTH: usize = 256;
 pub const ROOT_BLOCK_VOLUME: usize = ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH * ROOT_BLOCK_WIDTH;
+pub const NUM_LODS: usize = 4;
 
 pub const NUM_UPLOAD_BUFFERS: usize = 32;
 pub const SHADER_GROUP_SIZE: usize = 8; // Each compute shader works on 8x8 groups.

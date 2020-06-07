@@ -14,8 +14,6 @@ use array_macro::array;
 use ash::vk;
 use std::rc::Rc;
 
-pub const NUM_LODS: usize = 4;
-
 pub struct RenderData {
     pub core: Rc<Core>,
 
@@ -149,11 +147,11 @@ impl RenderData {
             old_transform_c1: [0.0, 0.0, 0.0].into(),
             old_transform_c2: [0.0, 0.0, 0.0].into(),
             region_offset: [0, 0, 0].into(),
-            lod0_rotation: [0, 0, 0].into(),
+            lod0_rotation: [-64, -64, 0].into(),
             lod1_rotation: [0, 0, 0].into(),
             lod2_rotation: [0, 0, 0].into(),
             lod3_rotation: [0, 0, 0].into(),
-            lod0_space_offset: [0, 0, 0].into(),
+            lod0_space_offset: [-64, -64, 0].into(),
             lod1_space_offset: [0, 0, 0].into(),
             lod2_space_offset: [0, 0, 0].into(),
             lod3_space_offset: [0, 0, 0].into(),
@@ -305,8 +303,6 @@ impl RenderData {
                 &self.minefield_images[index],
             );
         }
-        let mut uploader = TerrainUploadManager::new(Rc::clone(&self.core));
-        uploader.test_command(&mut commands, world, &self);
         let generic_layout_images = [
             &self.albedo_buffer,
             &self.completed_buffer,

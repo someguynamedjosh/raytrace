@@ -1,18 +1,17 @@
-use ash::version::DeviceV1_0;
-use ash::vk;
-use cgmath::{Matrix3, SquareMatrix};
-use std::rc::Rc;
-
-use crate::game::Game;
-use crate::render::constants::*;
-use crate::render::general::command_buffer::CommandBuffer;
-use crate::render::general::core::Core;
-use crate::util;
-
 use super::descriptor_sets::DescriptorCollection;
 use super::render_data::RenderData;
 use super::shaders::{self, Stage};
 use super::structs::DenoisePushData;
+use super::TerrainUploadManager;
+use crate::game::Game;
+use crate::render::constants::*;
+use crate::render::general::command_buffer::CommandBuffer;
+use crate::render::general::core::Core;
+use crate::util::{self, prelude::*};
+use ash::version::DeviceV1_0;
+use ash::vk;
+use cgmath::{Matrix3, SquareMatrix};
+use std::rc::Rc;
 
 pub struct Pipeline {
     core: Rc<Core>,
@@ -26,6 +25,7 @@ pub struct Pipeline {
     frame_complete_fence: vk::Fence,
     render_data: RenderData,
     descriptor_collection: DescriptorCollection,
+    tum: TerrainUploadManager,
 
     denoise_stage: Stage,
     finalize_stage: Stage,
@@ -47,6 +47,11 @@ impl Pipeline {
         let mut render_data = RenderData::create(core.clone());
         render_data.initialize(game);
         let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
+        let mut tum = TerrainUploadManager::new(Rc::clone(&core));
+        for _ in 0..4 {
+            tum.request_decrease(Axis::X);
+            tum.request_decrease(Axis::Y);
+        }
 
         let denoise_stage = shaders::create_denoise_stage(core.clone(), &descriptor_collection);
         let finalize_stage = shaders::create_finalize_stage(core.clone(), &descriptor_collection);
@@ -64,6 +69,7 @@ impl Pipeline {
             frame_complete_fence,
             render_data,
             descriptor_collection,
+            tum,
 
             denoise_stage,
             finalize_stage,
@@ -185,6 +191,16 @@ impl Pipeline {
         let mut buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all();
         buffer_content[0] = uniform_data.clone();
         drop(buffer_content);
+
+        let mut upload_commands = CommandBuffer::create_single(Rc::clone(&self.core));
+        upload_commands.begin_one_time_submit();
+        self.tum.setup_next_request(
+            &mut upload_commands,
+            game.borrow_world_mut(),
+            &self.render_data,
+        );
+        upload_commands.end();
+        upload_commands.blocking_execute_and_destroy();
 
         // Do this after we set the buffer so that it will only affect the next frame.
         let uniform_data = &mut self.render_data.raytrace_uniform_data;
