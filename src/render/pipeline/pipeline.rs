@@ -47,11 +47,7 @@ impl Pipeline {
         let mut render_data = RenderData::create(core.clone());
         render_data.initialize(game);
         let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
-        let mut tum = TerrainUploadManager::new(Rc::clone(&core));
-        for _ in 0..4 {
-            tum.request_decrease(Axis::X);
-            tum.request_decrease(Axis::Y);
-        }
+        let tum = TerrainUploadManager::new(Rc::clone(&core));
 
         let denoise_stage = shaders::create_denoise_stage(core.clone(), &descriptor_collection);
         let finalize_stage = shaders::create_finalize_stage(core.clone(), &descriptor_collection);
@@ -175,6 +171,16 @@ impl Pipeline {
                 .expect("Failed to reset fence.");
         }
 
+        let mut upload_commands = CommandBuffer::create_single(Rc::clone(&self.core));
+        upload_commands.begin_one_time_submit();
+        self.tum.setup_next_request(
+            &mut upload_commands,
+            game.borrow_world_mut(),
+            &self.render_data,
+        );
+        upload_commands.end();
+        upload_commands.blocking_execute_and_destroy();
+
         let camera = game.borrow_camera();
         let util::TripleEulerVector { forward, up, right } =
             util::compute_triple_euler_vector(camera.heading, camera.pitch);
@@ -188,19 +194,26 @@ impl Pipeline {
         uniform_data.seed = (uniform_data.seed + 1) % BLUE_NOISE_SIZE as u32;
         uniform_data.sun_angle = game.get_sun_angle();
 
+        let off = self.tum.get_render_offset(0);
+        let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
+        uniform_data.lod0_rotation = off;
+        uniform_data.lod0_space_offset = off;
+        let off = self.tum.get_render_offset(1);
+        let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
+        uniform_data.lod1_rotation = off;
+        uniform_data.lod1_space_offset = off;
+        let off = self.tum.get_render_offset(2);
+        let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
+        uniform_data.lod2_rotation = off;
+        uniform_data.lod2_space_offset = off;
+        let off = self.tum.get_render_offset(3);
+        let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
+        uniform_data.lod3_rotation = off;
+        uniform_data.lod3_space_offset = off;
+
         let mut buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all();
         buffer_content[0] = uniform_data.clone();
         drop(buffer_content);
-
-        let mut upload_commands = CommandBuffer::create_single(Rc::clone(&self.core));
-        upload_commands.begin_one_time_submit();
-        self.tum.setup_next_request(
-            &mut upload_commands,
-            game.borrow_world_mut(),
-            &self.render_data,
-        );
-        upload_commands.end();
-        upload_commands.blocking_execute_and_destroy();
 
         // Do this after we set the buffer so that it will only affect the next frame.
         let uniform_data = &mut self.render_data.raytrace_uniform_data;

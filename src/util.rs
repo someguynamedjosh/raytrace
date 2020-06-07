@@ -332,11 +332,11 @@ where
 }
 
 pub trait CoordConvertSigned<T> {
-    fn sign(self) -> T;
+    fn signed(self) -> T;
 }
 
 impl CoordConvertSigned<SignedCoord3D> for Coord3D {
-    fn sign(self) -> SignedCoord3D {
+    fn signed(self) -> SignedCoord3D {
         (self.0 as isize, self.1 as isize, self.2 as isize)
     }
 }

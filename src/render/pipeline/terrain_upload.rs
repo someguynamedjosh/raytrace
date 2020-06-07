@@ -18,13 +18,14 @@ use std::rc::Rc;
 const SLICE_SIZE: usize = 16;
 const SLICES_PER_CHUNK: usize = CHUNK_SIZE / SLICE_SIZE;
 
-#[derive(Debug)]
 /// Upon consuming this request, the next slice along the specified axis will be uploaded.
 struct TerrainUploadRequest {
     origin: SignedCoord3D,
     // [0, ROOT_BLOCK_WIDTH / SLICE_SIZE), how many slices to offset in each axis.
     num_slices: Coord3D,
     axis: Axis,
+    // What position this LOD will be at after the request is completed.
+    new_position: Position,
 }
 
 // This stores the origin of the current region and how many slices of the next region have been
@@ -33,6 +34,16 @@ struct TerrainUploadRequest {
 struct Position {
     origin: SignedCoord3D,
     num_loaded_slices: Coord3D,
+}
+
+impl Position {
+    fn render_offset(&self, lod: isize) -> SignedCoord3D {
+        self.origin
+            .add((1, 1, 1))
+            .scale(CHUNK_SIZE as _)
+            .add(self.num_loaded_slices.scale(SLICE_SIZE).signed())
+            .scale(1 << lod)
+    }
 }
 
 impl Default for Position {
@@ -50,6 +61,7 @@ pub struct TerrainUploadManager {
     material_upload_buffer: Buffer<u32>,
     request_queue: Vec<TerrainUploadRequest>,
     lod_positions: [Position; NUM_LODS],
+    gpu_lod_positions: [Position; NUM_LODS],
 }
 
 impl TerrainUploadManager {
@@ -74,6 +86,7 @@ impl TerrainUploadManager {
             material_upload_buffer,
             request_queue: Vec::new(),
             lod_positions: array![Position::default(); NUM_LODS],
+            gpu_lod_positions: array![Position::default(); NUM_LODS],
         }
     }
 
@@ -115,7 +128,7 @@ impl TerrainUploadManager {
                 Axis::Z => (d1, d2, 0),
             };
             // Which chunk we are loading from.
-            let world_coord = piece_offset.add(chunk_offset).sign().add(request.origin);
+            let world_coord = piece_offset.add(chunk_offset).signed().add(request.origin);
             let chunk =
                 chunks.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2, 0));
             // The coordinate inside the chunk to start copying from.
@@ -168,7 +181,7 @@ impl TerrainUploadManager {
                 })
                 .wrap(2.repeat())
                 .scale(CHUNK_SIZE)
-                .sign();
+                .signed();
             // If we copied with an offset on an off axis, the destination should have that same
             // offset on that same off axis. Don't copy the main axis offset because that one picks
             // out data for this particular slice, and the buffer is only one slice long along the
@@ -178,7 +191,7 @@ impl TerrainUploadManager {
                 Axis::Y => (copy_start.0, 0, copy_start.2),
                 Axis::Z => (copy_start.0, copy_start.1, 0),
             };
-            let target_start = target_start.add(target_offset.sign());
+            let target_start = target_start.add(target_offset.signed());
             util::copy_3d_bounded_auto_clip(
                 copy_size,
                 &chunk.materials,
@@ -266,6 +279,8 @@ impl TerrainUploadManager {
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::GENERAL,
         );
+
+        self.gpu_lod_positions[0] = request.new_position;
     }
 
     pub fn setup_next_request(
@@ -281,6 +296,10 @@ impl TerrainUploadManager {
         self.upload_slice(commands, chunks, data, request);
     }
 
+    pub fn get_render_offset(&self, lod: usize) -> SignedCoord3D {
+        self.gpu_lod_positions[lod].render_offset(lod as _)
+    }
+
     pub fn request_increase(&mut self, axis: Axis) {
         // Load the next slice then increment the number of loaded slices.
         // This makes it load the data from the next region instead of the current region.
@@ -293,6 +312,7 @@ impl TerrainUploadManager {
             origin: self.lod_positions[0].origin.add(origin_offset),
             num_slices: self.lod_positions[0].num_loaded_slices,
             axis,
+            new_position: self.lod_positions[0].clone(),
         });
         let num_slices = match axis {
             Axis::X => &mut self.lod_positions[0].num_loaded_slices.0,
@@ -332,6 +352,7 @@ impl TerrainUploadManager {
             origin: self.lod_positions[0].origin,
             num_slices: self.lod_positions[0].num_loaded_slices,
             axis,
+            new_position: self.lod_positions[0].clone(),
         });
     }
 }

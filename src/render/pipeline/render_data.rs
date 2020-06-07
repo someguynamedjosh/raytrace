@@ -238,7 +238,7 @@ impl RenderData {
         let mut gen_time = 0;
         let mut copy_time = 0;
         for chunk_coord in util::coord_iter_3d(ROOT_CHUNK_WIDTH) {
-            let world_coord = chunk_coord.sign().sub((
+            let world_coord = chunk_coord.signed().sub((
                 (ROOT_CHUNK_WIDTH as isize / 2),
                 (ROOT_CHUNK_WIDTH as isize / 2),
                 (ROOT_CHUNK_WIDTH as isize / 2),
@@ -253,12 +253,12 @@ impl RenderData {
             gen_time += timer.elapsed().as_millis();
             let timer = std::time::Instant::now();
             chunk.copy_materials(
-                util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).sign(),
+                util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).signed(),
                 material_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
             );
             chunk.copy_minefield(
-                util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).sign(),
+                util::scale_coord_3d(&chunk_coord, CHUNK_SIZE).signed(),
                 minefield_buffer_data.as_slice_mut(),
                 ROOT_BLOCK_WIDTH,
             );
