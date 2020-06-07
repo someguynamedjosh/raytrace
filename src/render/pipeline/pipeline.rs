@@ -47,7 +47,7 @@ impl Pipeline {
         let mut render_data = RenderData::create(core.clone());
         render_data.initialize(game);
         let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
-        let tum = TerrainUploadManager::new(Rc::clone(&core));
+        let mut tum = TerrainUploadManager::new(Rc::clone(&core));
 
         let denoise_stage = shaders::create_denoise_stage(core.clone(), &descriptor_collection);
         let finalize_stage = shaders::create_finalize_stage(core.clone(), &descriptor_collection);
@@ -170,6 +170,13 @@ impl Pipeline {
                 .reset_fences(&[wait_fence])
                 .expect("Failed to reset fence.");
         }
+
+        let camera = game.borrow_camera();
+        self.tum.request_move_towards((
+            camera.origin.x as isize,
+            camera.origin.y as isize,
+            camera.origin.z as isize,
+        ));
 
         let mut upload_commands = CommandBuffer::create_single(Rc::clone(&self.core));
         upload_commands.begin_one_time_submit();

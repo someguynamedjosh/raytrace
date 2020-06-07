@@ -113,9 +113,6 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     );
 
     uint current_lod = 0;
-    // Space offset translates where a particular LOD is rendered. Normally, the center of an LOD
-    // is rendered at the origin. This offset changes that.
-    vec3 current_space_offset = uniform_data.l0so;
     // "rotation" here refers to offsetting the coordinates in a particular LOD via modular
     // arithmetic. E.G. having a rotation of 10 on the X axis means coordinate 0 is really
     // coordinate 10, and coordinate ROOT_BLOCK_WIDTH is also coordinate 10
@@ -130,7 +127,6 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         || abs(origin.z - uniform_data.l2so.z) > ROOT_BLOCK_WIDTH * 2
     ) {
         current_lod = 3;
-        current_space_offset = uniform_data.l3so;
         current_rotation = uniform_data.l3r;
     } else if (
         abs(origin.x - uniform_data.l1so.x) > ROOT_BLOCK_WIDTH
@@ -138,7 +134,6 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         || abs(origin.z - uniform_data.l1so.z) > ROOT_BLOCK_WIDTH
     ) {
         current_lod = 2;
-        current_space_offset = uniform_data.l2so;
         current_rotation = uniform_data.l2r;
     } else if (
         abs(origin.x - uniform_data.l0so.x) > ROOT_BLOCK_WIDTH / 2
@@ -146,12 +141,11 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         || abs(origin.z - uniform_data.l0so.z) > ROOT_BLOCK_WIDTH / 2
     ) {
         current_lod = 1;
-        current_space_offset = uniform_data.l1so;
         current_rotation = uniform_data.l1r;
     }
     uint lod_divisor = (1 << current_lod);
     vec3 pos_offset = vec3(ROOT_BLOCK_WIDTH / 2 * lod_divisor);
-    uint current_step = get_step(mod((result.position - current_space_offset + pos_offset + current_rotation) / lod_divisor, ROOT_BLOCK_WIDTH), current_lod);
+    uint current_step = get_step(mod((result.position - pos_offset) / lod_divisor, ROOT_BLOCK_WIDTH), current_lod);
     uint step_size = (1 << current_step) / 2;
 
     uint limit = 2048;
@@ -164,7 +158,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         // - only setting the result normal if a new value gets hit.
         // - distributing the addition of the offset in any way.
         //    - although this point might be worth investigating now that there's three offsets.
-        length_to_next_voxel = (vec3(0.0001) + mod((result.position - current_space_offset + pos_offset + current_rotation) * muls, vec3(step_size))) * length_per_axis;
+        length_to_next_voxel = (vec3(0.0001) + mod((result.position - pos_offset) * muls, vec3(step_size))) * length_per_axis;
         if (length_to_next_voxel.x < length_to_next_voxel.y) {
             if (length_to_next_voxel.x < length_to_next_voxel.z) { 
                 result.position += direction * length_to_next_voxel.x;
@@ -182,33 +176,53 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
                 result.normal = normals.z;
             }
         }
-        current_step = get_step(mod((result.position - current_space_offset + pos_offset + current_rotation) / lod_divisor, ROOT_BLOCK_WIDTH), current_lod);
+        current_step = get_step(mod((result.position - pos_offset) / lod_divisor, ROOT_BLOCK_WIDTH), current_lod);
         if (
-            abs(result.position.x - current_space_offset.x) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
-            || abs(result.position.y - current_space_offset.y) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
-            || abs(result.position.z - current_space_offset.z) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
+            abs(result.position.x - current_rotation.x) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
+            || abs(result.position.y - current_rotation.y) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
+            || abs(result.position.z - current_rotation.z) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
         ) {
             // We encountered the edge of the LOD.
             if (current_lod < 3) {
                 current_lod += 1;
                 lod_divisor *= 2;
                 pos_offset *= 2;
-                if (current_lod == 1) {
-                    current_rotation = uniform_data.l1r;
-                    current_space_offset = uniform_data.l1so;
-                } else if (current_lod == 2) {
-                    current_rotation = uniform_data.l2r;
-                    current_space_offset = uniform_data.l2so;
-                } else if (current_lod == 3) {
-                    current_rotation = uniform_data.l3r;
-                    current_space_offset = uniform_data.l3so;
-                }
             } else {
                 // We hit the sky.
                 break;
             }
+            if (current_lod == 1) {
+                current_rotation = uniform_data.l1r;
+            } else if (current_lod == 2) {
+                current_rotation = uniform_data.l2r;
+            } else if (current_lod == 3) {
+                current_rotation = uniform_data.l3r;
+            }
+            // If we're still outside the bounds of the new LOD, increase to the next LOD.
+            if (
+                abs(result.position.x - current_rotation.x) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
+                || abs(result.position.y - current_rotation.y) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
+                || abs(result.position.z - current_rotation.z) >= ROOT_BLOCK_WIDTH / 2 * lod_divisor
+            ) {
+                // We encountered the edge of the LOD.
+                if (current_lod < 3) {
+                    current_lod += 1;
+                    lod_divisor *= 2;
+                    pos_offset *= 2;
+                } else {
+                    // We hit the sky.
+                    break;
+                }
+                if (current_lod == 1) {
+                    current_rotation = uniform_data.l1r;
+                } else if (current_lod == 2) {
+                    current_rotation = uniform_data.l2r;
+                } else if (current_lod == 3) {
+                    current_rotation = uniform_data.l3r;
+                }
+            }
             // Get the current step, according to the new LOD.
-            current_step = get_step(mod((result.position - current_space_offset + pos_offset + current_rotation) / lod_divisor, ROOT_BLOCK_WIDTH), current_lod);
+            current_step = get_step(mod((result.position - pos_offset) / lod_divisor, ROOT_BLOCK_WIDTH), current_lod);
             // We encountered a block. We haven't had time to get to the edge yet.
             if (current_step <= current_lod) break;
         } else if (current_step <= current_lod) {
@@ -224,31 +238,31 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         // TODO: I don't think we need to use the textureLod function here.
         packed_material = textureLod(
             world, 
-            mod((result.position - current_space_offset + pos_offset + current_rotation) / vec3(ROOT_BLOCK_WIDTH), 1.0), 
+            mod((result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH), 1.0), 
             0.0
         ).r;
     } else if (current_lod == 1) {
         packed_material = textureLod(
             world_lod1, 
-            mod((result.position - current_space_offset + pos_offset + current_rotation) / vec3(ROOT_BLOCK_WIDTH * 2), 1.0), 
+            mod((result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 2), 1.0), 
             0.0
         ).r;
     } else if (current_lod == 2) {
         packed_material = textureLod(
             world_lod2, 
-            mod((result.position - current_space_offset + pos_offset + current_rotation) / vec3(ROOT_BLOCK_WIDTH * 4), 1.0), 
+            mod((result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 4), 1.0), 
             0.0
         ).r;
     } else if (current_lod == 3) {
         if (
-            abs(result.position.x - current_space_offset.x) < ROOT_BLOCK_WIDTH * 4
-            && abs(result.position.y - current_space_offset.y) < ROOT_BLOCK_WIDTH * 4
-            && abs(result.position.z - current_space_offset.z) < ROOT_BLOCK_WIDTH* 4
+            abs(result.position.x - current_rotation.x) < ROOT_BLOCK_WIDTH * 4
+            && abs(result.position.y - current_rotation.y) < ROOT_BLOCK_WIDTH * 4
+            && abs(result.position.z - current_rotation.z) < ROOT_BLOCK_WIDTH * 4
         ) {
             result.air = false;
             packed_material = textureLod(
                 world_lod3, 
-                mod((result.position - current_space_offset + pos_offset + current_rotation) / vec3(ROOT_BLOCK_WIDTH * 8), 1.0), 
+                mod((result.position + pos_offset) / vec3(ROOT_BLOCK_WIDTH * 8), 1.0), 
                 0.0
             ).r;
         } else {

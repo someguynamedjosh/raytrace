@@ -302,18 +302,7 @@ impl TerrainUploadManager {
 
     pub fn request_increase(&mut self, axis: Axis) {
         // Load the next slice then increment the number of loaded slices.
-        // This makes it load the data from the next region instead of the current region.
-        let origin_offset = match axis {
-            Axis::X => (2, 0, 0),
-            Axis::Y => (0, 2, 0),
-            Axis::Z => (0, 0, 2),
-        };
-        self.request_queue.push(TerrainUploadRequest {
-            origin: self.lod_positions[0].origin.add(origin_offset),
-            num_slices: self.lod_positions[0].num_loaded_slices,
-            axis,
-            new_position: self.lod_positions[0].clone(),
-        });
+        let old_position = self.lod_positions[0].clone();
         let num_slices = match axis {
             Axis::X => &mut self.lod_positions[0].num_loaded_slices.0,
             Axis::Y => &mut self.lod_positions[0].num_loaded_slices.1,
@@ -329,6 +318,18 @@ impl TerrainUploadManager {
             *num_slices = 0;
             *coord += (ROOT_BLOCK_WIDTH / CHUNK_SIZE) as isize;
         }
+        // This makes it load the data from the next region instead of the current region.
+        let origin_offset = match axis {
+            Axis::X => (2, 0, 0),
+            Axis::Y => (0, 2, 0),
+            Axis::Z => (0, 0, 2),
+        };
+        self.request_queue.push(TerrainUploadRequest {
+            origin: old_position.origin.add(origin_offset),
+            num_slices: old_position.num_loaded_slices,
+            axis,
+            new_position: self.lod_positions[0].clone(),
+        });
     }
 
     pub fn request_decrease(&mut self, axis: Axis) {
@@ -354,5 +355,27 @@ impl TerrainUploadManager {
             axis,
             new_position: self.lod_positions[0].clone(),
         });
+    }
+
+    fn request_move_lod_towards(&mut self, lod: usize, desired_center: SignedCoord3D) {
+        let current_pos = &self.lod_positions[lod];
+        let delta = desired_center.sub(current_pos.render_offset(lod as _));
+        if delta.0 > SLICE_SIZE as _ {
+            self.request_increase(Axis::X);
+        } else if -delta.0 > SLICE_SIZE as _ {
+            self.request_decrease(Axis::X);
+        } else if delta.1 > SLICE_SIZE as _ {
+            self.request_increase(Axis::Y);
+        } else if -delta.1 > SLICE_SIZE as _ {
+            self.request_decrease(Axis::Y);
+        } else if delta.2 > SLICE_SIZE as _ {
+            self.request_increase(Axis::Z);
+        } else if -delta.2 > SLICE_SIZE as _ {
+            self.request_decrease(Axis::Z);
+        }
+    }
+
+    pub fn request_move_towards(&mut self, desired_center: SignedCoord3D) {
+        self.request_move_lod_towards(0, desired_center);
     }
 }
