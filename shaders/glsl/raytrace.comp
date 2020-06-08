@@ -297,7 +297,7 @@ HitResult trace_sun(HitResult from, vec3 direction) {
     return trace_ray(from.position, normalize(direction + vec3(noise_value.rg, 0) * 0.05));
 }
 
-HitResult trace_diffuse(HitResult from) {
+vec3 diffuse_direction(HitResult from) {
     float theta1 = PI * 2.0 * noise_value.r;
     float theta2 = acos(1.0 - 2.0 * noise_value.g);
     // Random point on sphere.
@@ -319,7 +319,7 @@ HitResult trace_diffuse(HitResult from) {
     } else if (from.normal == NORMAL_z + 1) {
         direction -= vec3(0, 0, 1);
     }
-    return trace_ray(from.position, normalize(direction));
+    return normalize(direction);
 }
 
 vec3 debug_normal(uint normal) {
@@ -367,6 +367,38 @@ vec2 encode_screen_space_normal(uint normal, vec3 right, vec3 up) {
     return screen_space * 0.5 + vec2(0.5);
 }
 
+vec3 sun_color(vec3 sun_direction) {
+    float horizon = length(sun_direction.xy);
+    float sun_amount = min(1.0 - horizon, 0.02) * 50.0;
+    vec3 main_color = vec3(0.9647, 0.9216, 0.7843) * 2.0;
+    vec3 sunset_color = vec3(0.7608, 0.2588, 0.0275) * 2.0;
+    if (sun_direction.z >= 0.0) {
+        return mix(sunset_color, main_color, sun_amount);
+    } else {
+        return mix(sunset_color, vec3(0), sun_amount * 2);
+    }
+}
+
+vec3 sample_sky(vec3 direction, vec3 sun_direction, vec3 sunlight, bool include_sun) {
+    if (direction.z < 0.0) {
+        // direction = normalize(vec3(direction.xy, 0.0));
+    }
+    vec3 bright_color = vec3(0.5294, 0.8275, 0.9647);
+    vec3 dark_color = vec3(0.0863, 0.1294, 0.2196);
+    vec3 dusk_color = vec3(0.9529, 0.4392, 0.0235);
+    float sunlight_amount = clamp((sunlight.x + sunlight.y + sunlight.z) * 0.2 - 0.02, 0.0, 1.0);
+    float horizon = pow(length(direction.xy), mix(40.0, 10.0, sunlight_amount));
+    float sun_amount = 1.0 - 0.5 * length(sun_direction - direction);
+    float sun_halo_amount = pow(sun_amount, mix(5.0, 1.0, sunlight_amount));
+    float bright_amount = min(horizon + sun_halo_amount * 0.5, 1.0);
+    vec3 color = mix(dark_color, bright_color, bright_amount * max(sunlight_amount, 0.1));
+    color += sunlight * pow(sun_amount, 5.0) * 0.5;
+    if (sun_amount > 0.98 && include_sun) {
+        color += sunlight;
+    }
+    return color;
+}
+
 void main() {
     ivec2 pixel = ivec2(gl_WorkGroupID.xy - gl_WorkGroupID.xy % ivec2(PIXEL_SPREAD));
     pixel *= ivec2(gl_WorkGroupSize.xy);
@@ -390,35 +422,36 @@ void main() {
         + screen_pos.y * uniform_data.up
     );
 
-    float sun_amount = max(cos(uniform_data.sun_angle), 0.0);
-    vec3 skylight = vec3(0.5294, 0.8275, 0.9647) * sun_amount + vec3(0.1059, 0.1529, 0.2588) * (1 - sun_amount);
-    vec3 sunlight = vec3(1.2059, 1.0784, 0.9137) * sun_amount + vec3(0.9255, 0.3333, 0.1843) * (1 - sun_amount);
-    sunlight *= min(sun_amount * 6.0, 1.0);
-    vec3 sunangle = vec3(cos(uniform_data.sun_angle) * 0.5, sin(uniform_data.sun_angle), cos(uniform_data.sun_angle));
-    vec3 light = skylight;
+    vec3 sunangle = normalize(vec3(cos(uniform_data.sun_angle) * 0.5 + (uniform_data.sun_angle - 0.5) * 0.5, sin(uniform_data.sun_angle), cos(uniform_data.sun_angle)));
+    vec3 sunlight = sun_color(sunangle);
+    vec3 light = vec3(0.0);
     HitResult primary = trace_ray(uniform_data.origin, ray_direction);
-    if (!primary.air) {
-        light = vec3(0.0);
+    if (primary.air) {
+        light = sample_sky(ray_direction, sunangle, sunlight, true);
+    } else {
         noise_value = texture(blue_noise, mod(noise_offset, vec2(NOISE_SIZE)));
         HitResult sun1 = trace_sun(primary, sunangle);
         if (sun1.air) {
             light += sunlight;
         }
-        HitResult dif1 = trace_diffuse(primary);
+        vec3 dif1_dir = diffuse_direction(primary);
+        HitResult dif1 = trace_ray(primary.position, dif1_dir);
         if (dif1.air) {
-            light += skylight;
+            light += sample_sky(dif1_dir, sunangle, sunlight, true);
         } else {
             vec3 light2 = vec3(0.0);
             vec3 albedo2 = dif1.albedo;
             noise_value = texture(blue_noise, mod(noise_offset + vec2(2.0 / NOISE_SIZE), vec2(NOISE_SIZE)));
             HitResult sun2 = trace_sun(dif1, sunangle);
             if (sun2.air) {
-                light2 += albedo2 * sunlight;
+                light2 += sunlight;
             }
-            HitResult dif2 = trace_diffuse(dif1);
+            vec3 dif2_dir = diffuse_direction(dif1);
+            HitResult dif2 = trace_ray(dif1.position, dif2_dir);
             if (dif2.air) {
-                light2 += albedo2 * skylight;
+                light2 += sample_sky(dif2_dir, sunangle, sunlight, true);
             }
+            light2 *= albedo2;
             light2 += dif1.emission;
             light += light2;
         }
@@ -429,10 +462,14 @@ void main() {
       pixel,
       vec4(light, 1.0) / LIGHTING_SCALE
     );
+    uint distance = 0xFFFF;
+    if (!primary.air) {
+        distance = uint(length(uniform_data.origin - primary.position) * 32);
+    }
     imageStore(
         depth_buffer,
         pixel,
-        uvec4(length(uniform_data.origin - primary.position) * 64)
+        uvec4(distance, 0, 0, 0)
     );
     imageStore(
         normal_buffer,
@@ -452,7 +489,7 @@ void main() {
     imageStore(
         fog_color_buffer,
         pixel,
-        vec4(skylight / vec3(LIGHTING_SCALE), 1.0)
+        vec4(sample_sky(ray_direction, sunangle, sunlight, false) / 2.0, 1.0)
     );
 
     #ifdef REPORT_ERROR

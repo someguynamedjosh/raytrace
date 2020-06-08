@@ -39,10 +39,14 @@ void main() {
     vec3 light_color = imageLoad(lighting_buffer, pixel).rgb * LIGHTING_SCALE;
     vec3 final_color = albedo_color * light_color + emission_color;
 
-    vec3 fog_color = imageLoad(fog_color_buffer, pixel).rgb * LIGHTING_SCALE;
-    float fog_amount = imageLoad(depth_buffer, pixel).r / 256.0 / 128.0 / 100.0;
-    if (fog_amount > 1.0) fog_amount = 1.0;
-    final_color = final_color * (1 - fog_amount) + fog_color * fog_amount;
+    uint depth = imageLoad(depth_buffer, pixel).r;
+    // Don't fog up the sky, only terrain.
+    if (depth < 0xFFFF) {
+        vec3 fog_color = imageLoad(fog_color_buffer, pixel).rgb * 2.0;
+        float fog_amount = depth / (32.0 * 128.0 * 8.0);
+        if (fog_amount > 1.0) fog_amount = 1.0;
+        final_color = mix(final_color, fog_color, fog_amount);
+    }
 
     final_color.r = filmic_curve(final_color.r);
     final_color.g = filmic_curve(final_color.g);

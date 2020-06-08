@@ -9,7 +9,7 @@ use std::path::PathBuf;
 pub type ChunkStorageCoord = (isize, isize, isize, u8);
 
 const HEADER_SIZE: u64 = 16;
-const NUM_BUFFERS: usize = 32;
+const NUM_BUFFERS: usize = 256;
 
 pub struct ChunkStorage {
     storage_dir: PathBuf,
