@@ -370,8 +370,8 @@ vec2 encode_screen_space_normal(uint normal, vec3 right, vec3 up) {
 vec3 sun_color(vec3 sun_direction) {
     float horizon = length(sun_direction.xy);
     float sun_amount = min(1.0 - horizon, 0.02) * 50.0;
-    vec3 main_color = vec3(0.9647, 0.9216, 0.7843) * 2.0;
-    vec3 sunset_color = vec3(0.7608, 0.2588, 0.0275) * 2.0;
+    vec3 main_color = vec3(0.9647, 0.7843, 0.8824) * 2.0;
+    vec3 sunset_color = vec3(0.7412, 0.2157, 0.1686) * 2.0;
     if (sun_direction.z >= 0.0) {
         return mix(sunset_color, main_color, sun_amount);
     } else {
@@ -385,7 +385,6 @@ vec3 sample_sky(vec3 direction, vec3 sun_direction, vec3 sunlight, bool include_
     }
     vec3 bright_color = vec3(0.5294, 0.8275, 0.9647);
     vec3 dark_color = vec3(0.0863, 0.1294, 0.2196);
-    vec3 dusk_color = vec3(0.9529, 0.4392, 0.0235);
     float sunlight_amount = clamp((sunlight.x + sunlight.y + sunlight.z) * 0.2 - 0.02, 0.0, 1.0);
     float horizon = pow(length(direction.xy), mix(40.0, 10.0, sunlight_amount));
     float sun_amount = 1.0 - 0.5 * length(sun_direction - direction);

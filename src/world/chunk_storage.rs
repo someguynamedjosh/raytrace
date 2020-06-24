@@ -83,63 +83,30 @@ impl ChunkStorage {
     }
 
     fn generate_and_store_chunk(&mut self, coord: &ChunkStorageCoord) -> (usize, usize) {
-        if coord.3 == 0 {
-            let pc_buffer_index = self.available_pc_buffers.pop().unwrap();
-            let uc_buffer_index = self.available_uc_buffers.pop().unwrap();
+        let pc_buffer_index = self.available_pc_buffers.pop().unwrap();
+        let uc_buffer_index = self.available_uc_buffers.pop().unwrap();
 
-            let mut heightmap = Heightmap::new();
-            super::generate_heightmap(&mut heightmap, &(coord.0, coord.1));
-            let unpacked_data = &mut self.uc_buffers[uc_buffer_index];
-            super::generate_chunk(unpacked_data, &(coord.0, coord.1, coord.2), &heightmap);
-            let packed_data = &mut self.pc_buffers[pc_buffer_index];
-            unpacked_data.pack_into(packed_data);
-            if let Err(err) = Self::write_packed_chunk_data(
-                &Self::get_path_for(&self.storage_dir, coord),
-                &self.pc_buffers[pc_buffer_index],
-                unpacked_data.scale,
-            ) {
-                println!("WARNING: Failed to write chunk data for {:?}.", coord);
-                println!("Caused by: {}", err);
-            }
-
-            (pc_buffer_index, uc_buffer_index)
-        } else {
-            let pc_buffer_index = self.available_pc_buffers.pop().unwrap();
-            let uc_buffer_index = self.available_uc_buffers.pop().unwrap();
-            let unpacked_data_ptr = self.uc_buffers.as_mut_ptr();
-
-            let mut neighborhood = Vec::with_capacity(8);
-            let next_lod_coord = util::scale_signed_coord_3d(&(coord.0, coord.1, coord.2), 2);
-            let next_lod = coord.3 - 1;
-            for offset in util::coord_iter_3d(2) {
-                let coord = util::offset_signed_coord_3d(
-                    &next_lod_coord,
-                    &util::coord_to_signed_coord(&offset),
-                );
-                let (unused, index) = self.load_chunk_data(&(coord.0, coord.1, coord.2, next_lod));
-                self.available_pc_buffers.push(unused);
-                neighborhood.push(index);
-            }
-            let neighborhood_refs: Vec<_> = neighborhood
-                .iter()
-                .map(|index| &self.uc_buffers[*index])
-                .collect();
-            // This is safe because this will always point to a different buffer than the other ones
-            let unpacked_data = unsafe { &mut *unpacked_data_ptr.offset(uc_buffer_index as isize) };
-            super::generate_mip(unpacked_data, &neighborhood_refs[..]);
-            let packed_data = &mut self.pc_buffers[pc_buffer_index];
-            unpacked_data.pack_into(packed_data);
-            if let Err(err) = Self::write_packed_chunk_data(
-                &Self::get_path_for(&self.storage_dir, coord),
-                &self.pc_buffers[pc_buffer_index],
-                unpacked_data.scale,
-            ) {
-                println!("WARNING: Failed to write chunk data for {:?}.", coord);
-                println!("Caused by: {}", err);
-            }
-            self.available_uc_buffers.append(&mut neighborhood);
-            (pc_buffer_index, uc_buffer_index)
+        let mut heightmap = Heightmap::new();
+        super::generate_heightmap(&mut heightmap, &(coord.0, coord.1), coord.3 as _);
+        let unpacked_data = &mut self.uc_buffers[uc_buffer_index];
+        super::generate_chunk(
+            unpacked_data,
+            &(coord.0, coord.1, coord.2),
+            &heightmap,
+            coord.3 as _,
+        );
+        let packed_data = &mut self.pc_buffers[pc_buffer_index];
+        unpacked_data.pack_into(packed_data);
+        if let Err(err) = Self::write_packed_chunk_data(
+            &Self::get_path_for(&self.storage_dir, coord),
+            &self.pc_buffers[pc_buffer_index],
+            unpacked_data.scale,
+        ) {
+            println!("WARNING: Failed to write chunk data for {:?}.", coord);
+            println!("Caused by: {}", err);
         }
+
+        (pc_buffer_index, uc_buffer_index)
     }
 
     fn load_chunk_data(&mut self, coord: &ChunkStorageCoord) -> (usize, usize) {
