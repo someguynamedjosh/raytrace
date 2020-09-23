@@ -8,7 +8,7 @@ lazy_static! {
     static ref MOUNTAIN_NOISE: functions::MountainNoise2 = functions::MountainNoise2::new();
 }
 
-const SCALE: f64 = 1600.0;
+const SCALE: f64 = 0600.0;
 
 fn height(x: isize, y: isize) -> isize {
     (MOUNTAIN_NOISE.get(x as f64 / SCALE, y as f64 / SCALE) * SCALE * 0.2 + 10.0) as isize

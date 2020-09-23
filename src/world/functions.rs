@@ -72,9 +72,11 @@ pub struct MountainNoise2 {
 
 impl MountainNoise2 {
     pub fn new() -> MountainNoise2 {
-        MountainNoise2 {
+        let mut result = MountainNoise2 {
             simplex: BasicMulti::new(),
-        }
+        };
+        result.simplex.persistence = 0.5;
+        result
     }
 
     fn get_noise(&self, coord: [f64; 2]) -> f64 {
@@ -91,7 +93,7 @@ impl MountainNoise2 {
         let slope = magnitude(dx, dy);
 
         let base = self.get_noise([x, y]);
-        let eroded = base - slope * 0.5 + 0.5;
+        let eroded = base + (1.0 - slope) * 0.7;
         (eroded / 1.5).powf(2.6)
     }
 }

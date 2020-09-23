@@ -1,3 +1,6 @@
+// I have no idea where this file originally came from but it appears to be similar to:
+// https://docs.rs/vulkano-win/0.19.0/src/vulkano_win/lib.rs.html
+
 use ash::extensions::ext::DebugUtils;
 use ash::extensions::khr::Surface;
 use ash::version::{EntryV1_0, InstanceV1_0};
