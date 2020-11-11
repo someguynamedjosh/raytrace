@@ -201,22 +201,10 @@ impl Pipeline {
         uniform_data.seed = (uniform_data.seed + 1) % BLUE_NOISE_SIZE as u32;
         uniform_data.sun_angle = game.get_sun_angle();
 
-        let off = self.tum.get_render_offset(0);
+        let off = self.tum.get_render_offset();
         let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
-        uniform_data.lod0_rotation = off;
-        uniform_data.lod0_space_offset = off;
-        let off = self.tum.get_render_offset(1);
-        let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
-        uniform_data.lod1_rotation = off;
-        uniform_data.lod1_space_offset = off;
-        let off = self.tum.get_render_offset(2);
-        let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
-        uniform_data.lod2_rotation = off;
-        uniform_data.lod2_space_offset = off;
-        let off = self.tum.get_render_offset(3);
-        let off = (off.0 as i32, off.1 as i32, off.2 as i32).into();
-        uniform_data.lod3_rotation = off;
-        uniform_data.lod3_space_offset = off;
+        uniform_data.rotation = off;
+        uniform_data.space_offset = off;
 
         let mut buffer_content = self.render_data.raytrace_uniform_data_buffer.bind_all();
         buffer_content[0] = uniform_data.clone();

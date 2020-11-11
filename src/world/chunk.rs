@@ -1,4 +1,4 @@
-use crate::render::{Material, constants::*};
+use crate::render::{constants::*, Material};
 use crate::util;
 
 pub enum PackedChunk {
@@ -93,28 +93,22 @@ impl PackedChunkData {
         );
     }
 
-    pub fn unpack_into(&self, unpacked_data: &mut UnpackedChunkData, scale: u8) {
+    pub fn unpack_into(&self, unpacked_data: &mut UnpackedChunkData) {
         for index in 0..CHUNK_VOLUME {
             unpacked_data.materials[index] = Material::unpack(self.materials[index]);
         }
-        unpacked_data.scale = scale;
     }
 }
 
 #[derive(Clone, PartialEq)]
 pub struct UnpackedChunkData {
     pub materials: Vec<Material>,
-    pub scale: u8,
 }
 
 impl UnpackedChunkData {
-    /// Scale is what sized block one voxel in this chunk represents. 0 = smallest unit, 1 = double,
-    /// 2 = quadruple, 3 = 8x and so on. It basically offsets every LOD value computed for the
-    /// minefield in the pack function.
-    pub fn new(scale: u8) -> UnpackedChunkData {
+    pub fn new() -> UnpackedChunkData {
         UnpackedChunkData {
             materials: vec![Material::air(); CHUNK_VOLUME],
-            scale,
         }
     }
 
@@ -161,7 +155,7 @@ impl UnpackedChunkData {
         if !lods[MAX_CHUNK_LOD - 1][0] {
             for index in 0..CHUNK_VOLUME {
                 packed_data.materials[index] = Material::air().pack();
-                packed_data.minefield[index] = self.scale + MAX_CHUNK_LOD as u8;
+                packed_data.minefield[index] = MAX_CHUNK_LOD as u8;
             }
             return;
         }
@@ -170,12 +164,12 @@ impl UnpackedChunkData {
         for index in 0..CHUNK_VOLUME {
             let coord = util::index_to_coord_3d(index, CHUNK_SIZE);
             if self.materials[index].solid {
-                packed_data.minefield[index] = self.scale;
+                packed_data.minefield[index] = 0;
                 continue;
             }
             let mut lod_coord = util::shrink_coord_3d(&coord, 2);
             let mut lod_stride = CHUNK_SIZE / 2;
-            let mut current_lod = self.scale + 1;
+            let mut current_lod = 1;
             for lod in &lods {
                 let lod_index = util::coord_to_index_3d(&lod_coord, lod_stride);
                 if lod[lod_index] {

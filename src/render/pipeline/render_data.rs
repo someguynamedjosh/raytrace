@@ -145,14 +145,8 @@ impl RenderData {
             old_transform_c1: [0.0, 0.0, 0.0].into(),
             old_transform_c2: [0.0, 0.0, 0.0].into(),
             region_offset: [0, 0, 0].into(),
-            lod0_rotation: [-64, -64, 0].into(),
-            lod1_rotation: [0, 0, 0].into(),
-            lod2_rotation: [0, 0, 0].into(),
-            lod3_rotation: [0, 0, 0].into(),
-            lod0_space_offset: [-64, -64, 0].into(),
-            lod1_space_offset: [0, 0, 0].into(),
-            lod2_space_offset: [0, 0, 0].into(),
-            lod3_space_offset: [0, 0, 0].into(),
+            rotation: [-64, -64, 0].into(),
+            space_offset: [-64, -64, 0].into(),
             _padding0: 0,
             _padding1: 0,
             _padding2: 0,
@@ -165,12 +159,6 @@ impl RenderData {
             _padding9: 0,
             _padding10: 0,
             _padding11: 0,
-            _padding12: 0,
-            _padding13: 0,
-            _padding14: 0,
-            _padding15: 0,
-            _padding16: 0,
-            _padding17: 0,
         }
     }
 
@@ -238,7 +226,7 @@ impl RenderData {
             ));
             let timer = std::time::Instant::now();
             let chunk =
-                world.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2, 0));
+                world.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2));
             gen_time += timer.elapsed().as_millis();
             let timer = std::time::Instant::now();
             chunk.copy_materials(

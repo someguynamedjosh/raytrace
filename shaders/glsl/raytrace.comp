@@ -97,12 +97,9 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
         direction.z > 0 ? -1 : 1
     );
 
-    // "rotation" here refers to offsetting the coordinates in a particular LOD via modular
+    // "rotation" here refers to offsetting the coordinates via modular
     // arithmetic. E.G. having a rotation of 10 on the X axis means coordinate 0 is really
     // coordinate 10, and coordinate ROOT_BLOCK_WIDTH is also coordinate 10
-    // TODO: Investigate weird rendering lag when rotated along z axis and rendering from outside
-    // LOD 0. It doesn't happen when inside LOD 0 but it might still be dragging down performance
-    // in hidden ways.
     // Also investigate high lag when sticking my head in a block.
     vec3 current_rotation = uniform_data.l0r;
     vec3 pos_offset = vec3(ROOT_BLOCK_WIDTH / 2);

@@ -17,15 +17,12 @@ fn height(x: isize, y: isize) -> isize {
 pub fn generate_heightmap(
     data: &mut Heightmap,
     chunk_coord: &util::SignedCoord2D,
-    scale_factor: u32,
 ) {
     let origin = util::scale_signed_coord_2d(chunk_coord, CHUNK_SIZE as isize);
-    let scale = 2usize.pow(scale_factor) as isize;
-    let origin = origin.scale(scale);
 
     let mut index = 0;
     for (x, y) in util::coord_iter_2d(CHUNK_SIZE) {
-        let (x, y) = (x as isize, y as isize).scale(scale);
+        let (x, y) = (x as isize, y as isize);
         data.data[index] = height(origin.0 + x, origin.1 + y);
         index += 1;
     }
@@ -57,11 +54,8 @@ pub fn generate_chunk(
     data: &mut UnpackedChunkData,
     chunk_coord: &util::SignedCoord3D,
     heightmap: &super::Heightmap,
-    scale_factor: u32,
 ) {
-    data.scale = scale_factor as u8;
-    let scale = 2usize.pow(scale_factor) as isize;
-    let size = CHUNK_SIZE as isize * scale;
+    let size = CHUNK_SIZE as isize;
     let origin = chunk_coord.scale(size);
 
     let mut random = rand::thread_rng();
@@ -78,7 +72,7 @@ pub fn generate_chunk(
                 continue;
             }
             for lz in 0..CHUNK_SIZE {
-                let z = origin.2 + lz as isize * scale;
+                let z = origin.2 + lz as isize;
                 if z >= height_val {
                     data.set_block(&(coord2d.0, coord2d.1, lz), Material::air());
                     continue;
@@ -86,67 +80,6 @@ pub fn generate_chunk(
                 let material_val = material(&mut random, z);
                 data.set_block(&(coord2d.0, coord2d.1, lz), MATERIALS[material_val].clone());
             }
-        }
-    }
-}
-
-pub fn generate_mip(target: &mut UnpackedChunkData, neighborhood: &[&UnpackedChunkData]) {
-    debug_assert!(
-        neighborhood.len() == 8,
-        "Neighborhood must contain 8 chunks."
-    );
-    let smaller_scale = neighborhood[0].scale;
-    for chunk in neighborhood {
-        debug_assert!(
-            chunk.scale == smaller_scale,
-            "Scales of all component chunks must be equal, {} != {}.",
-            chunk.scale,
-            smaller_scale
-        );
-    }
-    target.scale = neighborhood[0].scale + 1;
-    for (chunk, offset) in neighborhood.iter().zip(util::coord_iter_3d(2)) {
-        let offset = util::scale_coord_3d(&offset, CHUNK_SIZE / 2);
-        incorporate_materials_from_smaller_chunk(target, &chunk.materials, &offset);
-    }
-}
-
-fn incorporate_materials_from_smaller_chunk(
-    target: &mut UnpackedChunkData,
-    materials: &[Material],
-    offset: &util::Coord3D,
-) {
-    for coord in util::coord_iter_3d(CHUNK_SIZE / 2) {
-        let source_coord = util::scale_coord_3d(&coord, 2);
-        let source_index = util::coord_to_index_3d(&source_coord, CHUNK_SIZE);
-        let target_coord = util::offset_coord_3d(&coord, offset);
-        let mut material = Material::black();
-        let mut power = 0;
-        // Gives every index in a 2x2x2 neighborhood when added to the original index.
-        for offset in [
-            0,
-            1,
-            CHUNK_SIZE,
-            CHUNK_SIZE + 1,
-            CHUNK_SIZE * CHUNK_SIZE,
-            CHUNK_SIZE * CHUNK_SIZE + 1,
-            CHUNK_SIZE * CHUNK_SIZE + CHUNK_SIZE,
-            CHUNK_SIZE * CHUNK_SIZE + CHUNK_SIZE + 1,
-        ]
-        .iter()
-        {
-            let source = &materials[source_index + offset];
-            if source.solid {
-                material.add(source);
-                power += 1;
-            }
-        }
-        if power > 3 {
-            material.divide(power);
-            target.materials[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] = material;
-        } else {
-            target.materials[util::coord_to_index_3d(&target_coord, CHUNK_SIZE)] =
-                MATERIALS[0].clone();
         }
     }
 }

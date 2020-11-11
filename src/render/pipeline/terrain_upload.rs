@@ -14,8 +14,7 @@ struct TerrainUploadRequest {
     // [0, ROOT_BLOCK_SIZE / SLICE_SIZE), how many slices to offset in each axis.
     num_slices: Coord3D,
     axis: Axis,
-    lod: usize,
-    // What position this LOD will be at after the request is completed.
+    // What position the buffer will be at after the request is completed.
     new_position: Position,
 }
 
@@ -28,13 +27,12 @@ struct Position {
 }
 
 impl Position {
-    fn render_offset(&self, lod: isize) -> SignedCoord3D {
+    fn render_offset(&self) -> SignedCoord3D {
         const COORD: isize = ROOT_CHUNK_SIZE as isize / 2;
         self.origin
             .add(COORD.repeat())
             .scale(CHUNK_SIZE as _)
             .add(self.num_loaded_slices.scale(SLICE_SIZE).signed())
-            .scale(1 << lod)
     }
 }
 
@@ -53,8 +51,8 @@ pub struct TerrainUploadManager {
     minefield_upload_buffer: Buffer<u8>,
     material_upload_buffer: Buffer<u32>,
     request_queue: Vec<TerrainUploadRequest>,
-    lod_position: Position,
-    gpu_lod_position: Position,
+    cpu_position: Position,
+    gpu_position: Position,
 }
 
 impl TerrainUploadManager {
@@ -78,8 +76,8 @@ impl TerrainUploadManager {
             minefield_upload_buffer,
             material_upload_buffer,
             request_queue: Vec::new(),
-            lod_position: Position::default(),
-            gpu_lod_position: Position::default(),
+            cpu_position: Position::default(),
+            gpu_position: Position::default(),
         }
     }
 
@@ -90,7 +88,6 @@ impl TerrainUploadManager {
         data: &RenderData,
         request: TerrainUploadRequest,
     ) {
-        assert!(request.lod == 0);
         let mut mat_data = self.material_upload_buffer.bind_all();
         let mut min_data = self.minefield_upload_buffer.bind_all();
         // The dimensions of the data that will be copied into the buffer and eventually copied
@@ -123,12 +120,8 @@ impl TerrainUploadManager {
             };
             // Which chunk we are loading from.
             let world_coord = piece_offset.add(chunk_offset).signed().add(request.origin);
-            let chunk = chunks.borrow_packed_chunk_data(&(
-                world_coord.0,
-                world_coord.1,
-                world_coord.2,
-                request.lod as _,
-            ));
+            let chunk =
+                chunks.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2));
             // The coordinate inside the chunk to start copying from.
             let mut copy_start = (0, 0, 0);
             // Basically if we are copying from a chunk at the start of a particular axis, the
@@ -278,7 +271,7 @@ impl TerrainUploadManager {
             vk::ImageLayout::GENERAL,
         );
 
-        self.gpu_lod_position = request.new_position;
+        self.gpu_position = request.new_position;
     }
 
     pub fn setup_next_request(
@@ -294,22 +287,22 @@ impl TerrainUploadManager {
         self.upload_slice(commands, chunks, data, request);
     }
 
-    pub fn get_render_offset(&self, lod: usize) -> SignedCoord3D {
-        self.gpu_lod_position.render_offset(lod as _)
+    pub fn get_render_offset(&self) -> SignedCoord3D {
+        self.gpu_position.render_offset()
     }
 
-    pub fn request_increase(&mut self, axis: Axis, lod: usize) {
+    pub fn request_increase(&mut self, axis: Axis) {
         // Load the next slice then increment the number of loaded slices.
-        let old_position = self.lod_position.clone();
+        let old_position = self.cpu_position.clone();
         let num_slices = match axis {
-            Axis::X => &mut self.lod_position.num_loaded_slices.0,
-            Axis::Y => &mut self.lod_position.num_loaded_slices.1,
-            Axis::Z => &mut self.lod_position.num_loaded_slices.2,
+            Axis::X => &mut self.cpu_position.num_loaded_slices.0,
+            Axis::Y => &mut self.cpu_position.num_loaded_slices.1,
+            Axis::Z => &mut self.cpu_position.num_loaded_slices.2,
         };
         let coord = match axis {
-            Axis::X => &mut self.lod_position.origin.0,
-            Axis::Y => &mut self.lod_position.origin.1,
-            Axis::Z => &mut self.lod_position.origin.2,
+            Axis::X => &mut self.cpu_position.origin.0,
+            Axis::Y => &mut self.cpu_position.origin.1,
+            Axis::Z => &mut self.cpu_position.origin.2,
         };
         *num_slices += 1;
         if *num_slices == ROOT_BLOCK_SIZE / SLICE_SIZE {
@@ -326,22 +319,21 @@ impl TerrainUploadManager {
             origin: old_position.origin.add(origin_offset.signed()),
             num_slices: old_position.num_loaded_slices,
             axis,
-            lod,
-            new_position: self.lod_position.clone(),
+            new_position: self.cpu_position.clone(),
         });
     }
 
-    pub fn request_decrease(&mut self, axis: Axis, lod: usize) {
+    pub fn request_decrease(&mut self, axis: Axis) {
         // Rewind the coordinate to the previous slice and then load it from the current region.
         let num_slices = match axis {
-            Axis::X => &mut self.lod_position.num_loaded_slices.0,
-            Axis::Y => &mut self.lod_position.num_loaded_slices.1,
-            Axis::Z => &mut self.lod_position.num_loaded_slices.2,
+            Axis::X => &mut self.cpu_position.num_loaded_slices.0,
+            Axis::Y => &mut self.cpu_position.num_loaded_slices.1,
+            Axis::Z => &mut self.cpu_position.num_loaded_slices.2,
         };
         let coord = match axis {
-            Axis::X => &mut self.lod_position.origin.0,
-            Axis::Y => &mut self.lod_position.origin.1,
-            Axis::Z => &mut self.lod_position.origin.2,
+            Axis::X => &mut self.cpu_position.origin.0,
+            Axis::Y => &mut self.cpu_position.origin.1,
+            Axis::Z => &mut self.cpu_position.origin.2,
         };
         if *num_slices == 0 {
             *num_slices = ROOT_BLOCK_SIZE / SLICE_SIZE;
@@ -349,34 +341,28 @@ impl TerrainUploadManager {
         }
         *num_slices -= 1;
         self.request_queue.push(TerrainUploadRequest {
-            origin: self.lod_position.origin,
-            num_slices: self.lod_position.num_loaded_slices,
+            origin: self.cpu_position.origin,
+            num_slices: self.cpu_position.num_loaded_slices,
             axis,
-            lod,
-            new_position: self.lod_position.clone(),
+            new_position: self.cpu_position.clone(),
         });
     }
 
-    fn request_move_lod_towards(&mut self, lod: usize, desired_center: SignedCoord3D) {
-        let current_pos = &self.lod_position;
-        let delta = desired_center.sub(current_pos.render_offset(lod as _));
-        let delta = delta.shrink(1 << lod);
-        if delta.0 > SLICE_SIZE as _ {
-            self.request_increase(Axis::X, lod);
-        } else if -delta.0 > SLICE_SIZE as _ {
-            self.request_decrease(Axis::X, lod);
-        } else if delta.1 > SLICE_SIZE as _ {
-            self.request_increase(Axis::Y, lod);
-        } else if -delta.1 > SLICE_SIZE as _ {
-            self.request_decrease(Axis::Y, lod);
-        } else if delta.2 > SLICE_SIZE as _ {
-            self.request_increase(Axis::Z, lod);
-        } else if -delta.2 > SLICE_SIZE as _ {
-            self.request_decrease(Axis::Z, lod);
-        }
-    }
-
     pub fn request_move_towards(&mut self, desired_center: SignedCoord3D) {
-        self.request_move_lod_towards(0, desired_center);
+        let current_pos = &self.cpu_position;
+        let delta = desired_center.sub(current_pos.render_offset());
+        if delta.0 > SLICE_SIZE as _ {
+            self.request_increase(Axis::X);
+        } else if -delta.0 > SLICE_SIZE as _ {
+            self.request_decrease(Axis::X);
+        } else if delta.1 > SLICE_SIZE as _ {
+            self.request_increase(Axis::Y);
+        } else if -delta.1 > SLICE_SIZE as _ {
+            self.request_decrease(Axis::Y);
+        } else if delta.2 > SLICE_SIZE as _ {
+            self.request_increase(Axis::Z);
+        } else if -delta.2 > SLICE_SIZE as _ {
+            self.request_decrease(Axis::Z);
+        }
     }
 }

@@ -1,12 +1,11 @@
 use super::{Heightmap, PackedChunkData, UnpackedChunkData};
-use crate::util;
 use array_macro::array;
 use lz4::{Decoder, EncoderBuilder};
 use std::fs::File;
-use std::io::{self, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
-pub type ChunkStorageCoord = (isize, isize, isize, u8);
+pub type ChunkStorageCoord = (isize, isize, isize);
 
 const HEADER_SIZE: u64 = 16;
 const NUM_BUFFERS: usize = 256;
@@ -28,7 +27,7 @@ impl ChunkStorage {
         std::fs::create_dir_all(&storage_dir).expect("Failed to create chunk storage directory.");
         ChunkStorage {
             storage_dir,
-            uc_buffers: array![UnpackedChunkData::new(0); NUM_BUFFERS],
+            uc_buffers: array![UnpackedChunkData::new(); NUM_BUFFERS],
             available_uc_buffers: (0..NUM_BUFFERS).collect(),
             pc_buffers: array![PackedChunkData::new(); NUM_BUFFERS],
             available_pc_buffers: (0..NUM_BUFFERS).collect(),
@@ -36,21 +35,13 @@ impl ChunkStorage {
     }
 
     fn get_path_for(base: &PathBuf, coord: &ChunkStorageCoord) -> PathBuf {
-        let filename = format!(
-            "{:016X}{:016X}{:016X}{:02X}",
-            coord.0, coord.1, coord.2, coord.3
-        );
+        let filename = format!("{:016X}{:016X}{:016X}", coord.0, coord.1, coord.2);
         base.join(filename)
     }
 
-    fn write_packed_chunk_data(
-        path: &PathBuf,
-        data: &PackedChunkData,
-        scale: u8,
-    ) -> io::Result<()> {
+    fn write_packed_chunk_data(path: &PathBuf, data: &PackedChunkData) -> io::Result<()> {
         let file = File::create(path)?;
         let mut writer = EncoderBuilder::new().level(4).build(file)?;
-        writer.write_all(&[scale])?;
         unsafe {
             let mat_slice = &data.materials[..];
             let mat_slice_u8 =
@@ -62,12 +53,10 @@ impl ChunkStorage {
         Ok(())
     }
 
-    fn read_into_packed_chunk_data(path: &PathBuf, data: &mut PackedChunkData) -> io::Result<u8> {
+    fn read_into_packed_chunk_data(path: &PathBuf, data: &mut PackedChunkData) -> io::Result<()> {
         let file = File::open(path)?;
         let mut reader = Decoder::new(file)?;
 
-        let mut scale = [0; 1];
-        reader.read_exact(&mut scale)?;
         unsafe {
             let mat_slice = &mut data.materials[..];
             let mat_slice_u8 =
@@ -75,7 +64,7 @@ impl ChunkStorage {
             reader.read_exact(mat_slice_u8)?;
         }
         reader.read_exact(&mut data.minefield[..])?;
-        Ok(scale[0])
+        Ok(())
     }
 
     fn has_chunk(&self, coord: &ChunkStorageCoord) -> bool {
@@ -87,20 +76,14 @@ impl ChunkStorage {
         let uc_buffer_index = self.available_uc_buffers.pop().unwrap();
 
         let mut heightmap = Heightmap::new();
-        super::generate_heightmap(&mut heightmap, &(coord.0, coord.1), coord.3 as _);
+        super::generate_heightmap(&mut heightmap, &(coord.0, coord.1));
         let unpacked_data = &mut self.uc_buffers[uc_buffer_index];
-        super::generate_chunk(
-            unpacked_data,
-            &(coord.0, coord.1, coord.2),
-            &heightmap,
-            coord.3 as _,
-        );
+        super::generate_chunk(unpacked_data, &(coord.0, coord.1, coord.2), &heightmap);
         let packed_data = &mut self.pc_buffers[pc_buffer_index];
         unpacked_data.pack_into(packed_data);
         if let Err(err) = Self::write_packed_chunk_data(
             &Self::get_path_for(&self.storage_dir, coord),
             &self.pc_buffers[pc_buffer_index],
-            unpacked_data.scale,
         ) {
             println!("WARNING: Failed to write chunk data for {:?}.", coord);
             println!("Caused by: {}", err);
@@ -118,9 +101,9 @@ impl ChunkStorage {
                 &Self::get_path_for(&self.storage_dir, coord),
                 &mut self.pc_buffers[pc_buffer_index],
             ) {
-                Ok(scale) => {
+                Ok(..) => {
                     self.pc_buffers[pc_buffer_index]
-                        .unpack_into(&mut self.uc_buffers[uc_buffer_index], scale);
+                        .unpack_into(&mut self.uc_buffers[uc_buffer_index]);
                     (pc_buffer_index, uc_buffer_index)
                 }
                 Err(err) => {
@@ -193,7 +176,7 @@ mod tests {
             ..ChunkStorage::new()
         };
 
-        storage.borrow_packed_chunk_data(&(0, 0, 0, 1));
+        storage.borrow_packed_chunk_data(&(0, 0, 0));
 
         cleanup(storage.storage_dir);
     }
