@@ -7,7 +7,7 @@ use crate::game::Game;
 use crate::render::constants::*;
 use crate::render::general::command_buffer::CommandBuffer;
 use crate::render::general::core::Core;
-use crate::util::{self, prelude::*};
+use crate::util;
 use ash::version::DeviceV1_0;
 use ash::vk;
 use cgmath::{Matrix3, SquareMatrix};
@@ -47,8 +47,7 @@ impl Pipeline {
         let mut render_data = RenderData::create(core.clone());
         render_data.initialize(game);
         let descriptor_collection = DescriptorCollection::create(core.clone(), &render_data);
-        let mut tum = TerrainUploadManager::new(Rc::clone(&core));
-        // tum.request_decrease(Axis::X, 1);
+        let tum = TerrainUploadManager::new(Rc::clone(&core));
 
         let denoise_stage = shaders::create_denoise_stage(core.clone(), &descriptor_collection);
         let finalize_stage = shaders::create_finalize_stage(core.clone(), &descriptor_collection);

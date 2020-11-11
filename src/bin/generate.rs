@@ -1,6 +1,5 @@
 extern crate raytrace;
 
-use raytrace::render::constants::*;
 use raytrace::util::prelude::*;
 use raytrace::*;
 use std::io::Write;
@@ -67,30 +66,28 @@ impl StatTracker {
             );
         }
         print!("                    ");
-        std::io::stdout().flush();
+        std::io::stdout().flush().unwrap();
     }
 }
 
 fn main() {
     let mut game = game::Game::new();
-    let mut radius = RADIUS_L0;
-    for lod in 0..NUM_LODS {
-        let num_items = (radius * 2).pow(3);
-        let mut stat_tracker = StatTracker::new(num_items);
-        println!("\nGenerating LOD {} chunks...", lod);
-        for coord in util::coord_iter_3d(radius * 2) {
-            let world_coord = coord.signed().sub((radius as isize).repeat());
-            stat_tracker.start_item();
-            game.borrow_world_mut().borrow_packed_chunk_data(&(
-                world_coord.0,
-                world_coord.1,
-                world_coord.2,
-                lod as _,
-            ));
-            stat_tracker.end_item();
-            stat_tracker.print_status();
-        }
-        radius /= 2;
+    let radius = RADIUS_L0;
+    let lod = 0;
+    let num_items = (radius * 2).pow(3);
+    let mut stat_tracker = StatTracker::new(num_items);
+    println!("\nGenerating LOD {} chunks...", lod);
+    for coord in util::coord_iter_3d(radius * 2) {
+        let world_coord = coord.signed().sub((radius as isize).repeat());
+        stat_tracker.start_item();
+        game.borrow_world_mut().borrow_packed_chunk_data(&(
+            world_coord.0,
+            world_coord.1,
+            world_coord.2,
+            lod as _,
+        ));
+        stat_tracker.end_item();
+        stat_tracker.print_status();
     }
     println!("Done!");
 }

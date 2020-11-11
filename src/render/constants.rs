@@ -26,7 +26,6 @@ pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 pub const ROOT_CHUNK_SIZE: usize = 4;
 pub const ROOT_BLOCK_SIZE: usize = CHUNK_SIZE * ROOT_CHUNK_SIZE;
 pub const ROOT_BLOCK_VOLUME: usize = ROOT_BLOCK_SIZE * ROOT_BLOCK_SIZE * ROOT_BLOCK_SIZE;
-pub const NUM_LODS: usize = 4;
 // Slices are used to upload new terrain data to the GPU.
 pub const SLICE_SIZE: usize = 16;
 pub const SLICES_PER_CHUNK: usize = CHUNK_SIZE / SLICE_SIZE;

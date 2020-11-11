@@ -1,5 +1,4 @@
 use super::structs::RaytraceUniformData;
-use super::TerrainUploadManager;
 use crate::game::Game;
 use crate::render::constants::*;
 use crate::render::general::command_buffer::CommandBuffer;
@@ -10,15 +9,14 @@ use crate::render::general::structures::{
 };
 use crate::util::{self, prelude::*};
 use crate::world::ChunkStorage;
-use array_macro::array;
 use ash::vk;
 use std::rc::Rc;
 
 pub struct RenderData {
     pub core: Rc<Core>,
 
-    pub material_images: [SampledImage; NUM_LODS],
-    pub minefield_images: [SampledImage; NUM_LODS],
+    pub material_image: SampledImage,
+    pub minefield_image: SampledImage,
 
     pub lighting_buffer: StorageImage,
     pub completed_buffer: StorageImage,
@@ -53,7 +51,7 @@ impl RenderData {
         StorageImage::create(core, name, &options)
     }
 
-    fn create_material_image(core: Rc<Core>, lod: usize) -> SampledImage {
+    fn create_material_image(core: Rc<Core>) -> SampledImage {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
@@ -75,13 +73,13 @@ impl RenderData {
         };
         SampledImage::create(
             core.clone(),
-            &format!("material_lod{}", lod),
+            "material_img",
             &image_options,
             &sampler_options,
         )
     }
 
-    fn create_minefield(core: Rc<Core>, lod: usize) -> SampledImage {
+    fn create_minefield(core: Rc<Core>) -> SampledImage {
         let image_options = ImageOptions {
             typ: vk::ImageType::TYPE_3D,
             extent: vk::Extent3D {
@@ -103,7 +101,7 @@ impl RenderData {
         };
         SampledImage::create(
             core.clone(),
-            &format!("minefield_lod{}", lod),
+            "minefield_img",
             &image_options,
             &sampler_options,
         )
@@ -185,8 +183,8 @@ impl RenderData {
         RenderData {
             core: core.clone(),
 
-            material_images: array![|lod| Self::create_material_image(core.clone(), lod); NUM_LODS],
-            minefield_images: array![|lod| Self::create_minefield(core.clone(), lod); NUM_LODS],
+            material_image: Self::create_material_image(core.clone()),
+            minefield_image: Self::create_minefield(core.clone()),
 
             lighting_buffer: Self::create_framebuffer(core.clone(), "lighting_buf", rgba16_unorm),
             completed_buffer: Self::create_framebuffer(core.clone(), "completed_buf", rgba16_unorm),
@@ -214,20 +212,16 @@ impl RenderData {
         }
     }
 
-    fn make_world_upload_buffers(
-        &mut self,
-        world: &mut ChunkStorage,
-        lod: usize,
-    ) -> (Buffer<u32>, Buffer<u8>) {
+    fn make_world_upload_buffers(&mut self, world: &mut ChunkStorage) -> (Buffer<u32>, Buffer<u8>) {
         let mut material_buffer = Buffer::create(
             self.core.clone(),
-            &format!("material_lod{}", lod),
+            "material_buf",
             ROOT_BLOCK_VOLUME as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
         );
         let mut minefield_buffer = Buffer::create(
             self.core.clone(),
-            &format!("minefield_lod{}", lod),
+            "minefield_buf",
             ROOT_BLOCK_VOLUME as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
         );
@@ -243,12 +237,8 @@ impl RenderData {
                 (ROOT_CHUNK_SIZE as isize / 2),
             ));
             let timer = std::time::Instant::now();
-            let chunk = world.borrow_packed_chunk_data(&(
-                world_coord.0,
-                world_coord.1,
-                world_coord.2,
-                lod as u8,
-            ));
+            let chunk =
+                world.borrow_packed_chunk_data(&(world_coord.0, world_coord.1, world_coord.2, 0));
             gen_time += timer.elapsed().as_millis();
             let timer = std::time::Instant::now();
             chunk.copy_materials(
@@ -290,18 +280,12 @@ impl RenderData {
 
     pub fn initialize(&mut self, game: &mut Game) {
         let world = game.borrow_world_mut();
-        let upload_buffers = array![|lod| self.make_world_upload_buffers(world, lod); NUM_LODS];
+        let (material_buffer, minefield_buffer) = self.make_world_upload_buffers(world);
 
         let mut commands = CommandBuffer::create_single(self.core.clone());
         commands.begin_one_time_submit();
-        for (index, (material_buffer, minefield_buffer)) in upload_buffers.iter().enumerate() {
-            Self::upload_buf_commands(&mut commands, material_buffer, &self.material_images[index]);
-            Self::upload_buf_commands(
-                &mut commands,
-                minefield_buffer,
-                &self.minefield_images[index],
-            );
-        }
+        Self::upload_buf_commands(&mut commands, &material_buffer, &self.material_image);
+        Self::upload_buf_commands(&mut commands, &minefield_buffer, &self.minefield_image);
         let generic_layout_images = [
             &self.albedo_buffer,
             &self.completed_buffer,
