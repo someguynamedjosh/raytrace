@@ -174,7 +174,7 @@ impl Pipeline {
         let camera = game.borrow_camera();
         self.tum.request_move_towards((
             camera.origin.x as isize,
-            camera.origin.y as isize,
+            0,
             camera.origin.z as isize,
         ));
 

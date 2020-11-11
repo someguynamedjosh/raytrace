@@ -50,9 +50,9 @@ impl Game {
             result.camera.pitch.0 = args[5].parse().unwrap();
             result.sun_angle = args[6].parse().unwrap();
         } else {
-            result.camera.origin.x = 0.0;
-            result.camera.origin.y = 0.0;
-            result.camera.origin.z = 60.0;
+            result.camera.origin.x = -30.0;
+            result.camera.origin.y = -128.0;
+            result.camera.origin.z = 100.0;
         }
         result
     }
@@ -96,8 +96,8 @@ impl Game {
     }
 
     pub fn on_mouse_move(&mut self, x: f64, y: f64) {
-        self.camera.heading.0 = (-x / 80.0) as f32;
-        self.camera.pitch.0 = ((256.0 - y) / 200.0) as f32;
+        // self.camera.heading.0 = (-x / 80.0) as f32;
+        // self.camera.pitch.0 = ((256.0 - y) / 200.0) as f32;
     }
 
     pub fn borrow_world(&self) -> &ChunkStorage {

@@ -30,8 +30,8 @@ layout(set = 0, binding = 10) uniform UniformData {
     // the whole thing go out of order. So transmit each individual column instead.
     vec3 old_origin, old_transform_c0, old_transform_c1, old_transform_c2;
     ivec3 region_offset;
-    ivec3 l0r, l1r, l2r, l3r;
-    ivec3 l0so, l1so, l2so, l3so;
+    ivec3 lr;
+    ivec3 lso;
 } uniform_data;
 
 const uint ROOT_BLOCK_WIDTH = 256;
@@ -101,7 +101,7 @@ HitResult trace_ray(vec3 origin, vec3 direction) {
     // arithmetic. E.G. having a rotation of 10 on the X axis means coordinate 0 is really
     // coordinate 10, and coordinate ROOT_BLOCK_WIDTH is also coordinate 10
     // Also investigate high lag when sticking my head in a block.
-    vec3 current_rotation = uniform_data.l0r;
+    vec3 current_rotation = uniform_data.lr;
     vec3 pos_offset = vec3(ROOT_BLOCK_WIDTH / 2);
     uint current_step = get_step(mod((result.position + pos_offset), ROOT_BLOCK_WIDTH));
     uint step_size = (1 << current_step) / 2;
@@ -309,11 +309,15 @@ void main() {
         + screen_pos.x * uniform_data.right
         + screen_pos.y * uniform_data.up
     );
+    if (-ray_start.y > ROOT_BLOCK_WIDTH / 2.0) {
+        float space = -ray_start.y - (ROOT_BLOCK_WIDTH / 2.0);
+        ray_start += (space / ray_direction.y + 0.0001) * ray_direction;
+    }
 
     vec3 sunangle = normalize(vec3(cos(uniform_data.sun_angle) * 0.5 + (uniform_data.sun_angle - 0.5) * 0.5, sin(uniform_data.sun_angle), cos(uniform_data.sun_angle)));
     vec3 sunlight = sun_color(sunangle);
     vec3 light = vec3(0.0);
-    HitResult primary = trace_ray(uniform_data.origin, ray_direction);
+    HitResult primary = trace_ray(ray_start, ray_direction);
     if (primary.air) {
         light = sample_sky(ray_direction, sunangle, sunlight, true);
     } else {

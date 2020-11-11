@@ -27,7 +27,7 @@ impl Camera {
     pub fn new() -> Camera {
         Camera {
             origin: [0.0; 3].into(),
-            heading: cgmath::Rad(1.0),
+            heading: cgmath::Rad(std::f32::consts::PI * 0.5),
             pitch: cgmath::Rad(0.0),
         }
     }
